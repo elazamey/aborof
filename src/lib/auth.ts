@@ -47,6 +47,10 @@ export function isAdminRequest(request: Request) {
   return verifyAdminSession(token);
 }
 
+export function isAdminConfigured() {
+  return Boolean(process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET && process.env.ADMIN_SESSION_SECRET.length >= 32);
+}
+
 export function passwordMatches(input: string) {
   const configured = process.env.ADMIN_PASSWORD;
   if (!configured || !input) return false;
