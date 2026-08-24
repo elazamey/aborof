@@ -241,3 +241,44 @@ th { background: var(--green-l); color: var(--green-d); }
   .grid { grid-template-columns: 1fr 1fr; gap: 10px; }
   .card-img { height: 118px; font-size: 2.8rem; }
 }
+
+/* ---------- Storefront polish ---------- */
+.header { box-shadow: 0 4px 18px rgba(20, 38, 31, .06); }
+.topbar { letter-spacing: .01em; }
+.brand-name { color: var(--green-d); }
+.hero { min-height: 430px; display: flex; align-items: center; }
+.hero h1 { font-weight: 900; letter-spacing: -.03em; }
+.hero-art { transform: scale(1.08); }
+.section-head h2 { font-weight: 900; letter-spacing: -.02em; }
+.feature { transition: transform .2s, box-shadow .2s; }
+.feature:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.card { box-shadow: 0 2px 10px rgba(20, 38, 31, .035); }
+.card-img { min-height: 160px; }
+.card-title { min-height: 2.8em; }
+.card-actions .btn { min-height: 42px; }
+.search { box-shadow: 0 4px 18px rgba(20, 38, 31, .06); }
+.admin-shell { min-height: 55vh; display: grid; place-items: center; }
+.admin-login { width: 100%; box-shadow: var(--shadow-lg); border-top: 4px solid var(--green); }
+.admin-login h1 { margin: 4px 0 2px; font-size: 1.55rem; }
+.admin-kicker { color: var(--green); font-weight: 800; font-size: .85rem; }
+.admin-muted, .admin-loading { color: var(--muted); }
+.admin-loading { text-align: center; }
+
+@media (max-width: 640px) {
+  .container { padding-inline: 12px; }
+  .nav { padding-block: 9px; }
+  .brand-sub { display: none; }
+  .brand-name { font-size: 1rem; }
+  .nav-actions .btn-wa { display: none; }
+  .hero { min-height: auto; padding: 42px 0; }
+  .hero h1 { font-size: 1.75rem; }
+  .hero-art { font-size: 4.4rem; }
+  .features { gap: 9px; }
+  .feature { padding: 13px 8px; }
+  .feature p { font-size: .76rem; }
+  .card-img { min-height: 120px; }
+  .card-body { padding: 11px; }
+  .card-title { font-size: .9rem; }
+  .card-actions { flex-direction: column; }
+  .admin-shell { min-height: 60vh; }
+}

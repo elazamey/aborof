@@ -154,7 +154,7 @@ export const SEED_PRODUCTS: Product[] = [
 ];
 
 export const STORE = {
-  name: "أبو رفيدة العزامي",
+  name: "روفيده",
   tagline: "لأدوات ومستلزمات النظافة",
   phone: "01095032221",
   whatsapp: "201095032221",

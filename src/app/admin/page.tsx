@@ -9,6 +9,8 @@ export default function Admin() {
   const [products, setProducts] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [p, setP] = useState<any>({ id: "", name: "", description: "", price: "", old_price: "", category: CATEGORIES[0], image: "🧴", stock: 10, featured: false });
 
   async function load() {
@@ -20,12 +22,19 @@ export default function Admin() {
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
-    const r = await fetch("/api/admin/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
-    if (r.ok) { setAuthed(true); setPassword(""); load(); } else setMsg("بيانات الدخول غير صحيحة أو الإعداد غير مضبوط.");
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) { setAuthed(true); setPassword(""); await load(); }
+      else setMsg(data.error || "تعذر تسجيل الدخول.");
+    } catch { setMsg("تعذر الاتصال بالخادم. حاول مرة أخرى."); }
+    finally { setBusy(false); }
   }
 
   async function save(e: React.FormEvent) {
@@ -50,7 +59,8 @@ export default function Admin() {
     fetch("/api/admin/session")
       .then((r) => r.json())
       .then((data) => setAuthed(Boolean(data.authenticated)))
-      .catch(() => setAuthed(false));
+      .catch(() => setAuthed(false))
+      .finally(() => setLoading(false));
   }, []);
 
   async function logout() {
@@ -62,17 +72,22 @@ export default function Admin() {
 
   useEffect(() => { if (authed) load(); /* eslint-disable-next-line */ }, [authed]);
 
+  if (loading)
+    return <div className="container section"><div className="panel admin-loading">جارٍ التحقق من جلسة الإدارة…</div></div>;
+
   if (!authed)
     return (
-      <div className="container section" style={{ maxWidth: 420 }}>
-        <form className="panel" onSubmit={login}>
-          <h3>🔐 لوحة تحكم المتجر</h3>
+      <div className="container section admin-shell" style={{ maxWidth: 500 }}>
+        <form className="panel admin-login" onSubmit={login}>
+          <div className="admin-kicker">إدارة روفيده</div>
+          <h1>مرحبًا بك في لوحة التحكم</h1>
+          <p className="admin-muted">سجّل الدخول لإدارة المنتجات والطلبات بأمان.</p>
           {msg && <div className="alert">{msg}</div>}
           <div className="field">
             <label>كلمة مرور الإدارة</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
           </div>
-          <button className="btn btn-primary btn-block">دخول</button>
+          <button className="btn btn-primary btn-block" disabled={busy}>{busy ? "جارٍ التحقق…" : "دخول آمن"}</button>
         </form>
       </div>
     );

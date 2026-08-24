@@ -8,8 +8,8 @@ import { STORE } from "@/lib/seed";
 export const metadata: Metadata = {
   title: `${STORE.name} — ${STORE.tagline}`,
   description:
-    "متجر أبو رفيدة العزامي لبيع وعرض أدوات ومستلزمات التنظيف بأسعار الجملة. دفع فودافون كاش وتوصيل لكل المحافظات.",
-  keywords: ["أدوات نظافة", "منظفات", "أبو رفيدة العزامي", "مستلزمات تنظيف", "جملة منظفات مصر"],
+    "متجر روفيده لبيع وعرض أدوات ومستلزمات التنظيف بأسعار الجملة. دفع فودافون كاش وتوصيل لكل المحافظات.",
+  keywords: ["أدوات نظافة", "منظفات", "روفيده", "مستلزمات تنظيف", "جملة منظفات مصر"],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
