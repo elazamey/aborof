@@ -70,7 +70,7 @@ export default function Admin() {
     setOrders([]);
   }
 
-  useEffect(() => { if (authed) load(); /* eslint-disable-next-line */ }, [authed]);
+  useEffect(() => { if (authed) load(); }, [authed]);
 
   if (loading)
     return <div className="container section"><div className="panel admin-loading">جارٍ التحقق من جلسة الإدارة…</div></div>;
