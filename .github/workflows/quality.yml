@@ -1,0 +1,102 @@
+name: Quality and Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# يمنع تشغيل نسخ قديمة من نفس الفرع عند وصول تحديث أحدث.
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint, Typecheck, Tests and Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      # لا يفشل إذا لم يضف المشروع test script بعد؛ بعد إضافة الاختبارات
+      # يمكن إزالة --if-present لتحويله إلى شرط إلزامي.
+      - name: Tests
+        run: npm run test --if-present
+
+      - name: Production build
+        run: npm run build
+
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # يفشل الـ PR عند وجود High أو Critical.
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high
+
+  secret-scan:
+    name: Basic Secret Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # فحص مجاني أولي للأنماط الأكثر خطورة. لا يغني عن GitHub Secret Scanning.
+      - name: Scan tracked files for obvious secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          patterns='(AIzaSy[0-9A-Za-z_-]{20,}|gsk_[0-9A-Za-z_-]{20,}|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|ADMIN_PASSWORD=azzami2026)'
+          found=0
+          if git grep --cached -n -I -E "$patterns" -- . ':!package-lock.json'; then
+            found=1
+          fi
+          if git grep --cached -n -I -E 'TURSO_AUTH_TOKEN=[A-Za-z0-9_-]{20,}' -- . ':!package-lock.json' | grep -v 'TURSO_AUTH_TOKEN=your_turso_token'; then
+            found=1
+          fi
+          if [ "$found" -eq 1 ]; then
+            echo "Potential secret detected in tracked files. Remove or rotate it before merge."
+            exit 1
+          fi
+          echo "No obvious secret patterns found in tracked files."

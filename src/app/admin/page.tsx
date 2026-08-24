@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { CATEGORIES } from "@/lib/seed";
 
 export default function Admin() {
-  const [key, setKey] = useState("");
+  const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
   const [tab, setTab] = useState<"products" | "orders">("products");
   const [products, setProducts] = useState<any[]>([]);
@@ -14,21 +14,25 @@ export default function Admin() {
   async function load() {
     const r = await fetch("/api/products").then((x) => x.json());
     setProducts(r.products || []);
-    const o = await fetch(`/api/orders?key=${encodeURIComponent(key)}`).then((x) => x.json());
+    const o = await fetch("/api/orders").then((x) => x.json());
     setOrders(o.orders || []);
   }
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
-    const r = await fetch(`/api/orders?key=${encodeURIComponent(key)}`);
-    if (r.ok) { setAuthed(true); load(); } else setMsg("كلمة المرور غير صحيحة أو ADMIN_PASSWORD غير مضبوط.");
+    const r = await fetch("/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (r.ok) { setAuthed(true); setPassword(""); load(); } else setMsg("بيانات الدخول غير صحيحة أو الإعداد غير مضبوط.");
   }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const r = await fetch("/api/products", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, product: p }),
+      body: JSON.stringify({ product: p }),
     });
     const j = await r.json();
     setMsg(j.ok ? "✅ تم الحفظ" : "❌ " + (j.error || "خطأ"));
@@ -37,8 +41,23 @@ export default function Admin() {
 
   async function del(id: string) {
     if (!confirm("حذف المنتج؟")) return;
-    await fetch(`/api/products?id=${id}&key=${encodeURIComponent(key)}`, { method: "DELETE" });
+    const r = await fetch(`/api/products?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!r.ok) setMsg("تعذر حذف المنتج");
     load();
+  }
+
+  useEffect(() => {
+    fetch("/api/admin/session")
+      .then((r) => r.json())
+      .then((data) => setAuthed(Boolean(data.authenticated)))
+      .catch(() => setAuthed(false));
+  }, []);
+
+  async function logout() {
+    await fetch("/api/admin/session", { method: "POST" });
+    setAuthed(false);
+    setProducts([]);
+    setOrders([]);
   }
 
   useEffect(() => { if (authed) load(); /* eslint-disable-next-line */ }, [authed]);
@@ -50,8 +69,8 @@ export default function Admin() {
           <h3>🔐 لوحة تحكم المتجر</h3>
           {msg && <div className="alert">{msg}</div>}
           <div className="field">
-            <label>كلمة المرور (ADMIN_PASSWORD)</label>
-            <input type="password" value={key} onChange={(e) => setKey(e.target.value)} />
+            <label>كلمة مرور الإدارة</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
           </div>
           <button className="btn btn-primary btn-block">دخول</button>
         </form>
@@ -60,7 +79,10 @@ export default function Admin() {
 
   return (
     <div className="container section">
-      <h1>لوحة التحكم</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <h1>لوحة التحكم</h1>
+        <button className="btn btn-ghost" onClick={logout}>تسجيل الخروج</button>
+      </div>
       <div className="filters" style={{ justifyContent: "flex-start", marginTop: 14 }}>
         <button className={"chip" + (tab === "products" ? " active" : "")} onClick={() => setTab("products")}>المنتجات ({products.length})</button>
         <button className={"chip" + (tab === "orders" ? " active" : "")} onClick={() => setTab("orders")}>الطلبات ({orders.length})</button>
