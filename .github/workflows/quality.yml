@@ -41,6 +41,9 @@ jobs:
       - name: TypeScript
         run: npx tsc --noEmit
 
+      - name: Route inventory and coverage
+        run: npm run routes:inventory
+
       # لا يفشل إذا لم يضف المشروع test script بعد؛ بعد إضافة الاختبارات
       # يمكن إزالة --if-present لتحويله إلى شرط إلزامي.
       - name: Tests

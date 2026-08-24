@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "routes:inventory": "node scripts/route-inventory.mjs --check"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
