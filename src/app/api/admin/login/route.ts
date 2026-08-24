@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { createAdminSession, ADMIN_COOKIE, isAdminConfigured, passwordMatches, sessionMaxAge } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const limit = rateLimit(request, "admin-login", 8, 10 * 60 * 1000);
+  if (!limit.ok) {
+    const response = NextResponse.json({ error: "محاولات كثيرة، حاول بعد قليل" }, { status: 429 });
+    response.headers.set("Retry-After", String(limit.retryAfter));
+    return response;
+  }
   try {
     if (!isAdminConfigured()) {
       return NextResponse.json({ error: "لوحة الإدارة غير مهيأة بعد: أضف ADMIN_PASSWORD وADMIN_SESSION_SECRET في Vercel." }, { status: 503 });

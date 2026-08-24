@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProducts, getFaq, db, ensureSchema } from "@/lib/db";
 import { STORE } from "@/lib/seed";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,9 +119,11 @@ async function localAnswer(q: string) {
 }
 
 export async function POST(req: NextRequest) {
+  const limit = rateLimit(req, "chat", 30, 10 * 60 * 1000);
+  if (!limit.ok) return NextResponse.json({ error: "تم تجاوز حد الرسائل، حاول بعد قليل" }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
   try {
     const { messages = [] } = (await req.json()) as { messages: Msg[] };
-    const clean = messages.slice(-12).filter((m) => m?.content?.trim());
+    const clean = messages.slice(-12).filter((m) => m?.content?.trim().length <= 1000);
     const last = clean[clean.length - 1]?.content ?? "";
     const { list, f } = await buildContext();
     const sys = systemPrompt(list, f);

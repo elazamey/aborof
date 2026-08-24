@@ -59,6 +59,7 @@ export async function POST(request: Request) {
         p.featured ? 1 : 0,
       ],
     });
+    await c.execute({ sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)", args: [p.id ? "product_update" : "product_create", "product", id, JSON.stringify({ name: p.name.trim(), price: Number(p.price), stock: Number(p.stock) })] });
     return NextResponse.json({ ok: true, id });
   } catch {
     return NextResponse.json({ error: "تعذر حفظ المنتج" }, { status: 500 });
@@ -75,6 +76,7 @@ export async function DELETE(request: Request) {
   try {
     await ensureSchema();
     await c.execute({ sql: "DELETE FROM products WHERE id=?", args: [id] });
+    await c.execute({ sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)", args: ["product_delete", "product", id, "{}"] });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "تعذر حذف المنتج" }, { status: 500 });

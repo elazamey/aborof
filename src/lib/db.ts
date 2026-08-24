@@ -44,9 +44,13 @@ export async function ensureSchema() {
           customer TEXT NOT NULL,
           phone TEXT NOT NULL,
           address TEXT DEFAULT '',
+          governorate TEXT DEFAULT '',
           items TEXT NOT NULL,
           total REAL NOT NULL,
+          shipping_fee REAL DEFAULT 0,
           payment TEXT DEFAULT 'vodafone_cash',
+          transfer_ref TEXT DEFAULT '',
+          receipt_url TEXT DEFAULT '',
           status TEXT DEFAULT 'جديد',
           note TEXT DEFAULT '',
           created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -61,9 +65,23 @@ export async function ensureSchema() {
           question TEXT, answer TEXT,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )`,
+        `CREATE TABLE IF NOT EXISTS admin_audit_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action TEXT NOT NULL,
+          entity TEXT NOT NULL,
+          entity_id TEXT DEFAULT '',
+          details TEXT DEFAULT '',
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )`,
       ],
       "write"
     );
+
+    const orderColumns = await c.execute("PRAGMA table_info(orders)");
+    const existingOrderColumns = new Set(orderColumns.rows.map((row) => String((row as { name?: string }).name)));
+    for (const [name, definition] of Object.entries({ governorate: "TEXT DEFAULT ''", shipping_fee: "REAL DEFAULT 0", transfer_ref: "TEXT DEFAULT ''", receipt_url: "TEXT DEFAULT ''" })) {
+      if (!existingOrderColumns.has(name)) await c.execute(`ALTER TABLE orders ADD COLUMN ${name} ${definition}`);
+    }
 
     const cnt = await c.execute("SELECT COUNT(*) AS n FROM products");
     if (Number(cnt.rows[0].n) === 0) {
