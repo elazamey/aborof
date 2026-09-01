@@ -18,7 +18,9 @@ export default function ChatWidget() {
   ]);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy, open]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, busy, open]);
 
   async function send(t?: string) {
     const content = (t ?? text).trim();
@@ -36,10 +38,7 @@ export default function ChatWidget() {
       const j = await r.json();
       setMsgs((m) => [...m, { role: "assistant", content: j.reply }]);
     } catch {
-      setMsgs((m) => [
-        ...m,
-        { role: "assistant", content: `النت عندي فصل شوية 😅 كلمنا واتساب على ${STORE.phone}` },
-      ]);
+      setMsgs((m) => [...m, { role: "assistant", content: `النت عندي فصل شوية 😅 كلمنا واتساب على ${STORE.phone}` }]);
     } finally {
       setBusy(false);
     }
@@ -55,20 +54,30 @@ export default function ChatWidget() {
               <div className="nm">سيليا</div>
               <div className="st">● مساعدة خدمة العملاء — متاحة الآن</div>
             </div>
-            <button onClick={() => setOpen(false)} aria-label="إغلاق">✕</button>
+            <button onClick={() => setOpen(false)} aria-label="إغلاق">
+              ✕
+            </button>
           </div>
           <div className="chat-body">
             {msgs.map((m, i) => (
-              <div key={i} className={"bubble " + (m.role === "user" ? "me" : "bot")}>{m.content}</div>
+              <div key={i} className={"bubble " + (m.role === "user" ? "me" : "bot")}>
+                {m.content}
+              </div>
             ))}
             {busy && (
-              <div className="bubble bot typing"><span /><span /><span /></div>
+              <div className="bubble bot typing">
+                <span />
+                <span />
+                <span />
+              </div>
             )}
             <div ref={endRef} />
           </div>
           <div className="chat-quick">
             {QUICK.map((q) => (
-              <button key={q} onClick={() => send(q)}>{q}</button>
+              <button key={q} onClick={() => send(q)}>
+                {q}
+              </button>
             ))}
           </div>
           <div className="chat-input">
@@ -78,7 +87,9 @@ export default function ChatWidget() {
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && send()}
             />
-            <button onClick={() => send()} disabled={busy} aria-label="إرسال">➤</button>
+            <button onClick={() => send()} disabled={busy} aria-label="إرسال">
+              ➤
+            </button>
           </div>
         </div>
       )}
@@ -87,7 +98,13 @@ export default function ChatWidget() {
         <button className="fab bot" onClick={() => setOpen(!open)} title="تحدث مع سيليا">
           {open ? "✕" : "💬"}
         </button>
-        <a className="fab wa" href={`https://wa.me/${STORE.whatsapp}`} target="_blank" rel="noreferrer" title={`واتساب ${STORE.phone}`}>
+        <a
+          className="fab wa"
+          href={`https://wa.me/${STORE.whatsapp}`}
+          target="_blank"
+          rel="noreferrer"
+          title={`واتساب ${STORE.phone}`}
+        >
           📱
         </a>
       </div>

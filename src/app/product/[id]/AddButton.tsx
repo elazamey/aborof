@@ -18,7 +18,14 @@ export default function AddButton({ product }: { product: Product }) {
       <button className="btn btn-primary" disabled={out} onClick={() => addToCart(product, qty)}>
         🛒 أضف للسلة
       </button>
-      <button className="btn btn-gold" disabled={out} onClick={() => { addToCart(product, qty); router.push("/cart"); }}>
+      <button
+        className="btn btn-gold"
+        disabled={out}
+        onClick={() => {
+          addToCart(product, qty);
+          router.push("/cart");
+        }}
+      >
         ⚡ اشترِ الآن
       </button>
     </div>

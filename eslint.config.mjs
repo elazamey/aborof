@@ -11,11 +11,5 @@ export default defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
-  globalIgnores([
-    ".next/**",
-    ".vercel/**",
-    "node_modules/**",
-    "coverage/**",
-    "dist/**",
-  ]),
+  globalIgnores([".next/**", ".vercel/**", "node_modules/**", "coverage/**", "dist/**"]),
 ]);

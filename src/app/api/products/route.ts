@@ -14,14 +14,23 @@ function validText(value: unknown, max = MAX_TEXT) {
 function validProduct(product: any) {
   return (
     product &&
-    typeof product.id === "string" && product.id.length <= 80 &&
-    typeof product.name === "string" && product.name.trim().length >= 2 && product.name.length <= 200 &&
+    typeof product.id === "string" &&
+    product.id.length <= 80 &&
+    typeof product.name === "string" &&
+    product.name.trim().length >= 2 &&
+    product.name.length <= 200 &&
     validText(product.description) &&
-    Number.isFinite(Number(product.price)) && Number(product.price) >= 0 && Number(product.price) <= 1_000_000 &&
-    (product.old_price === "" || product.old_price == null || (Number.isFinite(Number(product.old_price)) && Number(product.old_price) >= 0)) &&
+    Number.isFinite(Number(product.price)) &&
+    Number(product.price) >= 0 &&
+    Number(product.price) <= 1_000_000 &&
+    (product.old_price === "" ||
+      product.old_price == null ||
+      (Number.isFinite(Number(product.old_price)) && Number(product.old_price) >= 0)) &&
     validText(product.category, 100) &&
     validText(product.image, 20) &&
-    Number.isInteger(Number(product.stock)) && Number(product.stock) >= 0 && Number(product.stock) <= 1_000_000
+    Number.isInteger(Number(product.stock)) &&
+    Number(product.stock) >= 0 &&
+    Number(product.stock) <= 1_000_000
   );
 }
 
@@ -59,7 +68,15 @@ export async function POST(request: Request) {
         p.featured ? 1 : 0,
       ],
     });
-    await c.execute({ sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)", args: [p.id ? "product_update" : "product_create", "product", id, JSON.stringify({ name: p.name.trim(), price: Number(p.price), stock: Number(p.stock) })] });
+    await c.execute({
+      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
+      args: [
+        p.id ? "product_update" : "product_create",
+        "product",
+        id,
+        JSON.stringify({ name: p.name.trim(), price: Number(p.price), stock: Number(p.stock) }),
+      ],
+    });
     return NextResponse.json({ ok: true, id });
   } catch {
     return NextResponse.json({ error: "تعذر حفظ المنتج" }, { status: 500 });
@@ -76,7 +93,10 @@ export async function DELETE(request: Request) {
   try {
     await ensureSchema();
     await c.execute({ sql: "DELETE FROM products WHERE id=?", args: [id] });
-    await c.execute({ sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)", args: ["product_delete", "product", id, "{}"] });
+    await c.execute({
+      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
+      args: ["product_delete", "product", id, "{}"],
+    });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "تعذر حذف المنتج" }, { status: 500 });

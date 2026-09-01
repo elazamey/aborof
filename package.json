@@ -7,6 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "test:drill": "node scripts/resilience-drill.mjs",
+    "verify": "npm run lint && npx tsc --noEmit && npm run routes:inventory && npm run format:check && npm run test:unit && npm run build && npm run test:smoke",
+    "release:check": "npm run verify && npm run test:drill",
     "routes:inventory": "node scripts/route-inventory.mjs --check"
   },
   "dependencies": {
@@ -21,6 +29,8 @@
     "@types/react-dom": "^18",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.2",
-    "typescript": "^5"
+    "prettier": "^3.9.6",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

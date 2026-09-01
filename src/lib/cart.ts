@@ -7,7 +7,11 @@ const KEY = "azzami_cart";
 
 export function readCart(): CartItem[] {
   if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem(KEY) || "[]");
+  } catch {
+    return [];
+  }
 }
 export function writeCart(items: CartItem[]) {
   localStorage.setItem(KEY, JSON.stringify(items));
@@ -40,6 +44,10 @@ export function useCart() {
     const next = readCart().map((i) => (i.id === id ? { ...i, qty: Math.max(1, qty) } : i));
     writeCart(next);
   }
-  function remove(id: string) { writeCart(readCart().filter((i) => i.id !== id)); }
-  function clear() { writeCart([]); }
+  function remove(id: string) {
+    writeCart(readCart().filter((i) => i.id !== id));
+  }
+  function clear() {
+    writeCart([]);
+  }
 }

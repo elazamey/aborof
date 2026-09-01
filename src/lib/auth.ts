@@ -15,26 +15,47 @@ function sign(payload: string) {
   return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
+/**
+ * Session token آمن للكوكي من باب التصميم (وليس كحل ترقيعي):
+ *   token = base64url(issuedAt:random).signature
+ * الأبجدية Base64URL (A-Z a-z 0-9 - _) لا تحتوي على ":" أو أي حرف يحتاج
+ * URL-encoding، فيتجنب تماماً مشكلة اختلاف الترميز بين Set-Cookie وقراءة
+ * الكوكي التي كانت تكسر التحقق من التوقيع.
+ */
 export function createAdminSession() {
-  const payload = `${Date.now()}:${randomBytes(24).toString("base64url")}`;
+  const payload = Buffer.from(`${Date.now()}:${randomBytes(24).toString("base64url")}`).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }
 
 export function verifyAdminSession(token: string | undefined) {
   if (!token) return false;
-  const separator = token.lastIndexOf(".");
-  if (separator < 1) return false;
+  // دفاع إضافي: لو وصلت القيمة مشفّرة من أي وسيط، فك الترميز بلا ضرر.
+  try {
+    token = decodeURIComponent(token);
+  } catch {
+    return false;
+  }
+  // strict parsing: جزءان بالضبط (payload.signature)
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+  const [payload, provided] = parts;
 
-  const payload = token.slice(0, separator);
-  const provided = token.slice(separator + 1);
   const expected = sign(payload);
   if (provided.length !== expected.length) return false;
+  if (!timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) return false;
 
-  const validSignature = timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
-  if (!validSignature) return false;
-
-  const issuedAt = Number(payload.split(":", 1)[0]);
-  return Number.isFinite(issuedAt) && Date.now() - issuedAt <= SESSION_MAX_AGE * 1000;
+  let decoded: string;
+  try {
+    decoded = Buffer.from(payload, "base64url").toString("utf8");
+  } catch {
+    return false;
+  }
+  const colon = decoded.indexOf(":");
+  const issuedAt = Number(colon > 0 ? decoded.slice(0, colon) : NaN);
+  if (!Number.isFinite(issuedAt)) return false;
+  // رفض تواريخ المستقبل (سماحية فرق ساعة صغيرة فقط) + انتهاء الصلاحية
+  if (issuedAt > Date.now() + 60_000) return false;
+  return Date.now() - issuedAt <= SESSION_MAX_AGE * 1000;
 }
 
 export function isAdminRequest(request: Request) {
@@ -48,7 +69,9 @@ export function isAdminRequest(request: Request) {
 }
 
 export function isAdminConfigured() {
-  return Boolean(process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET && process.env.ADMIN_SESSION_SECRET.length >= 32);
+  return Boolean(
+    process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET && process.env.ADMIN_SESSION_SECRET.length >= 32
+  );
 }
 
 export function passwordMatches(input: string) {

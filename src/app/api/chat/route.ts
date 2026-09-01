@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProducts, getFaq, db, ensureSchema } from "@/lib/db";
 import { STORE } from "@/lib/seed";
 import { rateLimit } from "@/lib/rate-limit";
+import { localAnswer } from "@/lib/chat-local";
+import { log } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +54,8 @@ async function callGemini(sys: string, messages: Msg[], key: string) {
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
       {
         method: "POST",
+        // مهلة صارمة: مزوّد معلّق/شبكة معطوبة يجب ألا يعلّق الشات بلا نهاية
+        signal: AbortSignal.timeout(10_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: sys }] },
@@ -83,6 +87,8 @@ async function callGemini(sys: string, messages: Msg[], key: string) {
 async function callGroq(sys: string, messages: Msg[], key: string) {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
+    // مهلة صارمة: مزوّد معلّق/شبكة معطوبة يجب ألا يعلّق الشات بلا نهاية
+    signal: AbortSignal.timeout(10_000),
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
@@ -96,31 +102,15 @@ async function callGroq(sys: string, messages: Msg[], key: string) {
   return (j?.choices?.[0]?.message?.content ?? "").trim();
 }
 
-/** رد احتياطي ذكي من قاعدة البيانات لو مفيش مفتاح API */
-async function localAnswer(q: string) {
-  const [products, faq] = await Promise.all([getProducts(), getFaq()]);
-  const t = q.toLowerCase();
-  const words = t.split(/\s+/).filter((w) => w.length > 2);
-  const score = (s: string) => words.reduce((n, w) => n + (s.toLowerCase().includes(w) ? 1 : 0), 0);
-
-  const bestFaq = faq.map((f) => ({ f, s: score(f.question) })).sort((a, b) => b.s - a.s)[0];
-  if (bestFaq && bestFaq.s >= 1) return bestFaq.f.answer;
-
-  const hits = products.map((p) => ({ p, s: score(p.name + " " + p.category + " " + p.description) }))
-    .filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 3);
-  if (hits.length)
-    return (
-      "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n" +
-      hits.map((h) => `• ${h.p.name} — ${h.p.price} جنيه`).join("\n") +
-      `\n\nتقدر تضيفهم للسلة وتكمل الطلب، والدفع فودافون كاش على ${STORE.vodafoneCash} أو عند الاستلام.`
-    );
-
-  return `أهلاً بحضرتك في ${STORE.name} 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على ${STORE.phone}.`;
-}
-
+/** رد احتياطي ذكي من قاعدة البيانات لو مفيش مفتاح API — منقول إلى src/lib/chat-local.ts للاختبار */
 export async function POST(req: NextRequest) {
+  const started = Date.now();
   const limit = rateLimit(req, "chat", 30, 10 * 60 * 1000);
-  if (!limit.ok) return NextResponse.json({ error: "تم تجاوز حد الرسائل، حاول بعد قليل" }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
+  if (!limit.ok)
+    return NextResponse.json(
+      { error: "تم تجاوز حد الرسائل، حاول بعد قليل" },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } }
+    );
   try {
     const { messages = [] } = (await req.json()) as { messages: Msg[] };
     const clean = messages.slice(-12).filter((m) => m?.content?.trim().length <= 1000);
@@ -134,10 +124,20 @@ export async function POST(req: NextRequest) {
     let source = "local";
 
     if (gemini) {
-      try { reply = await callGemini(sys, clean, gemini); source = "gemini"; } catch (e) { console.error(e); }
+      try {
+        reply = await callGemini(sys, clean, gemini);
+        source = "gemini";
+      } catch (e) {
+        console.error(e);
+      }
     }
     if (!reply && groq) {
-      try { reply = await callGroq(sys, clean, groq); source = "groq"; } catch (e) { console.error(e); }
+      try {
+        reply = await callGroq(sys, clean, groq);
+        source = "groq";
+      } catch (e) {
+        console.error(e);
+      }
     }
     if (!reply) reply = await localAnswer(last);
 
@@ -149,8 +149,19 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
+    log("info", "chat reply", {
+      request_id: req.headers.get("x-request-id"),
+      source,
+      durationMs: Date.now() - started,
+    });
     return NextResponse.json({ reply, source });
   } catch (e: any) {
+    log("error", "chat failed", {
+      request_id: req.headers.get("x-request-id"),
+      route: "/api/chat",
+      error: String(e?.message),
+      durationMs: Date.now() - started,
+    });
     return NextResponse.json(
       { reply: `حصل خطأ بسيط 😅 جرّب تاني أو كلمنا واتساب على ${STORE.phone}`, error: String(e?.message) },
       { status: 200 }

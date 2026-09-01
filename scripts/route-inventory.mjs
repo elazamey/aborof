@@ -13,14 +13,13 @@ function walk(dir, segments = []) {
     if (entry.isDirectory()) walk(full, [...segments, entry.name]);
     else if (routeFiles.has(entry.name)) {
       const isApi = entry.name.startsWith("route.");
-      const visible = segments
-        .filter((s) => !(s.startsWith("(") && s.endsWith(")")))
-        .join("/");
+      const visible = segments.filter((s) => !(s.startsWith("(") && s.endsWith(")"))).join("/");
       const route = `/${visible}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
       const dynamic = segments.some((s) => s.startsWith("[") && s.endsWith("]"));
       const content = fs.readFileSync(full, "utf8");
       const protectedRoute = route.startsWith("/admin") || route.startsWith("/api/admin");
-      const usesDb = /(?:from|require\()\s*["'][^"']*(?:db|seed)["']/.test(content) || /getProducts|getOrders|db\./.test(content);
+      const usesDb =
+        /(?:from|require\()\s*["'][^"']*(?:db|seed)["']/.test(content) || /getProducts|getOrders|db\./.test(content);
       rows.push({
         route,
         type: isApi ? "API" : dynamic ? "Dynamic page" : "Page",

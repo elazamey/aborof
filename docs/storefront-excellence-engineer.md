@@ -10,16 +10,16 @@
 
 ## دورة العمل الإلزامية
 
-| المرحلة | المطلوب | المخرج |
-|---|---|---|
-| DISCOVER | استخراج صفحات Next.js، API routes، الروابط، النماذج، الاستدعاءات، ومسارات الإدارة | `npm run routes:inventory` ومصفوفة مسارات |
-| AUDIT | فحص الوظائف، UX، UI، Responsive، RTL، Accessibility، الأداء، SEO، الأمان، والتحويل | Issues مصنفة P0/P1/P2 |
-| PRIORITIZE | P0 يمنع الاستخدام أو يسبب خسارة أو ثغرة؛ P1 يؤثر بوضوح؛ P2 تحسين مستقبلي | Backlog مرتب |
-| IMPLEMENT | تعديل حقيقي محدود النطاق مع الحفاظ على عقود API | Pull Request مرتبط بمشكلة |
-| VERIFY | اختبار Browser وMobile وDesktop وConsole وNetwork وAPI وScreenshots | دليل تحقق قابل لإعادة التشغيل |
-| REGRESSION | فحص الوظائف السابقة وGate A/Gate B | قرار PASS/FAIL |
-| MEASURE | مقارنة قبل/بعد في الأخطاء، الأداء، UX، والتحويل | أرقام أو ملاحظات قابلة للمقارنة |
-| RELEASE | نشر فقط عند اكتمال البوابات | GO أو NO-GO |
+| المرحلة    | المطلوب                                                                            | المخرج                                    |
+| ---------- | ---------------------------------------------------------------------------------- | ----------------------------------------- |
+| DISCOVER   | استخراج صفحات Next.js، API routes، الروابط، النماذج، الاستدعاءات، ومسارات الإدارة  | `npm run routes:inventory` ومصفوفة مسارات |
+| AUDIT      | فحص الوظائف، UX، UI، Responsive، RTL، Accessibility، الأداء، SEO، الأمان، والتحويل | Issues مصنفة P0/P1/P2                     |
+| PRIORITIZE | P0 يمنع الاستخدام أو يسبب خسارة أو ثغرة؛ P1 يؤثر بوضوح؛ P2 تحسين مستقبلي           | Backlog مرتب                              |
+| IMPLEMENT  | تعديل حقيقي محدود النطاق مع الحفاظ على عقود API                                    | Pull Request مرتبط بمشكلة                 |
+| VERIFY     | اختبار Browser وMobile وDesktop وConsole وNetwork وAPI وScreenshots                | دليل تحقق قابل لإعادة التشغيل             |
+| REGRESSION | فحص الوظائف السابقة وGate A/Gate B                                                 | قرار PASS/FAIL                            |
+| MEASURE    | مقارنة قبل/بعد في الأخطاء، الأداء، UX، والتحويل                                    | أرقام أو ملاحظات قابلة للمقارنة           |
+| RELEASE    | نشر فقط عند اكتمال البوابات                                                        | GO أو NO-GO                               |
 
 ## مصفوفة التدقيق
 

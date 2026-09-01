@@ -14,7 +14,10 @@ export async function POST(request: Request) {
   }
   try {
     if (!isAdminConfigured()) {
-      return NextResponse.json({ error: "لوحة الإدارة غير مهيأة بعد: أضف ADMIN_PASSWORD وADMIN_SESSION_SECRET في Vercel." }, { status: 503 });
+      return NextResponse.json(
+        { error: "لوحة الإدارة غير مهيأة بعد: أضف ADMIN_PASSWORD وADMIN_SESSION_SECRET في Vercel." },
+        { status: 503 }
+      );
     }
     const body = await request.json();
     if (typeof body?.password !== "string" || !passwordMatches(body.password)) {

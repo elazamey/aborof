@@ -16,11 +16,13 @@ export default async function Home() {
           <div>
             <h1>كل مستلزمات النظافة في مكان واحد 🧼</h1>
             <p>
-              متجر <b>{STORE.name}</b> — منظفات وأدوات نظافة أصلية بأسعار الجملة، مع توصيل سريع لكل
-              المحافظات، ودفع سهل عن طريق فودافون كاش أو عند الاستلام.
+              متجر <b>{STORE.name}</b> — منظفات وأدوات نظافة أصلية بأسعار الجملة، مع توصيل سريع لكل المحافظات، ودفع سهل
+              عن طريق فودافون كاش أو عند الاستلام.
             </p>
             <div className="hero-cta">
-              <Link href="#products" className="btn btn-gold">🛍️ تسوّق الآن</Link>
+              <Link href="#products" className="btn btn-gold">
+                🛍️ تسوّق الآن
+              </Link>
               <a className="btn btn-wa" href={`https://wa.me/${STORE.whatsapp}`} target="_blank" rel="noreferrer">
                 💬 اطلب واتساب {STORE.phone}
               </a>
@@ -59,7 +61,9 @@ export default async function Home() {
         <div className="container">
           <div className="section-head">
             <h2>منتجاتنا</h2>
-            <p>{products.length} منتج متاح للطلب الآن {hasDB() ? "" : "· (بيانات العرض — اربط Turso لإدارتها)"}</p>
+            <p>
+              {products.length} منتج متاح للطلب الآن {hasDB() ? "" : "· (بيانات العرض — اربط Turso لإدارتها)"}
+            </p>
           </div>
           <ProductGrid products={products} />
         </div>
