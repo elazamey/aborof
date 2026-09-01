@@ -1,0 +1,37 @@
+# TEMPORARY TOOL — UI screenshots of the current interface (removed after use).
+# Triggered by a tag push `shots-*` (no actions:write needed). Never touches deploy/production.
+name: UI screenshots (temp tool)
+on:
+  push:
+    tags: ["shots-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run build
+      - name: Start app (seed data fallback — no DB needed)
+        run: |
+          (PORT=3199 npx next start -p 3199 > /tmp/server.log 2>&1 &)
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3199/ > /dev/null && echo "server ready" && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:3199/ > /dev/null || { echo "SERVER FAILED"; cat /tmp/server.log; exit 1; }
+      - name: Capture screenshots
+        run: node scripts/screenshot-ui.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: /tmp/ui-shots
+          retention-days: 7
