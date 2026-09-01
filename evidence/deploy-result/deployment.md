@@ -1,31 +1,60 @@
 # Deployment — Evidence (نتائج مُلاحَظة فقط)
 
-> **OBSERVED** — لا توجد نتائج متوقعة. هذا الملف يوثّق **محاولة النشر الفعلية** ونتيجتها.
-> **التاريخ:** 2026-09-01
+> **OBSERVED** — كل قيمة هنا من تشغيل فعلي على GitHub. لا نتائج متوقعة.
+> **التاريخ:** 2026-09-01 · **RC_COMMIT (كود):** `579daa6`
 
-## محاولة التنفيذ
-
-| الخطوة | النتيجة المُلاحَظة |
-|---|---|
-| تثبيت النشر على RC_COMMIT بالضبط (Same-SHA) | ✅ tag `rc-579daa6` → `579daa6` (مرفوع ومتحقق: `git ls-remote`) |
-| تشغيل workflow النشر عبر dispatch على `ref=rc-579daa6` | ❌ **HTTP 403 — Resource not accessible by integration** (لا صلاحية `actions:write` للتطبيق) |
-| مسار النشر عبر push إلى main | ⚠️ غير متاح: يتطلب `VERCEL_DEPLOY_ENABLED=true` — والدليل المُلاحَظ أن آخر push إلى main (f10df28) أنتج deploy workflow **`skipped`** (run `32776075993`) |
-
-## الاستنتاج (observed)
+## آلية النشر (immutable release ref — صُممت ونُفذت)
 
 ```text
-Deployment mechanism: BLOCKED ❌
-سببان قاطعان:
-  1. VERCEL_DEPLOY_ENABLED ليست 'true' (مثبت: run 32776075993 = skipped)
-  2. لا يمكن dispatch (403 — صلاحية actions للتطبيق مقيدة)
-لم يُنشر أي شيء — لا deployment ID، لا deployed SHA، لا timestamp
+tag push (rc-<sha>)
+  → deploy workflow (من الـ tag نفسه)
+  → Gate ref/SHA (تطابق صارم)
+  → Gate VERCEL_DEPLOY_ENABLED (فشل ظاهر لا skip)
+  → Gate حضور الإعدادات (أسماء فقط)
+  → migration check → vercel build/deploy → verify revision → post-deploy
 ```
 
-## ما هو مطلوب لإكمال هذه البوابة (من مالك المستودع)
+- Commit النشر: `7b2ad32` (deploy.yml الجديد فوق RC) — **تطابق كودي مثبت مع RC**:
+  `git diff --stat 579daa6 7b2ad32 -- src scripts tests package.json package-lock.json next.config.mjs tsconfig.json` = **فارغ** (الفرق فقط: `.github/workflows/deploy.yml` + ملفات أدلة).
+- CI على commit النشر نفسه: ✅ `success` (run `33570021310`, headSha=`7b2ad32`).
 
-1. إضافة أسرار Vercel في إعدادات المستودع: `VERCEL_TOKEN` · `VERCEL_ORG_ID` · `VERCEL_PROJECT_ID`
-2. إضافة أسرار البيئة: `TURSO_DATABASE_URL` · `TURSO_AUTH_TOKEN` · `ADMIN_PASSWORD` · `ADMIN_SESSION_SECRET`
-3. متغير `VERCEL_DEPLOY_ENABLED=true` + `PRODUCTION_URL` (متغيرات مستودع)
-4. ثم: إما منح `actions:write` مؤقتاً للـ dispatch، أو دمج PR #1 في main (سيشغّل deploy workflow عند `push` إلى main على commit مثبّت)
+## السجل (observed)
 
-**القاعدة:** لا يُعتبر أي من هذا ناجحاً إلا بنتيجة workflow مُلاحَظة + تطابق `DEPLOYED_COMMIT == RC_COMMIT == 579daa6`.
+| الحقل | القيمة |
+|---|---|
+| **RC_COMMIT (كود)** | `579daa6` |
+| **TAG** | `rc-7b2ad32d7460ee4590924e7ccc272dcbefa6f04b` → `7b2ad32` (مرفوع ومتحقق) |
+| **WORKFLOW_RUN_ID** | `33570046664` |
+| **رابط التشغيل** | https://github.com/elazamey/aborof/actions/runs/33570046664 |
+| **TIMESTAMP** | 2026-09-01 (~23:05Z) |
+| **TARGET** | Vercel production (لم يُنشر) |
+| **DEPLOYMENT_ID** | — (لا يوجد — منعت البوابة التنفيذ) |
+| **DEPLOYED_SHA** | — (لم يُنشر شيء) |
+| **RESULT** | ❌ **BLOCKED — VERCEL_DEPLOY_ENABLED ليست `true`** |
+
+## خطوات التشغيل (observed من GitHub)
+
+| الخطوة | النتيجة |
+|---|---|
+| Checkout (tag) | ✅ success |
+| **Gate — release ref & SHA verification** | ✅ success — التطابق الصارم `EXPECTED_SHA == HEAD` عمل (tag → 7b2ad32) |
+| **Gate — VERCEL_DEPLOY_ENABLED** | ❌ **failure** — "VERCEL_DEPLOY_ENABLED is not 'true' — deployment refused" |
+| كل خطوات النشر (migration/vercel/post-deploy) | ⏭ skipped (لم تُنفَّذ) — **الإنتاج لم يُمَس** |
+
+## الاستنتاج
+
+```text
+Deployment mechanism: جاهز ومُختبَر (بوابة ref/SHA تعمل)
+Deployment execution: BLOCKED ❌ — VERCEL_DEPLOY_ENABLED != true (مُلاحَظ في run 33570046664)
+لم يُنشر أي شيء — لا DEPLOYMENT_ID، لا DEPLOYED_SHA
+```
+
+## المطلوب لإكمال TASK-02 (من مالك المستودع — لا قيم تُرسل لي)
+
+1. متغير المستودع **`VERCEL_DEPLOY_ENABLED=true`**
+2. متغير المستودع **`PRODUCTION_URL=https://...`**
+3. الأسرار (مستودع أو بيئة `production` — البيئة موجودة): `VERCEL_TOKEN` · `VERCEL_ORG_ID` · `VERCEL_PROJECT_ID` · `TURSO_DATABASE_URL` · `TURSO_AUTH_TOKEN` · `ADMIN_PASSWORD` · `ADMIN_SESSION_SECRET`
+
+> التحقق من حضورها يتم **عند التشغيل** عبر "Gate — production configuration presence" (أسماء فقط، لا قيم) — غير ممكن عبر API من الجلسة (403).
+
+بعد الضبط: أُعيد إطلاق الـ tag (force-push) → workflow يعيد البوابات → إن مرّت كلها: deploy + post-deploy → تُسجَّل النتائج المُلاحَظة هنا (DEPLOYMENT_ID، DEPLOYED_SHA، تطابق `RC_CODE == TAG_SHA app-tree == DEPLOYED_SHA`).
