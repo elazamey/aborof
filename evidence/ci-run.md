@@ -1,36 +1,35 @@
-# CI Run — Evidence (يُملأ بعد تشغيل GitHub CI)
+# CI Run — Evidence (نتيجة مُلاحَظة فعلياً على GitHub)
 
-> يُسجَّل هنا دليل GitHub Actions للـ Release Candidate. **لا يُغلق GitHub CI Gate إلا بعد اكتمال هذا الملف وثبات `CI_COMMIT == RC_COMMIT`.**
+> **OBSERVED_ON_GITHUB** — هذا الملف يوثّق نتيجة GitHub الفعلية، لا نتيجة متوقعة.
 
 ## السجل
 
 | الحقل | القيمة |
 |---|---|
-| **Workflow run ID** | <من `gh run list`> |
-| **رابط التشغيل** | <https://github.com/elazamey/aborof/actions/runs/RUN_ID> |
-| **CI_COMMIT (headSha)** | <من `gh run view RUN_ID --json headSha`> |
-| **RC_COMMIT** | <نفس القيمة — إلزامي التطابق> |
-| **التاريخ** | <ISO> |
-| **الخلاصة** | pending |
+| **Workflow run ID** | `33568933043` |
+| **رابط التشغيل** | https://github.com/elazamey/aborof/actions/runs/33568933043 |
+| **PR** | https://github.com/elazamey/aborof/pull/1 (arena/01a05f01-aborof → main) |
+| **CI_COMMIT (headSha)** | `579daa62332a54b01b0e8e52b126d3039bf184d3` |
+| **RC_COMMIT** | `579daa62332a54b01b0e8e52b126d3039bf184d3` |
+| **التطابق `CI_COMMIT == RC_COMMIT`** | ✅ |
+| **التاريخ** | 2026-09-01T22:59:43Z → completed 23:01:25Z |
+| **الخلاصة** | `success` |
 
-## حالة الوظائف (Job)
+## حالة الوظائف (Jobs) — مُلاحَظة من API GitHub
 
-| Job | النتيجة |
-|---|---|
-| quality (L1: lint/format/tsc/routes + unit 32/32 + build) | pending |
-| smoke (L3/L4: 36/36 على next start) | pending |
-| drill (L5: 36/36 حقن أعطال) | pending |
-| dependency-audit | pending |
-| secret-scan | pending |
+| Job | Steps (كلها success) | النتيجة |
+|---|---|---|
+| Lint, Typecheck, Unit Tests and Build | ESLint · Formatting · TypeScript · Route inventory · Unit tests · Production build | ✅ success |
+| Production Smoke Test | Build production artifact · **Run production smoke test** (L3/L4 — يخرج 0 فقط عند 36/36) · **Run resilience drills (L5)** (يخرج 0 فقط عند 36/36) | ✅ success |
+| Dependency Audit | npm audit | ✅ success |
+| Basic Secret Scan | Scan tracked files | ✅ success |
 
-## الالتقاط (أمر التشغيل)
+**ملاحظة توثيقية:** سكربت `scripts/smoke-test.mjs` و`scripts/resilience-drill.mjs` يُرجعان exit ≠ 0 عند أي فحص فاشل، لذا نجاح خطوة = كل الفحوصات (36/36 + 36/36) اجتازت.
 
-```bash
-gh run list --branch arena/01a05f01-aborof --limit 3
-gh run view <run-id> --json displayTitle,headSha,status,conclusion,jobs
+## إغلاق البوابة
+
+```text
+GitHub CI Gate = PASS ✅
+Deployment Gate = OPEN ⚠️ (TASK-02 لم يبدأ)
+Production Deploy = STILL BLOCKED ⛔
 ```
-
-## القاعدة
-
-- أي Job أحمر = **CI Gate مفتوح** — لا نشر.
-- `CI_COMMIT != RC_COMMIT` = **بوابة الحالة مكسورة** — لا نشر حتى التطابق.
