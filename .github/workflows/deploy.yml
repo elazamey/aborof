@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -42,6 +42,14 @@ jobs:
           npm run build
       - name: Production smoke test (LEVELS 3-4)
         run: npm run test:smoke
+      # ===== Pre-Deploy Gate: Database Compatibility (Migration Safety) =====
+      # أي فشل في فحص/تطبيق الهجرات على DB الإنتاج = deployment FAIL
+      # (لا "server starts anyway"). نفس كود الهجرات المستخدم في التشغيل — لا تكرار.
+      - name: Pre-deploy migration check (production DB)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node --experimental-strip-types scripts/migrate-check.mts
       - name: Pull Vercel production settings
         run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
       - name: Build Vercel artifact
