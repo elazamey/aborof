@@ -1,0 +1,156 @@
+{
+  "ts": "2026-09-01T22:49:28.999Z",
+  "failures": 0,
+  "checks": [
+    {
+      "name": "D01: الخادم بدأ رغم فشل DB القادم",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "D01: /api/ready أثناء الفشل → 503 not_ready",
+      "ok": true,
+      "detail": "503 {\"status\":\"not_ready\",\"database\":\"error\"}"
+    },
+    {
+      "name": "D01: /api/ready ما زال 503",
+      "ok": true,
+      "detail": "503"
+    },
+    {
+      "name": "D01: /api/products يتحلل بأمان (seed) بدل انهيار 500",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "D01: الطلب أثناء الفشل يفشل بأمان (5xx وليس نجاحاً جزئياً)",
+      "ok": true,
+      "detail": "500"
+    },
+    {
+      "name": "D01: /api/ready بعد استنفاد الأعطال → 200 ready (تعافٍ تلقائي بدون إعادة تشغيل)",
+      "ok": true,
+      "detail": "200 {\"status\":\"ready\",\"database\":\"ok\"}"
+    },
+    {
+      "name": "D01: الطلب التالي ينجح بعد التعافي",
+      "ok": true,
+      "detail": "200 ORD-02958333-43fae484"
+    },
+    {
+      "name": "D01: خصم واحد فقط بعد التعافي (p2: 60 → 59)",
+      "ok": true,
+      "detail": "59"
+    },
+    {
+      "name": "D02: كل 12 استجابة 200",
+      "ok": true,
+      "detail": "200,200,200,200,200,200,200,200,200,200,200,200"
+    },
+    {
+      "name": "D02: كل الاستجابات لنفس رقم الطلب",
+      "ok": true,
+      "detail": "ORD-02958926-c044a34a"
+    },
+    {
+      "name": "D02: حدث تصادم حقيقي (11 استجابة duplicate=true)",
+      "ok": true,
+      "detail": "11/12"
+    },
+    {
+      "name": "D02: 6 طلبات بمفاتيح مختلفة → 6 أرقام مختلفة",
+      "ok": true,
+      "detail": "6"
+    },
+    {
+      "name": "D02: المخزون خُصم مرة واحدة فقط (p1: 40 → 39)",
+      "ok": true,
+      "detail": "39"
+    },
+    {
+      "name": "D02: p3: 80 → 74 (6 طلبات)",
+      "ok": true,
+      "detail": "74"
+    },
+    {
+      "name": "D02: لا يوجد مخزون سالب إطلاقاً",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "D02: طلب واحد فقط للمفتاح المتكرر (بدل 12)",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "D03: الخادم يعود للعمل بعد القتل",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "D03: اتساق — لا حالة وسطى (طلب مكتمل ⟺ خصم كامل)",
+      "ok": true,
+      "detail": "p1=39, orders=0"
+    },
+    {
+      "name": "D03: إعادة المحاولة بنفس المفتاح تنجح (200)",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "D03: الحتمية عبر إعادة التشغيل — طلب واحد فقط وخصم واحد (p1 = 37)",
+      "ok": true,
+      "detail": "p1=37, orders=1"
+    },
+    {
+      "name": "D03: طلب جديد ينجح بعد إعادة التشغيل (تعافٍ كامل)",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "D04: جلسة منتهية → 401",
+      "ok": true,
+      "detail": "401"
+    },
+    {
+      "name": "D04: جلسة صالحة → 200",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "D04: توقيع مزوّر → 401",
+      "ok": true,
+      "detail": "401"
+    },
+    {
+      "name": "D04: كوكي غير صالح → 401",
+      "ok": true,
+      "detail": "401"
+    },
+    {
+      "name": "D05: الخادم يرفض الإقلاع (يفشل مبكراً بدل تشغيل مكسور)",
+      "ok": true,
+      "detail": "exited=true"
+    },
+    {
+      "name": "D05: رسالة واضحة: Environment contract violated",
+      "ok": true,
+      "detail": "[env] Environment contract violated: TURSO_DATABASE_URL is required in production "
+    },
+    {
+      "name": "D06: الشات يرد 200 رغم فشل المزوّدين",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "D06: الرد احتياطي محلي صحيح (المصدر local)",
+      "ok": true,
+      "detail": "source=local"
+    },
+    {
+      "name": "D06: الرد يطابق بيانات المتجر",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

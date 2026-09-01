@@ -50,13 +50,13 @@ AI unavailable
 
 ## حالة بوابة الإصدار (تُحدَّث عند كل جولة)
 
-| البوابة | الحالة | الدليل |
-|---|---|---|
-| L1 Static · L2 Build · L3 Runtime · L4 Business · L5 Resilience (محلياً) | ✅ PASS | `evidence/release-check/` + `evidence/l5-resilience/` |
-| Local Release Check (`npm run release:check`) | ✅ PASS (exit 0) | `evidence/release-check/release-2026-09-01T22-40-41Z.log` |
-| GitHub CI Gate | ⚠️ **غير مكتمل** — ملفات `.github/workflows/*` جاهزة محلياً ولم تُرفع بعد (صلاحية `workflows` للـ GitHub App ناقصة) | `evidence/ci-result/` (سيُملأ) |
-| Deployment Gate | ⚠️ غير مكتمل | `evidence/deploy-result/` (سيُملأ) |
-| Production Deploy | ⛔ **ممنوع** حتى GitHub CI = PASS على نفس commit الـ release-check | `evidence/post-deploy-result/` (سيُملأ) |
+| البوابة                                                                  | الحالة                                                                                                              | الدليل                                                    |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| L1 Static · L2 Build · L3 Runtime · L4 Business · L5 Resilience (محلياً) | ✅ PASS                                                                                                             | `evidence/release-check/` + `evidence/l5-resilience/`     |
+| Local Release Check (`npm run release:check`)                            | ✅ PASS (exit 0)                                                                                                    | `evidence/release-check/release-2026-09-01T22-40-41Z.log` |
+| GitHub CI Gate                                                           | ⚠️ **غير مكتمل** — ملفات `.github/workflows/*` جاهزة محلياً ولم تُرفع بعد (صلاحية `workflows` للـ GitHub App ناقصة) | `evidence/ci-result/` (سيُملأ)                            |
+| Deployment Gate                                                          | ⚠️ غير مكتمل                                                                                                        | `evidence/deploy-result/` (سيُملأ)                        |
+| Production Deploy                                                        | ⛔ **ممنوع** حتى GitHub CI = PASS على نفس commit الـ release-check                                                  | `evidence/post-deploy-result/` (سيُملأ)                   |
 
 **قاعدة Same-Commit:** الـ commit الذي يجتاز GitHub CI هو نفسه الذي يُنشر ويُتحقق منه بعد النشر.
 

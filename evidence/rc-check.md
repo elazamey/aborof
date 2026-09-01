@@ -3,11 +3,11 @@
 | الحقل | القيمة |
 |---|---|
 | **الحالة** | ✅ Local Release Check PASS |
-| **التاريخ** | 2026-09-01T22:40:41Z |
-| **Code commit (بدون workflows)** | `83567f0ddde9575ac1d2030125148a21b1eeb894` |
+| **التاريخ** | 2026-09-01T22:49:01Z |
+| **Code commit (بدون workflows)** | `5b2e015` (كود؛ commit الـ workflows يُضاف فوقه بعد الرفع) |
 | **RC_COMMIT (نهائي، بعد رفع workflows)** | <يُثبَّت هنا بعد الرفع: `git rev-parse HEAD`> |
 | **الأمر** | `npm run release:check` (L1 Static → L2 Build → L3/4 Smoke → L5 Drills) |
-| **السجل الكامل** | `evidence/release-check/release-2026-09-01T22-40-41Z.log` |
+| **السجل الكامل** | `evidence/release-check/release-2026-09-01T22-49-01Z.log` |
 
 ## النتائج
 
