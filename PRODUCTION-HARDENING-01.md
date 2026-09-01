@@ -33,6 +33,33 @@
 
 **قاعدة:** أي خلل يكشفه drill = يُصلَح ويُعاد الـ drill بالكامل، ويُسجَّل دليل جديد في `evidence/` قابل لإعادة التشغيل (`npm run build && npm run test:drill`).
 
+### قرار UX/API موثّق — سلوك فشل مزوّد الذكاء الاصطناعي (DRILL-06)
+
+استجابة `200` عند فشل Gemini/Groq **لا تعني أن الذكاء الاصطناعي نجح**؛ تعني أن **النظام تعامل بنجاح مع فشل المزوّد**:
+
+```text
+AI unavailable
+  → graceful fallback (رد محلي من قاعدة البيانات)
+  → no hanging (مهلة 10 ثوانٍ على كل مزوّد)
+  → no unhandled exception
+  → 200 مع source="local"
+```
+
+- التمييز في الـ observability: حقل `source` (gemini | groq | local) يُسجَّل في سجل JSON مع كل رد، والمراقبة **لا تعتمد على 200 وحده** — تراقب `source` للتمييز بين نجاح المزوّد والتحلّل الآمن.
+- هذا قرار تصميمي متعمد: **التوافر أولاً** لعميل ينتظر إجابة، مع بقاء الأثر التشخيصي كاملاً في السجلات.
+
+## حالة بوابة الإصدار (تُحدَّث عند كل جولة)
+
+| البوابة | الحالة | الدليل |
+|---|---|---|
+| L1 Static · L2 Build · L3 Runtime · L4 Business · L5 Resilience (محلياً) | ✅ PASS | `evidence/release-check/` + `evidence/l5-resilience/` |
+| Local Release Check (`npm run release:check`) | ✅ PASS (exit 0) | `evidence/release-check/release-2026-09-01T22-40-41Z.log` |
+| GitHub CI Gate | ⚠️ **غير مكتمل** — ملفات `.github/workflows/*` جاهزة محلياً ولم تُرفع بعد (صلاحية `workflows` للـ GitHub App ناقصة) | `evidence/ci-result/` (سيُملأ) |
+| Deployment Gate | ⚠️ غير مكتمل | `evidence/deploy-result/` (سيُملأ) |
+| Production Deploy | ⛔ **ممنوع** حتى GitHub CI = PASS على نفس commit الـ release-check | `evidence/post-deploy-result/` (سيُملأ) |
+
+**قاعدة Same-Commit:** الـ commit الذي يجتاز GitHub CI هو نفسه الذي يُنشر ويُتحقق منه بعد النشر.
+
 ---
 
 ## 2) المراحل الثماني — Gates + Acceptance Criteria
