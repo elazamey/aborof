@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   quality:
-    name: Lint, Typecheck, Tests and Build
+    name: Lint, Typecheck, Unit Tests and Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -35,8 +35,12 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # LEVEL 1 — Static
       - name: ESLint
         run: npm run lint
+
+      - name: Formatting
+        run: npm run format:check
 
       - name: TypeScript
         run: npx tsc --noEmit
@@ -44,13 +48,43 @@ jobs:
       - name: Route inventory and coverage
         run: npm run routes:inventory
 
-      # لا يفشل إذا لم يضف المشروع test script بعد؛ بعد إضافة الاختبارات
-      # يمكن إزالة --if-present لتحويله إلى شرط إلزامي.
-      - name: Tests
-        run: npm run test --if-present
+      # LEVEL 1/5 — Unit tests (auth round-trip, shipping, rate-limit, chat, db recovery)
+      - name: Unit tests
+        run: npm run test:unit
 
+      # LEVEL 2 — Build
       - name: Production build
         run: npm run build
+
+  smoke:
+    # LEVEL 3 (Runtime) + LEVEL 4 (Business) — على خادم الإنتاج الحقيقي next start
+    name: Production Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: quality
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build production artifact
+        run: npm run build
+
+      - name: Run production smoke test
+        run: npm run test:smoke
+
+      # LEVEL 5 — Resilience: حقن أعطال فعلية (فشل DB، قتل وسط طلب، تزامن، جلسات)
+      - name: Run resilience drills (L5)
+        run: npm run test:drill
 
   dependency-audit:
     name: Dependency Audit

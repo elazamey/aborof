@@ -32,15 +32,43 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
-      - name: Validate before deploy
+      - name: Validate before deploy (LEVELS 1-2 + unit tests)
         run: |
           npm run lint
+          npm run format:check
           npx tsc --noEmit
           npm run routes:inventory
+          npm run test:unit
           npm run build
+      - name: Production smoke test (LEVELS 3-4)
+        run: npm run test:smoke
       - name: Pull Vercel production settings
         run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
       - name: Build Vercel artifact
         run: npx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
       - name: Deploy prebuilt artifact
         run: npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+      # ===== Post-Deploy Verification =====
+      # لا يُعتبر النشر ناجحاً قبل اجتياز هذه الفحوصات على رابط الإنتاج.
+      # أضف متغير المستودع PRODUCTION_URL (مثال: https://store.vercel.app)
+      - name: Post-deploy smoke verification
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::error::PRODUCTION_URL repository variable is not set. Deployment is blocked until it is configured."
+            exit 1
+          fi
+          echo "Waiting for deployment to propagate…"
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$PRODUCTION_URL/api/health" || true)
+            if [ "$code" = "200" ]; then break; fi
+            sleep 15
+          done
+          [ "$code" = "200" ] || { echo "::error::Health check failed ($code)"; exit 1; }
+          curl -fsS "$PRODUCTION_URL/api/health" | grep -q '"status":"ok"'
+          curl -fsS "$PRODUCTION_URL/api/ready" | grep -q '"status":"ready"'
+          curl -fsS -o /dev/null "$PRODUCTION_URL/"
+          curl -fsS -o /dev/null "$PRODUCTION_URL/product/p1"
+          echo "✅ Post-deploy verification PASSED"

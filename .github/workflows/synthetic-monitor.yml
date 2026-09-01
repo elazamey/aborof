@@ -1,0 +1,48 @@
+name: Synthetic Monitoring
+
+on:
+  schedule:
+    # كل 15 دقيقة — مراقبة الموقع من خارج Vercel (اكتشاف التوقف بدلاً من انتظار شكوى العميل)
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    name: Production health checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run synthetic checks
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::warning::PRODUCTION_URL repository variable is not set — monitoring is disabled."
+            exit 0
+          fi
+          echo "Monitoring $PRODUCTION_URL"
+          # Liveness
+          health=$(curl -fsS --max-time 15 "$PRODUCTION_URL/api/health") || { echo "::error::HEALTH FAIL — /api/health"; exit 1; }
+          echo "$health" | grep -q '"status":"ok"' || { echo "::error::HEALTH FAIL — status not ok"; exit 1; }
+          # Readiness (DB)
+          ready=$(curl -fsS --max-time 15 "$PRODUCTION_URL/api/ready") || { echo "::error::READY FAIL — /api/ready"; exit 1; }
+          echo "$ready" | grep -q '"status":"ready"' || { echo "::error::READY FAIL — database not ready"; exit 1; }
+          # Homepage
+          curl -fsS --max-time 15 -o /dev/null "$PRODUCTION_URL/"
+          # Product page (كشف تراجع الصفحات الديناميكية)
+          curl -fsS --max-time 15 -o /dev/null "$PRODUCTION_URL/product/p1"
+          # Chat local fallback
+          reply=$(curl -fsS --max-time 15 -X POST "$PRODUCTION_URL/api/chat" \
+            -H "Content-Type: application/json" \
+            -d '{"messages":[{"role":"user","content":"طرق الدفع؟"}]}')
+          echo "$reply" | grep -q '"reply"' || { echo "::error::CHAT FAIL — no reply"; exit 1; }
+          echo "✅ Synthetic monitoring PASS"
