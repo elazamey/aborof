@@ -25,6 +25,8 @@ jobs:
           TURSO_DATABASE_URL: file:/tmp/shots.db
         run: |
           set -e
+          mkdir -p /tmp/debug
+          trap 'echo "STEP FAILED"; { echo "== node =="; node -v; echo "== server.log =="; cat /tmp/server.log 2>/dev/null; echo "== .next exists =="; ls .next 2>/dev/null | head; echo "== last cmds =="; history 2>/dev/null | tail; } > /tmp/debug/failure.txt 2>&1' ERR
           node --experimental-strip-types scripts/migrate-check.mts
           node --experimental-strip-types --input-type=module -e '
             import { createClient } from "@libsql/client";
@@ -54,11 +56,14 @@ jobs:
             curl -sf http://127.0.0.1:3199/ > /dev/null && echo "server ready" && break
             sleep 2
           done
-          curl -sf http://127.0.0.1:3199/ > /dev/null || { echo "SERVER FAILED"; cat /tmp/server.log; exit 1; }
+          curl -sf http://127.0.0.1:3199/ > /dev/null || { echo "SERVER FAILED"; cp /tmp/server.log /tmp/debug/server.log 2>/dev/null; exit 1; }
       - name: Capture screenshots
         run: node scripts/screenshot-ui.mjs
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ui-screenshots
-          path: /tmp/ui-shots
+          path: |
+            /tmp/ui-shots
+            /tmp/debug
           retention-days: 7
