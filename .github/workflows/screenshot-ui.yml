@@ -61,28 +61,24 @@ jobs:
       - name: Capture screenshots
         run: |
           node scripts/screenshot-ui.mjs > /tmp/capture.log 2>&1 || echo "node-exit=$?" >> /tmp/capture.log
-          tail -30 /tmp/capture.log
+          echo "::notice title=capture-tail::$(tail -12 /tmp/capture.log | tr '\n' '|')"
           exit 0
       - name: Push captured files to branch (temp)
         if: always()
         run: |
           set +e
-          echo "== ui-shots dir =="
-          ls -la /tmp/ui-shots 2>&1
-          echo "== debug dir =="
-          ls -la /tmp/debug 2>&1
           mkdir -p .tmp-ui-shots/debug
-          cp -r /tmp/ui-shots/* .tmp-ui-shots/ 2>&1
-          cp /tmp/debug/* .tmp-ui-shots/debug/ 2>&1
-          cp /tmp/capture.log .tmp-ui-shots/debug/capture.log 2>&1
-          cp /tmp/server.log .tmp-ui-shots/debug/server.log 2>&1
+          cp -r /tmp/ui-shots/* .tmp-ui-shots/ 2>/dev/null
+          cp /tmp/capture.log .tmp-ui-shots/debug/capture.log 2>/dev/null
+          cp /tmp/server.log .tmp-ui-shots/debug/server.log 2>/dev/null
+          N=$(ls /tmp/ui-shots/*.png 2>/dev/null | wc -l)
+          echo "::notice title=shots-count::PNG count = $N"
           git config user.name "ui-shots-bot"
           git config user.email "ui-shots-bot@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git add -A .tmp-ui-shots
-          git status --short
-          git commit -m "ui-shots(temp): captured screenshots + diagnostics"
-          echo "commit-exit=$?"
-          git log -1 --oneline
-          git push origin HEAD:refs/heads/arena/01a05f01-aborof 2>&1
-          echo "push-exit=$?"
+          git commit -m "ui-shots(temp): captured screenshots + diagnostics" 2>&1 | tail -1
+          CE=${PIPESTATUS[0]}
+          git push origin HEAD:refs/heads/arena/01a05f01-aborof 2>&1 | tail -3
+          PE=${PIPESTATUS[0]}
+          echo "::notice title=push-result::commit-exit=$CE push-exit=$PE"
