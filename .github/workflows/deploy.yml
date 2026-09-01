@@ -1,8 +1,13 @@
 name: Deploy to Vercel
 
+# ===== Deployment by immutable release ref =====
+# النشر يتم حصراً من tag بصيغة rc-<sha> (مثلاً rc-579daa6...).
+# - لا نشر من main المتحرك.
+# - لا merge لتفعيل النشر.
+# - tag يثبّت SHA واحداً: الفحص يرفض أي تطابق ناقص.
 on:
   push:
-    branches: [main]
+    tags: ["rc-*"]
   workflow_dispatch:
 
 concurrency:
@@ -14,8 +19,7 @@ permissions:
 
 jobs:
   deploy:
-    # فعّل النشر بعد إضافة الأسرار والمتغير VERCEL_DEPLOY_ENABLED=true في إعدادات المستودع.
-    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' }}
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -23,15 +27,81 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
-      - name: Checkout
+      - name: Checkout (tag)
         uses: actions/checkout@v4
+
+      # ===== Gate: immutable release ref + SHA =====
+      - name: Gate — release ref & SHA verification
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::Deploy requires a tag ref (rc-*). Got $GITHUB_REF_TYPE"
+            exit 1
+          fi
+          case "$GITHUB_REF_NAME" in
+            rc-*) ;;
+            *) echo "::error::Tag must match rc-* (got $GITHUB_REF_NAME)"; exit 1 ;;
+          esac
+          EXPECTED_SHA="${GITHUB_REF_NAME#rc-}"
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          echo "TAG=$GITHUB_REF_NAME EXPECTED_SHA=$EXPECTED_SHA ACTUAL_SHA=$ACTUAL_SHA"
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "::error::SHA mismatch — tag expects $EXPECTED_SHA but HEAD is $ACTUAL_SHA"
+            exit 1
+          fi
+          # حزام أمان إضافي: متغير RC_SHA في المستودع (إن وُجد) يجب أن يطابق
+          if [ -n "${{ vars.RC_SHA }}" ] && [ "${{ vars.RC_SHA }}" != "$ACTUAL_SHA" ]; then
+            echo "::error::RC_SHA variable (${{ vars.RC_SHA }}) != ACTUAL_SHA ($ACTUAL_SHA)"
+            exit 1
+          fi
+          echo "✅ Release ref verified: $GITHUB_REF_NAME → $ACTUAL_SHA"
+
+      # ===== Gate: VERCEL_DEPLOY_ENABLED (فشل ظاهر، لا skip صامت) =====
+      - name: Gate — VERCEL_DEPLOY_ENABLED
+        run: |
+          if [ "${{ vars.VERCEL_DEPLOY_ENABLED }}" != "true" ]; then
+            echo "::error::VERCEL_DEPLOY_ENABLED is not 'true' — deployment refused"
+            exit 1
+          fi
+          echo "✅ VERCEL_DEPLOY_ENABLED = true"
+
+      # ===== Gate: حضور الإعدادات المطلوبة (أسماء فقط — لا تُطبع أي قيمة) =====
+      - name: Gate — production configuration presence
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for v in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID TURSO_DATABASE_URL \
+                    TURSO_AUTH_TOKEN ADMIN_PASSWORD ADMIN_SESSION_SECRET; do
+            if [ -z "${!v:-}" ]; then missing="$missing $v"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required configuration:$missing"
+            exit 1
+          fi
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::error::PRODUCTION_URL repository variable is missing"
+            exit 1
+          fi
+          echo "✅ Production configuration present (names verified, values never printed)"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+
       - name: Validate before deploy (LEVELS 1-2 + unit tests)
         run: |
           npm run lint
@@ -40,8 +110,10 @@ jobs:
           npm run routes:inventory
           npm run test:unit
           npm run build
+
       - name: Production smoke test (LEVELS 3-4)
         run: npm run test:smoke
+
       # ===== Pre-Deploy Gate: Database Compatibility (Migration Safety) =====
       # أي فشل في فحص/تطبيق الهجرات على DB الإنتاج = deployment FAIL
       # (لا "server starts anyway"). نفس كود الهجرات المستخدم في التشغيل — لا تكرار.
@@ -50,24 +122,45 @@ jobs:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: node --experimental-strip-types scripts/migrate-check.mts
+
       - name: Pull Vercel production settings
         run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+
       - name: Build Vercel artifact
         run: npx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
-      - name: Deploy prebuilt artifact
-        run: npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+
+      - name: Deploy prebuilt artifact (capture URL)
+        id: deploy
+        run: |
+          URL="$(npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID")"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Deployment URL: $URL"
+
+      - name: Verify deployed revision/SHA
+        run: |
+          set -euo pipefail
+          URL="${{ steps.deploy.outputs.url }}"
+          INFO="$(npx vercel inspect "$URL" --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --json 2>/dev/null || true)"
+          SHA="$(echo "$INFO" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('gitCommit') or {}).get('sha',''))" 2>/dev/null || true)"
+          if [ -n "$SHA" ]; then
+            if [ "$SHA" != "${{ github.sha }}" ]; then
+              echo "::error::Deployed revision $SHA != expected ${{ github.sha }}"
+              exit 1
+            fi
+            echo "✅ Deployed revision verified: $SHA"
+          else
+            # نشر عبر CLI لا يكشف دائماً gitCommit — التثبيت أُجبر عند الـ checkout
+            # (TAG_SHA == HEAD) + التحقق التالي بعد النشر على الرابط الحقيقي.
+            echo "⚠ Vercel CLI did not expose git SHA for this deployment — SHA gate enforced at checkout; post-deploy verification follows."
+          fi
+
       # ===== Post-Deploy Verification =====
       # لا يُعتبر النشر ناجحاً قبل اجتياز هذه الفحوصات على رابط الإنتاج.
-      # أضف متغير المستودع PRODUCTION_URL (مثال: https://store.vercel.app)
       - name: Post-deploy smoke verification
         env:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           set -euo pipefail
-          if [ -z "$PRODUCTION_URL" ]; then
-            echo "::error::PRODUCTION_URL repository variable is not set. Deployment is blocked until it is configured."
-            exit 1
-          fi
           echo "Waiting for deployment to propagate…"
           for i in $(seq 1 20); do
             code=$(curl -s -o /dev/null -w '%{http_code}' "$PRODUCTION_URL/api/health" || true)
