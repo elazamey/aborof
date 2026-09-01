@@ -32,5 +32,6 @@
     "prettier": "^3.9.6",
     "typescript": "^5",
     "vitest": "^4.1.11"
-  }
+  },
+  "type": "module"
 }
