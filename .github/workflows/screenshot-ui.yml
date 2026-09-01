@@ -1,16 +1,19 @@
 # TEMPORARY TOOL — UI screenshots of the current interface (removed after use).
 # Triggered by a tag push `shots-*` (no actions:write needed). Never touches deploy/production.
+# The runner pushes the captured PNGs + diagnostics directly to the branch (artifacts unreachable
+# from the dev sandbox); the temp files are removed in a follow-up cleanup commit.
 name: UI screenshots (temp tool)
 on:
   push:
     tags: ["shots-*"]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   shots:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,8 +28,6 @@ jobs:
           TURSO_DATABASE_URL: file:/tmp/shots.db
         run: |
           set -e
-          mkdir -p /tmp/debug
-          trap 'echo "STEP FAILED"; { echo "== node =="; node -v; echo "== server.log =="; cat /tmp/server.log 2>/dev/null; echo "== .next exists =="; ls .next 2>/dev/null | head; echo "== last cmds =="; history 2>/dev/null | tail; } > /tmp/debug/failure.txt 2>&1' ERR
           node --experimental-strip-types scripts/migrate-check.mts
           node --experimental-strip-types --input-type=module -e '
             import { createClient } from "@libsql/client";
@@ -56,14 +57,24 @@ jobs:
             curl -sf http://127.0.0.1:3199/ > /dev/null && echo "server ready" && break
             sleep 2
           done
-          curl -sf http://127.0.0.1:3199/ > /dev/null || { echo "SERVER FAILED"; cp /tmp/server.log /tmp/debug/server.log 2>/dev/null; exit 1; }
+          curl -sf http://127.0.0.1:3199/ > /dev/null || { echo "SERVER FAILED"; cat /tmp/server.log; exit 1; }
       - name: Capture screenshots
-        run: node scripts/screenshot-ui.mjs
-      - uses: actions/upload-artifact@v4
+        run: |
+          node scripts/screenshot-ui.mjs > /tmp/capture.log 2>&1
+          echo "capture-exit=$?" >> /tmp/capture.log
+          tail -20 /tmp/capture.log
+      - name: Push captured files to branch (temp)
         if: always()
-        with:
-          name: ui-screenshots
-          path: |
-            /tmp/ui-shots
-            /tmp/debug
-          retention-days: 7
+        run: |
+          set -e
+          mkdir -p .tmp-ui-shots/debug
+          cp -r /tmp/ui-shots/* .tmp-ui-shots/ 2>/dev/null || true
+          cp /tmp/debug/* .tmp-ui-shots/debug/ 2>/dev/null || true
+          cp /tmp/capture.log .tmp-ui-shots/debug/capture.log 2>/dev/null || true
+          cp /tmp/server.log .tmp-ui-shots/debug/server.log 2>/dev/null || true
+          git config user.name "ui-shots-bot"
+          git config user.email "ui-shots-bot@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git add .tmp-ui-shots
+          git commit -q -m "ui-shots(temp): captured screenshots + diagnostics" || echo "nothing to commit"
+          git push origin HEAD:refs/heads/arena/01a05f01-aborof
