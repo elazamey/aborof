@@ -414,8 +414,8 @@ async function run() {
 
 function writeEvidence() {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const mdPath = path.resolve(`evidence/l5-resilience-${ts}.md`);
-  const jsonPath = path.resolve(`evidence/l5-resilience-${ts}.json`);
+  const mdPath = path.resolve(`evidence/l5-resilience/l5-resilience-${ts}.md`);
+  const jsonPath = path.resolve(`evidence/l5-resilience/l5-resilience-${ts}.json`);
   const lines = [
     "# L5 Resilience Drill — Evidence",
     "",
