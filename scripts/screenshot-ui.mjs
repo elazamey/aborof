@@ -7,7 +7,7 @@ const BASE = "http://127.0.0.1:3199";
 const OUT = "/tmp/ui-shots";
 mkdirSync(OUT, { recursive: true });
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ["--no-sandbox"] });
 
 async function capture(name, path, { width, height }, fullPage) {
   const page = await browser.newPage({ viewport: { width, height } });
