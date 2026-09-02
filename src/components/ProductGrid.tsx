@@ -81,6 +81,7 @@ export default function ProductGrid({ products }: { products: Product[] }) {
               <article className="card" key={p.id}>
                 <div className="card-img">
                   {p.image}
+                  <div className="card-shine" aria-hidden="true" />
                   {out ? (
                     <span className="tag out">نفذت الكمية</span>
                   ) : off > 0 ? (

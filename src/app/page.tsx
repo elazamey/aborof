@@ -12,8 +12,12 @@ export default async function Home() {
   return (
     <>
       <section className="hero">
+        <div className="hero-orb hero-orb-a" aria-hidden="true" />
+        <div className="hero-orb hero-orb-b" aria-hidden="true" />
+        <div className="hero-grid" aria-hidden="true" />
         <div className="container hero-in">
-          <div>
+          <div className="hero-copy">
+            <span className="hero-kicker">✨ متجر {STORE.name} — جملة للأفراد والشركات</span>
             <h1>كل مستلزمات النظافة في مكان واحد 🧼</h1>
             <p>
               متجر <b>{STORE.name}</b> — منظفات وأدوات نظافة أصلية بأسعار الجملة، مع توصيل سريع لكل المحافظات، ودفع سهل
@@ -34,7 +38,9 @@ export default async function Home() {
               <span className="hero-badge">👩‍💼 سيليا ترد عليك فوراً</span>
             </div>
           </div>
-          <div className="hero-art">🧴🧹🧽</div>
+          <div className="hero-art" aria-hidden="true">
+            <div className="hero-art-inner">🧴🧹🧽</div>
+          </div>
         </div>
       </section>
 
@@ -57,7 +63,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="section" id="products" style={{ background: "#fff" }}>
+      <section className="section section-products" id="products">
         <div className="container">
           <div className="section-head">
             <h2>منتجاتنا</h2>

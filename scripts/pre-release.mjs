@@ -274,6 +274,123 @@ function stageStatic() {
       )
     : fail("PL02-RESPONSIVE", "platform", "P1", "responsive", "Responsive CSS", `@media ×${mediaCount}`);
 
+  // ── PL13 UI performance budget: globals.css ≤ 40 kB (خامة خفيفة، بدون خطوط خارجية) ──
+  const cssBytes = Buffer.byteLength(css, "utf8");
+  const cssKb = Math.round(cssBytes / 1024);
+  cssBytes > 0 && cssKb <= 40
+    ? pass("PL13-UI-CSS-BUDGET", "platform", "P1", "perf", "UI CSS budget (globals.css ≤ 40 kB)", `${cssKb} kB`)
+    : fail(
+        "PL13-UI-CSS-BUDGET",
+        "platform",
+        "P1",
+        "perf",
+        "UI CSS budget",
+        cssBytes === 0 ? "unmeasured" : `${cssKb} kB`
+      );
+
+  // ── PL14 UI zero-external-requests: لا خطوط/CDN/سكربتات خارجية ──
+  const layoutSrc = readFileSync(path.join(ROOT, "src/app/layout.tsx"), "utf8");
+  const ext = /(https?:)?\/\/(fonts\.googleapis|fonts\.gstatic|cdn\.|unpkg|jsdelivr|ajax\.googleapis|googleapis)/g;
+  const extHits = [...css.matchAll(ext), ...layoutSrc.matchAll(ext)];
+  extHits.length === 0
+    ? pass(
+        "PL14-UI-NO-EXTERNAL",
+        "platform",
+        "P1",
+        "perf",
+        "UI zero external requests (no fonts/CDN origins)",
+        "0 origins in CSS + layout"
+      )
+    : fail(
+        "PL14-UI-NO-EXTERNAL",
+        "platform",
+        "P1",
+        "perf",
+        "UI zero external requests",
+        `${extHits.length} external origin(s)`
+      );
+
+  // ── PL15 UI class regression: كل className مستخدم معرّف في globals.css ──
+  const uiDirs = [path.join(ROOT, "src/app"), path.join(ROOT, "src/components")];
+  const tokens = new Set();
+  const collect = (src) => {
+    // className="a b" (ثابت) + className={`a ${x}`} / className={"a b"} (قالبي)
+    for (const m of src.matchAll(/className="([^"]+)"/g)) m[1].split(/\s+/).forEach((t) => tokens.add(t));
+    for (const m of src.matchAll(/className=\{`([^`]+)`\}/g))
+      m[1]
+        .replace(/\$\{[^}]*\}/g, "")
+        .split(/\s+/)
+        .forEach((t) => tokens.add(t));
+    for (const m of src.matchAll(/className=\{("[^"]+")/g))
+      m[1]
+        .replace(/^"|"$/g, "")
+        .split(/\s+/)
+        .forEach((t) => tokens.add(t));
+  };
+  (function walk(d) {
+    for (const f of readdirSync(d)) {
+      const p = path.join(d, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (f.endsWith(".tsx")) collect(readFileSync(p, "utf8"));
+    }
+  })(uiDirs[0]);
+  (function walk(d) {
+    for (const f of readdirSync(d)) {
+      const p = path.join(d, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (f.endsWith(".tsx")) collect(readFileSync(p, "utf8"));
+    }
+  })(uiDirs[1]);
+  const missingClasses = [...tokens].filter((t) => /^[a-z][a-z0-9-]*$/.test(t) && !css.includes(`.${t}`));
+  missingClasses.length === 0
+    ? pass(
+        "PL15-UI-CLASSES",
+        "platform",
+        "P1",
+        "ui",
+        "UI class regression (every className defined in globals.css)",
+        `${tokens.size} classes verified`
+      )
+    : fail("PL15-UI-CLASSES", "platform", "P1", "ui", "UI class regression", `undefined: ${missingClasses.join(", ")}`);
+
+  // ── PL16 UI states regression: حالات التحميل/الخطأ/الفارغ/النجاح موجودة ومستخدمة ──
+  const stateClasses = ["empty", "alert", "ok", "admin-loading", "typing"];
+  const missingStates = stateClasses.filter((s) => !css.includes(`.${s}`));
+  const uiSrc = [
+    "src/app/page.tsx",
+    "src/app/cart/page.tsx",
+    "src/app/product/[id]/page.tsx",
+    "src/app/admin/page.tsx",
+    "src/components/ProductGrid.tsx",
+    "src/components/ChatWidget.tsx",
+  ]
+    .map((f) => readFileSync(path.join(ROOT, f), "utf8"))
+    .join("\n");
+  const unusedStates = stateClasses.filter((s) => !new RegExp(`\\b${s}\\b`).test(uiSrc));
+  const statesOk = missingStates.length === 0 && unusedStates.length === 0;
+  statesOk
+    ? pass(
+        "PL16-UI-STATES",
+        "platform",
+        "P1",
+        "ui",
+        "UI states regression (loading/error/empty/success defined + used)",
+        `${stateClasses.length} states verified`
+      )
+    : fail(
+        "PL16-UI-STATES",
+        "platform",
+        "P1",
+        "ui",
+        "UI states regression",
+        `missing=${missingStates.join(",")} unused=${unusedStates.join(",")}`
+      );
+
+  // ── PL17 UI focus accessibility: :focus-visible في CSS ──
+  css.includes(":focus-visible")
+    ? pass("PL17-UI-FOCUS", "platform", "P1", "a11y", "Visible keyboard focus (:focus-visible in CSS)", "observed")
+    : fail("PL17-UI-FOCUS", "platform", "P1", "a11y", "Visible keyboard focus", ":focus-visible absent");
+
   // ── Migrations additive (rollback safety) ──
   const mig = readFileSync(path.join(ROOT, "src/lib/migrations.ts"), "utf8");
   const destructive = /DROP TABLE|DROP COLUMN|RENAME TABLE|RENAME COLUMN/.test(mig);

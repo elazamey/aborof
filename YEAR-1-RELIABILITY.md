@@ -45,7 +45,7 @@
 
 | #   | الوحدة                    | الحالة            | الدليل / التنفيذ                                                                              |
 | --- | ------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
-| 01  | PRE_RELEASE_GATE          | ✅ **نشط ومُثبت** | `scripts/pre-release.mjs` — 61 بوابة (بعد R07 + C1/C2 + S06B + S10) — `evidence/pre-release/` |
+| 01  | PRE_RELEASE_GATE          | ✅ **نشط ومُثبت** | `scripts/pre-release.mjs` — 66 بوابة (بعد R07 + C1/C2 + S06B + S10 + PL13-PL17 UI) — `evidence/pre-release/` |
 | 02  | CONTINUOUS_MONITORING     | 🔶 جاهز جزئيًا    | `synthetic-monitor.yml` (كل 15 دقيقة) — الفعّال يتطلب `PRODUCTION_URL`                        |
 | 03  | DATA_INTEGRITY            | ✅ **منفّذ**      | `scripts/integrity-watchdog.mjs` + بوابة R07 — 7 فحوصات invariants                            |
 | 04  | BACKUP_RESTORE            | ✅ منفّذ (عقد)    | بوابة R05 (نسخ→تلف→استعادة→تحقق) + `migrate-check` — الجدولة بعد النشر                        |

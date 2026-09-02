@@ -1,12 +1,12 @@
 {
   "gate": "PRE_RELEASE_GATE",
   "version": 1,
-  "commit_sha": "244b16415195625f890ea07ad220a25a63f4d5b0",
+  "commit_sha": "f6afc15275f5334bbdb9a192020e753453ee0116",
   "branch": "arena/01a05f01-aborof",
-  "timestamp": "2026-09-02T01:00:12.752Z",
+  "timestamp": "2026-09-02T01:21:39.578Z",
   "summary": {
-    "total": 72,
-    "pass": 61,
+    "total": 77,
+    "pass": 66,
     "fail": 0,
     "not_configured": 11,
     "p0": {
@@ -16,8 +16,8 @@
       "not_configured": 3
     },
     "p1": {
-      "total": 47,
-      "pass": 39,
+      "total": 52,
+      "pass": 44,
       "fail": 0,
       "not_configured": 8
     }
@@ -159,9 +159,59 @@
       "area": "platform",
       "priority": "P1",
       "layer": "responsive",
-      "name": "Responsive CSS (@media ×4)",
+      "name": "Responsive CSS (@media ×6)",
       "status": "PASS",
       "detail": "≥2 breakpoints",
+      "evidence": ""
+    },
+    {
+      "id": "PL13-UI-CSS-BUDGET",
+      "area": "platform",
+      "priority": "P1",
+      "layer": "perf",
+      "name": "UI CSS budget (globals.css ≤ 40 kB)",
+      "status": "PASS",
+      "detail": "27 kB",
+      "evidence": ""
+    },
+    {
+      "id": "PL14-UI-NO-EXTERNAL",
+      "area": "platform",
+      "priority": "P1",
+      "layer": "perf",
+      "name": "UI zero external requests (no fonts/CDN origins)",
+      "status": "PASS",
+      "detail": "0 origins in CSS + layout",
+      "evidence": ""
+    },
+    {
+      "id": "PL15-UI-CLASSES",
+      "area": "platform",
+      "priority": "P1",
+      "layer": "ui",
+      "name": "UI class regression (every className defined in globals.css)",
+      "status": "PASS",
+      "detail": "93 classes verified",
+      "evidence": ""
+    },
+    {
+      "id": "PL16-UI-STATES",
+      "area": "platform",
+      "priority": "P1",
+      "layer": "ui",
+      "name": "UI states regression (loading/error/empty/success defined + used)",
+      "status": "PASS",
+      "detail": "5 states verified",
+      "evidence": ""
+    },
+    {
+      "id": "PL17-UI-FOCUS",
+      "area": "platform",
+      "priority": "P1",
+      "layer": "a11y",
+      "name": "Visible keyboard focus (:focus-visible in CSS)",
+      "status": "PASS",
+      "detail": "observed",
       "evidence": ""
     },
     {
@@ -261,7 +311,7 @@
       "layer": "ui",
       "name": "Home page renders (200 + brand)",
       "status": "PASS",
-      "detail": "200 181ms",
+      "detail": "200 176ms",
       "evidence": ""
     },
     {
@@ -291,7 +341,7 @@
       "layer": "cart",
       "name": "Cart page renders (200)",
       "status": "PASS",
-      "detail": "200 11ms",
+      "detail": "200 12ms",
       "evidence": ""
     },
     {
@@ -301,7 +351,7 @@
       "layer": "checkout",
       "name": "Order create (COD) + stock decrement",
       "status": "PASS",
-      "detail": "ORD-10811836-3fb9ed59 stock 40→38",
+      "detail": "ORD-12098611-7cc592ff stock 40→38",
       "evidence": ""
     },
     {
@@ -311,7 +361,7 @@
       "layer": "orders",
       "name": "Idempotency: same key → same order, stock decremented once",
       "status": "PASS",
-      "detail": "ORD-10811844-e21d187d dup=true stock 38→37",
+      "detail": "ORD-12098621-90c3a7d3 dup=true stock 38→37",
       "evidence": ""
     },
     {
@@ -321,7 +371,7 @@
       "layer": "orders",
       "name": "Double submit (different keys) → two distinct orders",
       "status": "PASS",
-      "detail": "ORD-10811857-88d031dd ≠ ORD-10811864-7dfcd3dc",
+      "detail": "ORD-12098635-31aefdb8 ≠ ORD-12098642-2d569c4a",
       "evidence": ""
     },
     {
@@ -541,7 +591,7 @@
       "layer": "perf",
       "name": "TTFB budgets (local, <1500ms)",
       "status": "PASS",
-      "detail": "home=15ms product=10ms",
+      "detail": "home=18ms product=13ms",
       "evidence": ""
     },
     {
@@ -761,7 +811,7 @@
       "layer": "release",
       "name": "Release SHA pinned & recorded",
       "status": "PASS",
-      "detail": "HEAD=244b16415195625f890ea07ad220a25a63f4d5b0 branch=arena/01a05f01-aborof",
+      "detail": "HEAD=f6afc15275f5334bbdb9a192020e753453ee0116 branch=arena/01a05f01-aborof",
       "evidence": ""
     }
   ]
