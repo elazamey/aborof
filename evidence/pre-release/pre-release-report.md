@@ -1,8 +1,8 @@
 # PRE_RELEASE_GATE — Evidence
 
 - **القرار:** RELEASE_BLOCKED
-- **الـ SHA:** `953ebbf0825bfd2a2d202d8898a8236ebfe3c996` (فرع: arena/01a05f01-aborof)
-- **التاريخ:** 2026-09-02T00:50:08.614Z
+- **الـ SHA:** `244b16415195625f890ea07ad220a25a63f4d5b0` (فرع: arena/01a05f01-aborof)
+- **التاريخ:** 2026-09-02T01:00:12.752Z
 - **المُلخص:** 61 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 72)
 - **P0:** 22 PASS / 0 FAIL / 3 NOT_CONFIGURED
 - **P1:** 39 PASS / 0 FAIL / 8 NOT_CONFIGURED
@@ -21,7 +21,7 @@
 | L1-TSC | P1 | quality | PASS | TypeScript (tsc --noEmit) | exit 0 |
 | L1-ROUTES | P1 | quality | PASS | Route inventory & coverage | exit 0 |
 | L1-FMT | P1 | quality | PASS | Prettier format check | exit 0 |
-| L1-UNIT | P1 | quality | PASS | Vitest unit tests (78 passed) | exit 0 |
+| L1-UNIT | P1 | quality | PASS | Vitest unit tests (107 passed) | exit 0 |
 | S04-XSS | P1 | security | PASS | No dangerouslySetInnerHTML in src | grep found 0 matches |
 | S05-SQLI | P1 | security | PASS | Parameterized SQL only (no ${} inside execute on user-input surface) | grep found 0 matches |
 | S06-SECRETS | P1 | security | PASS | No obvious secret patterns in tracked files (HEAD) | git grep 0 hits |
@@ -38,13 +38,13 @@
 | R03-SCHEMA | P1 | reliability | PASS | Constraints & indexes (NOT NULL, PK, idempotency index) | version=3 notnull=true idx=true pk=true |
 | R05-BACKUP | P1 | reliability | PASS | Backup/restore drill (copy → corrupt → restore → verify) | products=1 version=3 |
 | R06-DRILL | P1 | reliability | PASS | Resilience drills L5 (6 drills, injected failures) | exit 0 — DRILL-01..06 PASS |
-| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 201ms |
+| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 181ms |
 | F02-PRODUCTS | P0 | functional | PASS | Products API (list, fields complete) | 12 products |
 | F03-PRODUCT-PAGE | P0 | functional | PASS | Product page (200) + unknown product (404) | detail=200 notfound=404 |
-| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 12ms |
-| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-10207615-f6032dcf stock 40→38 |
-| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-10207626-f7a9d19a dup=true stock 38→37 |
-| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-10207646-6e262d1f ≠ ORD-10207655-0febe2ae |
+| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 11ms |
+| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-10811836-3fb9ed59 stock 40→38 |
+| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-10811844-e21d187d dup=true stock 38→37 |
+| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-10811857-88d031dd ≠ ORD-10811864-7dfcd3dc |
 | F08-VALIDATION | P0 | functional | PASS | Order validation battery (422/400/409/413) |  |
 | F09-AUTH | P0 | functional | PASS | Admin login (401 wrong / 200 right), session, logout | bad=401 good=200 logout→false |
 | S03-COOKIE | P1 | security | PASS | Admin cookie flags (HttpOnly, SameSite=Lax, Secure, Path=/) | observed on Set-Cookie |
@@ -66,7 +66,7 @@
 | PL09-SEO | P1 | platform | PASS | SEO metadata (title + meta description) | observed in <head> |
 | PL10-ROBOTS | P1 | platform | PASS | robots.txt served (disallow /admin, /api) | 200 User-Agent: * |
 | PL12-404 | P1 | platform | PASS | 404 status for unknown pages | observed |
-| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=16ms product=13ms |
+| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=15ms product=10ms |
 | RC07-RID | P0 | release | PASS | Request-ID echo (proxy → response header) | observed |
 | E2E01-JOURNEY | P1 | functional | PASS | Critical journey (products → cart → order → admin → status → cancel) | HTTP-level E2E across F-gates PASS |
 | RC07-LOGS | P0 | release | PASS | Structured JSON logs (server) | 106 log lines observed |
@@ -88,6 +88,6 @@
 | PL08-LAB-METRICS | P1 | platform | NOT_CONFIGURED | Lab metrics (LCP/INP/CLS) | تحتاج أدوات متصفح (Lighthouse/Playwright) — غير متاحة في هذه البيئة (NOT_CONFIGURED) |
 | PL11-SEO-URLS | P1 | platform | NOT_CONFIGURED | Canonical/OG/sitemap/JSON-LD (absolute URLs) | تحتاج PRODUCTION_URL (غير مهيأ بعد) — تُضاف مع اكتمال إعداد الإنتاج (NOT_CONFIGURED) |
 | RC10-EVIDENCE | P0 | release | PASS | Evidence completeness (deploy-result + L5 + rollback) | all present |
-| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=953ebbf0825bfd2a2d202d8898a8236ebfe3c996 branch=arena/01a05f01-aborof |
+| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=244b16415195625f890ea07ad220a25a63f4d5b0 branch=arena/01a05f01-aborof |
 
 _كل النتائج مُلاحَظة من تشغيل فعلي (لا PASS مفترض). الأسماء فقط لأي متغيرات بيئة — لا قيم._
