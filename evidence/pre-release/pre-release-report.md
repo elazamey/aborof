@@ -1,11 +1,11 @@
 # PRE_RELEASE_GATE — Evidence
 
 - **القرار:** RELEASE_BLOCKED
-- **الـ SHA:** `f01a6e82c97b9d5816defebaa656a29f41d7edfd` (فرع: arena/01a05f01-aborof)
-- **التاريخ:** 2026-09-02T00:43:29.883Z
-- **المُلخص:** 57 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 68)
+- **الـ SHA:** `953ebbf0825bfd2a2d202d8898a8236ebfe3c996` (فرع: arena/01a05f01-aborof)
+- **التاريخ:** 2026-09-02T00:50:08.614Z
+- **المُلخص:** 61 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 72)
 - **P0:** 22 PASS / 0 FAIL / 3 NOT_CONFIGURED
-- **P1:** 35 PASS / 0 FAIL / 8 NOT_CONFIGURED
+- **P1:** 39 PASS / 0 FAIL / 8 NOT_CONFIGURED
 
 ## Blockers
 
@@ -25,6 +25,8 @@
 | S04-XSS | P1 | security | PASS | No dangerouslySetInnerHTML in src | grep found 0 matches |
 | S05-SQLI | P1 | security | PASS | Parameterized SQL only (no ${} inside execute on user-input surface) | grep found 0 matches |
 | S06-SECRETS | P1 | security | PASS | No obvious secret patterns in tracked files (HEAD) | git grep 0 hits |
+| S06B-SECRETS-HISTORY | P1 | security | PASS | Secret history scan (whole git history, all branches) | git log --all -p: 0 hits |
+| S10-TIMEOUTS | P1 | security | PASS | Global timeout policy: every fetch() has AbortSignal.timeout | 0 API files with unguarded fetch |
 | PL05-MOTION | P1 | platform | PASS | prefers-reduced-motion handling in CSS | media query present |
 | PL02-RESPONSIVE | P1 | platform | PASS | Responsive CSS (@media ×4) | ≥2 breakpoints |
 | RC02-ROLLBACK | P0 | release | PASS | Migrations additive (no DROP/RENAME) | inspection OK |
@@ -36,13 +38,13 @@
 | R03-SCHEMA | P1 | reliability | PASS | Constraints & indexes (NOT NULL, PK, idempotency index) | version=3 notnull=true idx=true pk=true |
 | R05-BACKUP | P1 | reliability | PASS | Backup/restore drill (copy → corrupt → restore → verify) | products=1 version=3 |
 | R06-DRILL | P1 | reliability | PASS | Resilience drills L5 (6 drills, injected failures) | exit 0 — DRILL-01..06 PASS |
-| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 188ms |
+| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 201ms |
 | F02-PRODUCTS | P0 | functional | PASS | Products API (list, fields complete) | 12 products |
 | F03-PRODUCT-PAGE | P0 | functional | PASS | Product page (200) + unknown product (404) | detail=200 notfound=404 |
-| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 11ms |
-| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-09809315-ac590933 stock 40→38 |
-| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-09809324-34b4177c dup=true stock 38→37 |
-| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-09809338-72d05884 ≠ ORD-09809346-50f61eff |
+| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 12ms |
+| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-10207615-f6032dcf stock 40→38 |
+| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-10207626-f7a9d19a dup=true stock 38→37 |
+| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-10207646-6e262d1f ≠ ORD-10207655-0febe2ae |
 | F08-VALIDATION | P0 | functional | PASS | Order validation battery (422/400/409/413) |  |
 | F09-AUTH | P0 | functional | PASS | Admin login (401 wrong / 200 right), session, logout | bad=401 good=200 logout→false |
 | S03-COOKIE | P1 | security | PASS | Admin cookie flags (HttpOnly, SameSite=Lax, Secure, Path=/) | observed on Set-Cookie |
@@ -50,7 +52,9 @@
 | F11-LIFECYCLE | P0 | functional | PASS | Order lifecycle (status changes + cancel restock once) | stock p3: 77→80→80 audit=3 |
 | F12-CHAT | P0 | functional | PASS | Chat (local fallback source) + rate limit 429 | reply=ok source=local 429=429 |
 | F13-ADMIN-CRUD | P0 | functional | PASS | Admin products CRUD (create/update/delete) | create=200 update=200 delete=200 |
-| R04-STOCK | P1 | reliability | PASS | No negative stock after all gate orders | min stock = 20 |
+| C1-CONCURRENCY-SAMEKEY | P1 | reliability | PASS | Concurrency: 20× same idempotency key → 1 order, stock decremented once | ok=20 unique-ids=1 stock 45→44 |
+| C2-CONCURRENCY-OVERSELL | P1 | reliability | PASS | Concurrency: oversell (60 req / stock < 60) → exactly-stock ok + rest 409, stock hits 0 | ok=37 409=23 stock 37→0 |
+| R04-STOCK | P1 | reliability | PASS | No negative stock after all gate orders | min stock = 0 |
 | S01-HEADERS | P1 | security | PASS | Security headers (CSP, nosniff, XFO, Referrer, Permissions, COOP) | all present |
 | S02-NO-POWERED | P1 | security | PASS | No X-Powered-By header | absent |
 | S09-CORS-FRAME | P1 | security | PASS | No CORS open + frame-ancestors 'none' | cors=none |
@@ -62,10 +66,10 @@
 | PL09-SEO | P1 | platform | PASS | SEO metadata (title + meta description) | observed in <head> |
 | PL10-ROBOTS | P1 | platform | PASS | robots.txt served (disallow /admin, /api) | 200 User-Agent: * |
 | PL12-404 | P1 | platform | PASS | 404 status for unknown pages | observed |
-| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=15ms product=10ms |
+| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=16ms product=13ms |
 | RC07-RID | P0 | release | PASS | Request-ID echo (proxy → response header) | observed |
 | E2E01-JOURNEY | P1 | functional | PASS | Critical journey (products → cart → order → admin → status → cancel) | HTTP-level E2E across F-gates PASS |
-| RC07-LOGS | P0 | release | PASS | Structured JSON logs (server) | 49 log lines observed |
+| RC07-LOGS | P0 | release | PASS | Structured JSON logs (server) | 106 log lines observed |
 | RC07-NOLEAK-LOGS | P0 | release | PASS | No secret values in server logs | grep: 0 hits |
 | RC07-HEALTH-READY | P0 | release | PASS | Health & readiness endpoints (200) | observed during server startup (polled /api/health) |
 | R07-INTEGRITY | P1 | reliability | PASS | Data integrity invariants (stock, orders, idempotency, orphans, schema) | watchdog exit 0 — all checks passed |
@@ -84,6 +88,6 @@
 | PL08-LAB-METRICS | P1 | platform | NOT_CONFIGURED | Lab metrics (LCP/INP/CLS) | تحتاج أدوات متصفح (Lighthouse/Playwright) — غير متاحة في هذه البيئة (NOT_CONFIGURED) |
 | PL11-SEO-URLS | P1 | platform | NOT_CONFIGURED | Canonical/OG/sitemap/JSON-LD (absolute URLs) | تحتاج PRODUCTION_URL (غير مهيأ بعد) — تُضاف مع اكتمال إعداد الإنتاج (NOT_CONFIGURED) |
 | RC10-EVIDENCE | P0 | release | PASS | Evidence completeness (deploy-result + L5 + rollback) | all present |
-| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=f01a6e82c97b9d5816defebaa656a29f41d7edfd branch=arena/01a05f01-aborof |
+| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=953ebbf0825bfd2a2d202d8898a8236ebfe3c996 branch=arena/01a05f01-aborof |
 
 _كل النتائج مُلاحَظة من تشغيل فعلي (لا PASS مفترض). الأسماء فقط لأي متغيرات بيئة — لا قيم._

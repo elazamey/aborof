@@ -202,6 +202,59 @@ function stageStatic() {
         scanHits.join(" | ")
       );
 
+  // ── S06B secret history scan: كامل git history (كل الفروع والـ commits) ──
+  const hist = runCmd("git", ["log", "--all", "-p", "--", ".", ":!package-lock.json"], {
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  const histHits = hist.stdout
+    .split("\n")
+    .filter((l) => new RegExp(secretPattern).test(l))
+    .filter((l) => !l.includes("your_turso_token") && !l.includes(".github/workflows/quality.yml"))
+    .slice(0, 5);
+  histHits.length === 0
+    ? pass(
+        "S06B-SECRETS-HISTORY",
+        "security",
+        "P1",
+        "secrets",
+        "Secret history scan (whole git history, all branches)",
+        "git log --all -p: 0 hits"
+      )
+    : fail(
+        "S06B-SECRETS-HISTORY",
+        "security",
+        "P1",
+        "secrets",
+        "Secret history scan (whole git history)",
+        histHits.join(" | ")
+      );
+
+  // ── S10 global timeout policy: كل fetch() في API routes له مهلة ──
+  const apiDir = path.join(ROOT, "src/app/api");
+  const apiFiles = [];
+  (function walk(d) {
+    for (const f of readdirSync(d)) {
+      const p = path.join(d, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (f.endsWith(".ts")) apiFiles.push(p);
+    }
+  })(apiDir);
+  const unguardedFetch = [];
+  for (const f of apiFiles) {
+    const c = readFileSync(f, "utf8");
+    if (/fetch\(/.test(c) && !c.includes("AbortSignal.timeout")) unguardedFetch.push(f);
+  }
+  unguardedFetch.length === 0
+    ? pass(
+        "S10-TIMEOUTS",
+        "security",
+        "P1",
+        "api",
+        "Global timeout policy: every fetch() has AbortSignal.timeout",
+        "0 API files with unguarded fetch"
+      )
+    : fail("S10-TIMEOUTS", "security", "P1", "api", "Global timeout policy", unguardedFetch.join(", "));
+
   // ── Reduced motion CSS ──
   const css = readFileSync(path.join(ROOT, "src/app/globals.css"), "utf8");
   css.includes("prefers-reduced-motion")
@@ -932,6 +985,63 @@ async function stageHttp() {
         "admin",
         "Admin products CRUD",
         `create=${cr1.status} update=${cr2.status} found=${found} del=${del.status} gone=${gone}`
+      );
+
+  // ── C1 concurrency: نفس idempotency key ×20 متوازٍ (IPs مختلفة) ──
+  const cKey = `gate-race-${Date.now()}`;
+  const c1Start = await stockOf("p6");
+  const c1Reqs = Array.from({ length: 20 }, (_, i) =>
+    postJson("/api/orders", { ...orderBody, items: [{ id: "p6", qty: 1 }], idempotencyKey: cKey }, `10.8.0.${i}`)
+  );
+  const c1Res = await Promise.all(c1Reqs);
+  const c1OkCount = c1Res.filter((r) => r.status === 200).length;
+  const c1Ids = new Set(c1Res.filter((r) => r.json?.id).map((r) => r.json.id));
+  const c1End = await stockOf("p6");
+  const c1Pass = c1OkCount === 20 && c1Ids.size === 1 && c1Start - c1End === 1;
+  c1Pass
+    ? pass(
+        "C1-CONCURRENCY-SAMEKEY",
+        "reliability",
+        "P1",
+        "inventory",
+        "Concurrency: 20× same idempotency key → 1 order, stock decremented once",
+        `ok=${c1OkCount} unique-ids=${c1Ids.size} stock ${c1Start}→${c1End}`
+      )
+    : fail(
+        "C1-CONCURRENCY-SAMEKEY",
+        "reliability",
+        "P1",
+        "inventory",
+        "Concurrency: same idempotency key",
+        `ok=${c1OkCount} unique-ids=${c1Ids.size} stock ${c1Start}→${c1End}`
+      );
+
+  // ── C2 concurrency: oversell — 60 طلبًا متوازيًا على مخزون < 60 ──
+  const c2Start = await stockOf("p1");
+  const c2Reqs = Array.from({ length: 60 }, (_, i) =>
+    postJson("/api/orders", { ...orderBody, items: [{ id: "p1", qty: 1 }] }, `10.7.0.${i}`)
+  );
+  const c2Res = await Promise.all(c2Reqs);
+  const c2Ok = c2Res.filter((r) => r.status === 200).length;
+  const c2Conf = c2Res.filter((r) => r.status === 409).length;
+  const c2End = await stockOf("p1");
+  const c2Pass = c2Ok === c2Start && c2Conf === 60 - c2Start && c2End === 0;
+  c2Pass
+    ? pass(
+        "C2-CONCURRENCY-OVERSELL",
+        "reliability",
+        "P1",
+        "inventory",
+        "Concurrency: oversell (60 req / stock < 60) → exactly-stock ok + rest 409, stock hits 0",
+        `ok=${c2Ok} 409=${c2Conf} stock ${c2Start}→${c2End}`
+      )
+    : fail(
+        "C2-CONCURRENCY-OVERSELL",
+        "reliability",
+        "P1",
+        "inventory",
+        "Concurrency: oversell",
+        `ok=${c2Ok} 409=${c2Conf} stock ${c2Start}→${c2End}`
       );
 
   // ── R04 no negative stock ──

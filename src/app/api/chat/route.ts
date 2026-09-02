@@ -134,9 +134,13 @@ export async function POST(req: NextRequest) {
     let reply = "";
     let source = "local";
 
+    // Kill switch (YEAR-1-RELIABILITY / launch P0.5): AI_ENABLED=false يوقف
+    // المزوّدين الخارجيين فورًا ويبقي المتجر يعمل بالرد المحلي (سيليا).
+    const aiEnabled = process.env.AI_ENABLED !== "false";
+
     // Circuit breaker لكل مزوّد AI (YEAR-1-RELIABILITY #4): عند فشل متكرر
     // نتوقف عن قصف المزوّد وننتقل للرد المحلي، ثم نجرب استكشافيًا بعد الهدوء.
-    if (gemini) {
+    if (gemini && aiEnabled) {
       try {
         if (aiBreakers.gemini.allow()) {
           reply = await callGemini(sys, clean, gemini);
@@ -148,7 +152,7 @@ export async function POST(req: NextRequest) {
         console.error(e);
       }
     }
-    if (!reply && groq) {
+    if (!reply && groq && aiEnabled) {
       try {
         if (aiBreakers.groq.allow()) {
           reply = await callGroq(sys, clean, groq);

@@ -1,12 +1,12 @@
 {
   "gate": "PRE_RELEASE_GATE",
   "version": 1,
-  "commit_sha": "f01a6e82c97b9d5816defebaa656a29f41d7edfd",
+  "commit_sha": "953ebbf0825bfd2a2d202d8898a8236ebfe3c996",
   "branch": "arena/01a05f01-aborof",
-  "timestamp": "2026-09-02T00:43:29.883Z",
+  "timestamp": "2026-09-02T00:50:08.614Z",
   "summary": {
-    "total": 68,
-    "pass": 57,
+    "total": 72,
+    "pass": 61,
     "fail": 0,
     "not_configured": 11,
     "p0": {
@@ -16,8 +16,8 @@
       "not_configured": 3
     },
     "p1": {
-      "total": 43,
-      "pass": 35,
+      "total": 47,
+      "pass": 39,
       "fail": 0,
       "not_configured": 8
     }
@@ -122,6 +122,26 @@
       "name": "No obvious secret patterns in tracked files (HEAD)",
       "status": "PASS",
       "detail": "git grep 0 hits",
+      "evidence": ""
+    },
+    {
+      "id": "S06B-SECRETS-HISTORY",
+      "area": "security",
+      "priority": "P1",
+      "layer": "secrets",
+      "name": "Secret history scan (whole git history, all branches)",
+      "status": "PASS",
+      "detail": "git log --all -p: 0 hits",
+      "evidence": ""
+    },
+    {
+      "id": "S10-TIMEOUTS",
+      "area": "security",
+      "priority": "P1",
+      "layer": "api",
+      "name": "Global timeout policy: every fetch() has AbortSignal.timeout",
+      "status": "PASS",
+      "detail": "0 API files with unguarded fetch",
       "evidence": ""
     },
     {
@@ -241,7 +261,7 @@
       "layer": "ui",
       "name": "Home page renders (200 + brand)",
       "status": "PASS",
-      "detail": "200 188ms",
+      "detail": "200 201ms",
       "evidence": ""
     },
     {
@@ -271,7 +291,7 @@
       "layer": "cart",
       "name": "Cart page renders (200)",
       "status": "PASS",
-      "detail": "200 11ms",
+      "detail": "200 12ms",
       "evidence": ""
     },
     {
@@ -281,7 +301,7 @@
       "layer": "checkout",
       "name": "Order create (COD) + stock decrement",
       "status": "PASS",
-      "detail": "ORD-09809315-ac590933 stock 40→38",
+      "detail": "ORD-10207615-f6032dcf stock 40→38",
       "evidence": ""
     },
     {
@@ -291,7 +311,7 @@
       "layer": "orders",
       "name": "Idempotency: same key → same order, stock decremented once",
       "status": "PASS",
-      "detail": "ORD-09809324-34b4177c dup=true stock 38→37",
+      "detail": "ORD-10207626-f7a9d19a dup=true stock 38→37",
       "evidence": ""
     },
     {
@@ -301,7 +321,7 @@
       "layer": "orders",
       "name": "Double submit (different keys) → two distinct orders",
       "status": "PASS",
-      "detail": "ORD-09809338-72d05884 ≠ ORD-09809346-50f61eff",
+      "detail": "ORD-10207646-6e262d1f ≠ ORD-10207655-0febe2ae",
       "evidence": ""
     },
     {
@@ -375,13 +395,33 @@
       "evidence": ""
     },
     {
+      "id": "C1-CONCURRENCY-SAMEKEY",
+      "area": "reliability",
+      "priority": "P1",
+      "layer": "inventory",
+      "name": "Concurrency: 20× same idempotency key → 1 order, stock decremented once",
+      "status": "PASS",
+      "detail": "ok=20 unique-ids=1 stock 45→44",
+      "evidence": ""
+    },
+    {
+      "id": "C2-CONCURRENCY-OVERSELL",
+      "area": "reliability",
+      "priority": "P1",
+      "layer": "inventory",
+      "name": "Concurrency: oversell (60 req / stock < 60) → exactly-stock ok + rest 409, stock hits 0",
+      "status": "PASS",
+      "detail": "ok=37 409=23 stock 37→0",
+      "evidence": ""
+    },
+    {
       "id": "R04-STOCK",
       "area": "reliability",
       "priority": "P1",
       "layer": "inventory",
       "name": "No negative stock after all gate orders",
       "status": "PASS",
-      "detail": "min stock = 20",
+      "detail": "min stock = 0",
       "evidence": ""
     },
     {
@@ -501,7 +541,7 @@
       "layer": "perf",
       "name": "TTFB budgets (local, <1500ms)",
       "status": "PASS",
-      "detail": "home=15ms product=10ms",
+      "detail": "home=16ms product=13ms",
       "evidence": ""
     },
     {
@@ -531,7 +571,7 @@
       "layer": "observability",
       "name": "Structured JSON logs (server)",
       "status": "PASS",
-      "detail": "49 log lines observed",
+      "detail": "106 log lines observed",
       "evidence": ""
     },
     {
@@ -721,7 +761,7 @@
       "layer": "release",
       "name": "Release SHA pinned & recorded",
       "status": "PASS",
-      "detail": "HEAD=f01a6e82c97b9d5816defebaa656a29f41d7edfd branch=arena/01a05f01-aborof",
+      "detail": "HEAD=953ebbf0825bfd2a2d202d8898a8236ebfe3c996 branch=arena/01a05f01-aborof",
       "evidence": ""
     }
   ]

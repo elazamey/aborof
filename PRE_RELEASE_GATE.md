@@ -97,3 +97,64 @@ PaymentProvider / NotificationProvider / AIProvider / StorageProvider / WebhookV
 - كل فحص HTTP يستخدم عناوين IP افتراضية معزولة لدلاء الـ rate limit.
 - `npm run pre-release` يشمل: lint, tsc, routes, format, unit (بما فيها عقود الـ providers), build, drills L5، بطارية HTTP، الفحوصات الساكنة، ثم القرار.
 - البوابة الحالية متوقعة `RELEASE_BLOCKED` حتى اكتمال **TASK-02** (Production Config / Monitoring / Post-deploy NOT_CONFIGURED) — هذا صحيح ومقصود: لا يُنشر قبل اكتمال الإعدادات.
+
+## 7. المحاور العشرة (Final Release Gate — R1..R10)
+
+كل محور هو **نظرة فوق بوابات** موجودة (لا فحص جديد مستقل) — القرار النهائي من القسم 2:
+
+| المحور                      | البوابات المغطية                                                                                                                 | الحالة (آخر تشغيل)                |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| **R1 Code Quality**         | L1-LINT, L1-TSC, L1-ROUTES, L1-FMT, L1-UNIT, L2-BUILD                                                                            | ✅ PASS                           |
+| **R2 Runtime**              | F01..F04, PL06, PL12, RC07 (health/ready/rid/logs)                                                                               | ✅ PASS                           |
+| **R3 Business**             | F05..F13, E2E01                                                                                                                  | ✅ PASS                           |
+| **R4 Data Integrity**       | R01, R02, R03, R04, R05, R07 (watchdog 9 فحوصات: schema/stock/orders/totals/status/idempotency/orphans/snapshots/reconciliation) | ✅ PASS                           |
+| **R5 Security**             | S01..S10 (headers, cookie, authz, XSS, SQLi, secrets HEAD + history S06B, leak, rate limits, CORS, timeouts)                     | ✅ PASS                           |
+| **R6 Checkout/Inventory**   | F05..F08, F11, C1 (same-key ×20), C2 (oversell ×60), R04                                                                         | ✅ PASS                           |
+| **R7 External Services**    | EX01..EX07 + عقود providers (22 اختبار)                                                                                          | ✅ PASS + NOT_CONFIGURED اختيارية |
+| **R8 Performance/UI**       | PL02, PL05, PL06, PL07, PL08 (NC), E2E02 (NC)                                                                                    | ✅ PASS + NC                      |
+| **R9 Deployment/Rollback**  | RC01 (NC), RC02, RC03, RC06 (NC), RC10, RC11                                                                                     | ⛔ حتى TASK-02                    |
+| **R10 Monitoring/Recovery** | RC04, RC05 (NC), R06 (drills), R05 (restore)                                                                                     | ⛔ حتى TASK-02                    |
+
+## 8. Full Release Rehearsal (بروفة الإصدار الكاملة)
+
+تُنفَّذ قبل أول نشر — نفس الـ artifact/configuration المتوقع استخدامها في الإنتاج قدر الإمكان:
+
+```text
+Fresh Environment → Install (npm ci) → Migration (v3) → Seed → Build
+→ CI (L1-L5) → Smoke (L3/L4) → Resilience (L5 drills) → Backup → Restore drill
+→ Deploy Candidate (من rc-<sha> tag) → Post-Deploy smoke → Monitoring
+```
+
+- **المراحل حتى Backup/Restore:** منفّذة ومثبتة في `npm run pre-release` (بوابات R01..R07 + R06 + R05).
+- **Deploy Candidate + Post-Deploy + Monitoring:** `NOT_CONFIGURED` حتى اكتمال TASK-02 (المتغيرات والأسرار) — تُنفَّذ عبر deploy workflow (تاج `rc-<sha>`).
+- **القاعدة:** أي تغيير على الكود بعد البروفة يبدأ دورة تحقق جديدة (Release Freeze).
+
+## 9. قائمة إطلاق P0 (شروط الإطلاق — حالة التنفيذ)
+
+| الشرط                                          | الحالة                   | الدليل                                                                    |
+| ---------------------------------------------- | ------------------------ | ------------------------------------------------------------------------- |
+| Release Freeze (RC SHA ثابت)                   | ✅                       | RC11 + قاعدة "أي تغيير = دورة جديدة"                                      |
+| Production Configuration Gate                  | 🔶 NOT_CONFIGURED        | RC01 — بانتظار الأسرار/المتغيرات (TASK-02)                                |
+| Backup + Restore فعلي                          | ✅                       | R05 (نسخ→تلف→استعادة→تحقق) + R07                                          |
+| Transaction Integrity                          | ✅                       | F05/F06/F11 (stock/order/cancel مرة واحدة) + R04                          |
+| Double-Submit / Race                           | ✅                       | C1 (20× نفس المفتاح) + C2 (60× oversell) + DRILL-02                       |
+| Kill Switch للتكاملات                          | ✅ AI (AI_ENABLED=false) | `src/app/api/chat/route.ts` — البقية عند وجودها                           |
+| Global Timeout Policy                          | ✅                       | S10 + `AbortSignal.timeout` في chat + `withTimeout`                       |
+| Idempotency Audit                              | ✅                       | orders (key+UNIQUE)، product upsert، PATCH إلغاء مرة واحدة، Outbox dedupe |
+| Webhook Replay Protection                      | ✅ (عقد)                 | `createHmacWebhookVerifier` + `createWebhookDeduplicator` (EX06)          |
+| Secret History Scan                            | ✅                       | S06B (git log --all -p)                                                   |
+| Dependency Supply-Chain                        | ✅                       | EX07 + npm audit (CI) + no new deps                                       |
+| Admin Hardening                                | ✅                       | auth (HMAC/HttpOnly/rate-limit/audit) + F09/F10                           |
+| Data Invariant Scanner                         | ✅                       | R07 watchdog (9 فحوصات، يومي)                                             |
+| Reconciliation                                 | ✅                       | watchdog totals + R07                                                     |
+| Snapshot Integrity                             | ✅                       | watchdog snapshots + R07                                                  |
+| 3D ليس شرطًا للتشغيل                           | 🔶 مخطط                  | مع مرحلة CINEMATIC UI (progressive enhancement)                           |
+| Performance Budget قبل التصميم                 | ✅                       | PL06/PL07 + قاعدة PR تجاوز budget = FAIL                                  |
+| Mobile-first Checkout                          | 🔶 مخطط                  | مع مرحلة CINEMATIC UI                                                     |
+| SEO Release Audit                              | 🔶 جزئي                  | PL09/PL10/PL12 ✅ · PL11 (canonical/OG/sitemap) NC                        |
+| Error/Business Alerts                          | 🔶 مخطط                  | بعد النشر (monitoring)                                                    |
+| Synthetic Monitoring                           | 🔶 مخطط                  | بعد PRODUCTION_URL                                                        |
+| Runbooks                                       | ✅ مسودة                 | `YEAR-1-RELIABILITY.md` §7                                                |
+| Rollback Drill                                 | ✅                       | RC03 + evidence/deploy-result/rollback-readiness.md                       |
+| Deployment Provenance                          | ✅                       | deploy.yml (SHA gate) + RC11 + evidence                                   |
+| Feature Flags / Maintenance Mode / Incident ID | 🔶 مخطط                  | P2 — مع النشر/الواجهة                                                     |

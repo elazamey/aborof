@@ -69,7 +69,7 @@ async function main() {
     check("no negative stock", negStock.rows, (r) => `${r.id} stock=${r.stock}`);
 
     // 2) orders with missing/invalid items
-    const orders = await client.execute("SELECT id, items, total, status FROM orders");
+    const orders = await client.execute("SELECT id, items, total, shipping_fee, status FROM orders");
     const invalidItems = [];
     const invalidTotal = [];
     const invalidStatus = [];
@@ -118,6 +118,55 @@ async function main() {
       }
     }
     check("no orders referencing unknown products", orphanRefs.slice(0, 10), (r) => `${r.order} → ${r.product}`);
+
+    // 5) snapshot integrity: كل item في الطلب يحمل name/price/qty صحيحة (لا تعتمد على المنتج الحي)
+    const badSnap = [];
+    for (const row of orders.rows) {
+      let items = [];
+      try {
+        items = JSON.parse(String(row.items ?? "[]"));
+      } catch {
+        continue; // items تالفة — مغطاة في فحص items
+      }
+      if (!Array.isArray(items)) continue;
+      for (const it of items) {
+        const ok =
+          it &&
+          typeof it.name === "string" &&
+          it.name.trim().length > 0 &&
+          Number.isFinite(Number(it.price)) &&
+          Number(it.price) >= 0 &&
+          Number.isInteger(Number(it.qty)) &&
+          Number(it.qty) >= 1;
+        if (!ok) {
+          badSnap.push({ order: row.id, item: JSON.stringify(it) });
+          break;
+        }
+      }
+    }
+    check("orders keep full product snapshots (name/price/qty)", badSnap.slice(0, 10), (r) => `${r.order}: ${r.item}`);
+
+    // 6) reconciliation مالي: order.total == Σ(items.price×qty) + shipping_fee
+    const badTotal = [];
+    for (const row of orders.rows) {
+      let items = [];
+      try {
+        items = JSON.parse(String(row.items ?? "[]"));
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(items)) continue;
+      const subtotal = items.reduce((s, it) => s + Number(it?.price ?? 0) * Number(it?.qty ?? 0), 0);
+      const expected = subtotal + Number(row.shipping_fee ?? 0);
+      if (Math.abs(expected - Number(row.total)) > 0.001) {
+        badTotal.push({ order: row.id, total: row.total, expected });
+      }
+    }
+    check(
+      "order totals reconcile: total == Σ(items) + shipping",
+      badTotal.slice(0, 10),
+      (r) => `${r.order} total=${r.total} expected=${r.expected}`
+    );
 
     const total = checks.length;
     const bad = violations.length;
