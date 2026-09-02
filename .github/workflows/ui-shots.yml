@@ -41,9 +41,11 @@ jobs:
           CHROME_PATH: /usr/bin/google-chrome
         run: |
           TURSO_DATABASE_URL=file:/tmp/shots.db TURSO_AUTH_TOKEN=shots \
-          ADMIN_PASSWORD=admin ADMIN_SESSION_SECRET=shots-secret-0123456789abcdef \
+          ADMIN_PASSWORD=admin ADMIN_SESSION_SECRET=shots-secret-abcdef0123456789abcdef0123456789 \
           npx next start -p 3000 > /tmp/server.log 2>&1 &
-          for i in $(seq 1 60); do curl -sf http://localhost:3000/ > /dev/null && break; sleep 2; done
+          ok=0
+          for i in $(seq 1 60); do curl -sf http://localhost:3000/ > /dev/null && ok=1 && break; sleep 2; done
+          if [ "$ok" != "1" ]; then echo "SERVER FAILED:"; cat /tmp/server.log; exit 1; fi
           node scripts/ui-shots.mjs http://localhost:3000
 
       - name: Upload screenshots

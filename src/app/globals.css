@@ -1321,3 +1321,71 @@ tr:hover td {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   CINEMATIC_ENHANCEMENTS=false — مفتاح تعطيل كامل (core storefront)
+   يُفعَّل عبر <body class="cinematic-off"> من layout.tsx.
+   يوقف: orbs/شبكة/3D/زجاج/لمعات/تدرجات نصية — مع بقاء التخطيط نفسه.
+   ═══════════════════════════════════════════════════════════════════ */
+.cinematic-off {
+  background: var(--bg);
+}
+.cinematic-off .hero-orb,
+.cinematic-off .hero-grid,
+.cinematic-off .card-shine {
+  display: none;
+}
+.cinematic-off .hero {
+  background: linear-gradient(180deg, #0a1410 0%, #07090d 100%);
+}
+.cinematic-off .hero-copy {
+  animation: none;
+}
+.cinematic-off .hero h1 {
+  background: none;
+  -webkit-text-fill-color: #ffffff;
+  color: #ffffff;
+}
+.cinematic-off .hero-art-inner {
+  animation: none;
+  transform: none;
+}
+.cinematic-off .hero-kicker,
+.cinematic-off .cart-badge,
+.cinematic-off .brand-logo,
+.cinematic-off .chip.active,
+.cinematic-off .btn-primary,
+.cinematic-off .btn-gold,
+.cinematic-off .btn-wa,
+.cinematic-off .vodafone {
+  box-shadow: none;
+}
+.cinematic-off .header {
+  background: rgba(8, 10, 14, 0.96);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.cinematic-off .feature,
+.cinematic-off .hero-badge,
+.cinematic-off .btn-ghost {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.cinematic-off .card {
+  background: var(--card);
+}
+.cinematic-off .card-img {
+  background: linear-gradient(160deg, #121a22, #0c1118);
+}
+.cinematic-off .price {
+  text-shadow: none;
+}
+.cinematic-off .fab.bot {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+.cinematic-off *,
+.cinematic-off *::before,
+.cinematic-off *::after {
+  animation: none !important;
+  transition: none !important;
+}

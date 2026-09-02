@@ -391,6 +391,32 @@ function stageStatic() {
     ? pass("PL17-UI-FOCUS", "platform", "P1", "a11y", "Visible keyboard focus (:focus-visible in CSS)", "observed")
     : fail("PL17-UI-FOCUS", "platform", "P1", "a11y", "Visible keyboard focus", ":focus-visible absent");
 
+  // ── PL18 CINEMATIC_ENHANCEMENTS kill switch: OFF يبقي المتجر الأساسي يعمل ──
+  const layoutSource = readFileSync(path.join(ROOT, "src/app/layout.tsx"), "utf8");
+  const switchOk =
+    layoutSource.includes("CINEMATIC_ENHANCEMENTS") &&
+    css.includes(".cinematic-off") &&
+    css.includes(".cinematic-off .hero-orb") &&
+    css.includes("animation: none") &&
+    /className=\{cinematic \? "" : "cinematic-off"\}/.test(layoutSource.replace(/\s+/g, " "));
+  switchOk
+    ? pass(
+        "PL18-CINEMATIC-SWITCH",
+        "platform",
+        "P1",
+        "ui",
+        "CINEMATIC_ENHANCEMENTS kill switch (OFF keeps core storefront)",
+        "env→body class→CSS overrides verified"
+      )
+    : fail(
+        "PL18-CINEMATIC-SWITCH",
+        "platform",
+        "P1",
+        "ui",
+        "CINEMATIC_ENHANCEMENTS kill switch",
+        "switch wiring incomplete"
+      );
+
   // ── Migrations additive (rollback safety) ──
   const mig = readFileSync(path.join(ROOT, "src/lib/migrations.ts"), "utf8");
   const destructive = /DROP TABLE|DROP COLUMN|RENAME TABLE|RENAME COLUMN/.test(mig);

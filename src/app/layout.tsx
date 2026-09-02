@@ -12,9 +12,12 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // CINEMATIC_ENHANCEMENTS — مفتاح تعطيل التصميم السينمائي (ON افتراضيًا).
+  // أي قيمة != "false" تُبقي التأثيرات؛ "false" = core storefront بدون حركة/زجاج/توهج.
+  const cinematic = process.env.CINEMATIC_ENHANCEMENTS !== "false";
   return (
     <html lang="ar" dir="rtl">
-      <body>
+      <body className={cinematic ? "" : "cinematic-off"}>
         <Header />
         <main>{children}</main>
         <Footer />

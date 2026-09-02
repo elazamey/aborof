@@ -1,12 +1,12 @@
 {
   "gate": "PRE_RELEASE_GATE",
   "version": 1,
-  "commit_sha": "f6afc15275f5334bbdb9a192020e753453ee0116",
+  "commit_sha": "66ea70be612a14888e65344f674ba4044d3f50eb",
   "branch": "arena/01a05f01-aborof",
-  "timestamp": "2026-09-02T01:21:39.578Z",
+  "timestamp": "2026-09-02T01:36:25.509Z",
   "summary": {
-    "total": 77,
-    "pass": 66,
+    "total": 78,
+    "pass": 67,
     "fail": 0,
     "not_configured": 11,
     "p0": {
@@ -16,8 +16,8 @@
       "not_configured": 3
     },
     "p1": {
-      "total": 52,
-      "pass": 44,
+      "total": 53,
+      "pass": 45,
       "fail": 0,
       "not_configured": 8
     }
@@ -171,7 +171,7 @@
       "layer": "perf",
       "name": "UI CSS budget (globals.css ≤ 40 kB)",
       "status": "PASS",
-      "detail": "27 kB",
+      "detail": "29 kB",
       "evidence": ""
     },
     {
@@ -212,6 +212,16 @@
       "name": "Visible keyboard focus (:focus-visible in CSS)",
       "status": "PASS",
       "detail": "observed",
+      "evidence": ""
+    },
+    {
+      "id": "PL18-CINEMATIC-SWITCH",
+      "area": "platform",
+      "priority": "P1",
+      "layer": "ui",
+      "name": "CINEMATIC_ENHANCEMENTS kill switch (OFF keeps core storefront)",
+      "status": "PASS",
+      "detail": "env→body class→CSS overrides verified",
       "evidence": ""
     },
     {
@@ -311,7 +321,7 @@
       "layer": "ui",
       "name": "Home page renders (200 + brand)",
       "status": "PASS",
-      "detail": "200 176ms",
+      "detail": "200 192ms",
       "evidence": ""
     },
     {
@@ -351,7 +361,7 @@
       "layer": "checkout",
       "name": "Order create (COD) + stock decrement",
       "status": "PASS",
-      "detail": "ORD-12098611-7cc592ff stock 40→38",
+      "detail": "ORD-12984422-8bcc6e44 stock 40→38",
       "evidence": ""
     },
     {
@@ -361,7 +371,7 @@
       "layer": "orders",
       "name": "Idempotency: same key → same order, stock decremented once",
       "status": "PASS",
-      "detail": "ORD-12098621-90c3a7d3 dup=true stock 38→37",
+      "detail": "ORD-12984432-9fab5564 dup=true stock 38→37",
       "evidence": ""
     },
     {
@@ -371,7 +381,7 @@
       "layer": "orders",
       "name": "Double submit (different keys) → two distinct orders",
       "status": "PASS",
-      "detail": "ORD-12098635-31aefdb8 ≠ ORD-12098642-2d569c4a",
+      "detail": "ORD-12984450-ca98ece9 ≠ ORD-12984457-dd7e323d",
       "evidence": ""
     },
     {
@@ -591,7 +601,7 @@
       "layer": "perf",
       "name": "TTFB budgets (local, <1500ms)",
       "status": "PASS",
-      "detail": "home=18ms product=13ms",
+      "detail": "home=17ms product=13ms",
       "evidence": ""
     },
     {
@@ -811,7 +821,7 @@
       "layer": "release",
       "name": "Release SHA pinned & recorded",
       "status": "PASS",
-      "detail": "HEAD=f6afc15275f5334bbdb9a192020e753453ee0116 branch=arena/01a05f01-aborof",
+      "detail": "HEAD=66ea70be612a14888e65344f674ba4044d3f50eb branch=arena/01a05f01-aborof",
       "evidence": ""
     }
   ]
