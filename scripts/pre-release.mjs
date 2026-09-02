@@ -1419,6 +1419,17 @@ function aggregate() {
     console.log("Blockers:");
     for (const b of blockers) console.log(`  - ${b.id} (${b.status}): ${b.reason.slice(0, 120)}`);
   }
+  // annotations لـ GitHub Actions — تُقرأ عبر check-runs API (السجلات قد تكون محجوبة)
+  if (decision === "RELEASE_BLOCKED") {
+    const reasons = blockers.map((b) => `${b.id}(${b.status})`).join(", ");
+    console.log(
+      `::error title=PRE_RELEASE_GATE::RELEASE_BLOCKED — ${counts.pass} PASS / ${counts.fail} FAIL / ${counts.not_configured} NC — blockers: ${reasons}`
+    );
+  } else {
+    console.log(
+      `::notice title=PRE_RELEASE_GATE::RELEASE_READY — ${counts.pass} PASS / ${counts.fail} FAIL / ${counts.not_configured} NC`
+    );
+  }
   console.log("─".repeat(60));
   return decision === "RELEASE_READY" ? 0 : 1;
 }
