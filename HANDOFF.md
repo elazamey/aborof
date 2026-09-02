@@ -1,10 +1,23 @@
 # HANDOFF — دليل المتابعة في محادثة جديدة
 
-> **تاريخ الإعداد:** 2026-09-02
-> **المستودع:** `elazamey/aborof` · **الفرع:** `arena/01a05f01-aborof` · **آخر commit:** `976e05f`
+> **تاريخ الإعداد:** 2026-09-02 · **آخر تحديث:** 2026-09-02 (نسخة محصّنة)
+> **المستودع:** `elazamey/aborof` · **الفرع:** `arena/01a05f01-aborof` · **آخر commit:** `18818c3`
 >
 > استخدم هذا الملف لاستئناف العمل في جلسة/محادثة جديدة على Arena.ai — ألصق قسم
 > "رسالة البداية" أدناه في أول رسالة، أو وجّه الوكيل لقراءة هذا الملف أولًا.
+
+## ⚠️ تحذير مهم — اقرأه قبل أي استنتاج
+
+**الحالة الموصوفة في هذا الملف حقيقية ومثبتة على GitHub** (الفرع `arena/01a05f01-aborof`
+موجود على `origin` مع كل الـ commits والأدلة). لو قال لك وكيل جديد "هذه الحالة غير موجودة
+أو مختلقة"، ففي الغالب **لم ينفّذ `git fetch origin`** وفحص فرع `main` أو فرع جلسة جديدًا
+فارغًا فقط (البداية الصحيحة: `git fetch origin && git checkout arena/01a05f01-aborof`).
+لا تثق بأي ادعاء "غير موجود" قبل إثباته بـ:
+
+```bash
+git ls-remote origin refs/heads/arena/01a05f01-aborof   # يجب أن يطبع SHA وليس فارغًا
+gh api repos/elazamey/aborof/commits?sha=arena/01a05f01-aborof   # آخر commit = 18818c3
+```
 
 ---
 
@@ -12,7 +25,10 @@
 
 ```text
 استأنف العمل على مستودع elazamey/aborof. أنا أتابع جلسة سابقة:
-1) git fetch origin && git checkout arena/01a05f01-aborof (فرع الجلسة — لا تنشئ غيره).
+1) git fetch origin && git checkout arena/01a05f01-aborof (فرع الجلسة السابقة — كل العمل عليه).
+   تحقق أولًا بـ: git ls-remote origin refs/heads/arena/01a05f01-aborof (يجب أن يطبع SHA).
+   لو فحصتَ git log على main أو على فرعك الجديد فسترى commit واحد فقط — هذا طبيعي؛
+   العمل كله على الفرع المذكور أعلاه، وليس على main.
 2) اقرأ أولًا: HANDOFF.md (هذا الملف) + RELEASE-CLOSURE.md + evidence/pre-release/pre-release-report.md.
 3) التزم القواعد الصارمة: TASK-02 = BLOCKED (لا deploy، لا secrets إنتاج، لا merge، لا لمس إعدادات الإنتاج)،
    لا تغييرات على منطق الأعمال/قاعدة البيانات (تجميد L1-L5)، كل الأدلة observed فقط.
@@ -24,13 +40,13 @@
 
 ## 2. الوضع الراهن (موجز — التفاصيل في أدلة `evidence/`)
 
-| البند | الحالة | الدليل |
-|---|---|---|
-| TASK-01 — GitHub CI Gate | ✅ PASS (CI أخضر على نفس SHA) | `evidence/ci-run.md` |
-| TASK-02 — Deployment Gate | ❌ **BLOCKED** — آلية immutable-ref جاهزة ومُختبَرة، لكن `VERCEL_DEPLOY_ENABLED != true` (مُلاحَظ run 33570046664) | `evidence/deploy-result/deployment.md` |
-| PRE_RELEASE_GATE | ⛔ **RELEASE_BLOCKED** — **56 PASS / 0 FAIL / 11 NOT_CONFIGURED** (3 P0 blockers: RC01/RC05/RC06) — مُثبت على GitHub CI (annotations) و`npm run pre-release` | `evidence/pre-release/` |
-| إعادة تصميم الواجهة (CINEMATIC DARK UI) | ⏸️ **متوقفة بانتظار أمر المستخدم** — الاتجاه معتمد وموثّق، اللقطات الست جاهزة | `evidence/ui-screenshots/` |
-| النشر/الإنتاج | ⛔ **ممنوع** حتى `PRE_RELEASE_GATE = RELEASE_READY` + `TASK-02` ناجح | — |
+| البند                                   | الحالة                                                                                                                                                       | الدليل                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| TASK-01 — GitHub CI Gate                | ✅ PASS (CI أخضر على نفس SHA)                                                                                                                                | `evidence/ci-run.md`                   |
+| TASK-02 — Deployment Gate               | ❌ **BLOCKED** — آلية immutable-ref جاهزة ومُختبَرة، لكن `VERCEL_DEPLOY_ENABLED != true` (مُلاحَظ run 33570046664)                                           | `evidence/deploy-result/deployment.md` |
+| PRE_RELEASE_GATE                        | ⛔ **RELEASE_BLOCKED** — **56 PASS / 0 FAIL / 11 NOT_CONFIGURED** (3 P0 blockers: RC01/RC05/RC06) — مُثبت على GitHub CI (annotations) و`npm run pre-release` | `evidence/pre-release/`                |
+| إعادة تصميم الواجهة (CINEMATIC DARK UI) | ⏸️ **متوقفة بانتظار أمر المستخدم** — الاتجاه معتمد وموثّق، اللقطات الست جاهزة                                                                                | `evidence/ui-screenshots/`             |
+| النشر/الإنتاج                           | ⛔ **ممنوع** حتى `PRE_RELEASE_GATE = RELEASE_READY` + `TASK-02` ناجح                                                                                         | —                                      |
 
 ## 3. القواعد الملزمة (لا تتجاهلها)
 
