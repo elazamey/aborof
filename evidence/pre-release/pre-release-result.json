@@ -1,17 +1,17 @@
 {
   "gate": "PRE_RELEASE_GATE",
   "version": 1,
-  "commit_sha": "66ea70be612a14888e65344f674ba4044d3f50eb",
+  "commit_sha": "bfb1fd627940b54779b77b3cf1ae035ccf5332f7",
   "branch": "arena/01a05f01-aborof",
-  "timestamp": "2026-09-02T01:36:25.509Z",
+  "timestamp": "2026-09-02T01:56:16.142Z",
   "summary": {
-    "total": 78,
-    "pass": 67,
+    "total": 87,
+    "pass": 76,
     "fail": 0,
     "not_configured": 11,
     "p0": {
-      "total": 25,
-      "pass": 22,
+      "total": 34,
+      "pass": 31,
       "fail": 0,
       "not_configured": 3
     },
@@ -89,7 +89,7 @@
       "area": "quality",
       "priority": "P1",
       "layer": "unit",
-      "name": "Vitest unit tests (107 passed)",
+      "name": "Vitest unit tests (129 passed)",
       "status": "PASS",
       "detail": "exit 0",
       "evidence": ""
@@ -261,7 +261,7 @@
       "layer": "perf",
       "name": "Bundle size budget (total static JS ≤ 1200 kB)",
       "status": "PASS",
-      "detail": "total=604 kB (12 chunks)",
+      "detail": "total=612 kB (12 chunks)",
       "evidence": ""
     },
     {
@@ -269,9 +269,9 @@
       "area": "reliability",
       "priority": "P1",
       "layer": "database",
-      "name": "Clean migration → schema v3",
+      "name": "Clean migration → schema v4",
       "status": "PASS",
-      "detail": "[migrate] OK — schema version 3 (required 3)",
+      "detail": "[migrate] OK — schema version 4 (required 4)",
       "evidence": ""
     },
     {
@@ -279,7 +279,7 @@
       "area": "reliability",
       "priority": "P1",
       "layer": "database",
-      "name": "Migration idempotency (rerun → v3)",
+      "name": "Migration idempotency (rerun → v4)",
       "status": "PASS",
       "detail": "second run OK, version stable",
       "evidence": ""
@@ -291,7 +291,7 @@
       "layer": "database",
       "name": "Constraints & indexes (NOT NULL, PK, idempotency index)",
       "status": "PASS",
-      "detail": "version=3 notnull=true idx=true pk=true",
+      "detail": "version=4 notnull=true idx=true pk=true",
       "evidence": ""
     },
     {
@@ -301,7 +301,7 @@
       "layer": "database",
       "name": "Backup/restore drill (copy → corrupt → restore → verify)",
       "status": "PASS",
-      "detail": "products=1 version=3",
+      "detail": "products=1 version=4",
       "evidence": ""
     },
     {
@@ -321,7 +321,7 @@
       "layer": "ui",
       "name": "Home page renders (200 + brand)",
       "status": "PASS",
-      "detail": "200 192ms",
+      "detail": "200 183ms",
       "evidence": ""
     },
     {
@@ -351,7 +351,7 @@
       "layer": "cart",
       "name": "Cart page renders (200)",
       "status": "PASS",
-      "detail": "200 12ms",
+      "detail": "200 11ms",
       "evidence": ""
     },
     {
@@ -361,7 +361,7 @@
       "layer": "checkout",
       "name": "Order create (COD) + stock decrement",
       "status": "PASS",
-      "detail": "ORD-12984422-8bcc6e44 stock 40→38",
+      "detail": "ORD-14174571-f75f31b0 stock 40→38",
       "evidence": ""
     },
     {
@@ -371,7 +371,7 @@
       "layer": "orders",
       "name": "Idempotency: same key → same order, stock decremented once",
       "status": "PASS",
-      "detail": "ORD-12984432-9fab5564 dup=true stock 38→37",
+      "detail": "ORD-14174580-9d155e54 dup=true stock 38→37",
       "evidence": ""
     },
     {
@@ -381,7 +381,7 @@
       "layer": "orders",
       "name": "Double submit (different keys) → two distinct orders",
       "status": "PASS",
-      "detail": "ORD-12984450-ca98ece9 ≠ ORD-12984457-dd7e323d",
+      "detail": "ORD-14174593-e2792e70 ≠ ORD-14174600-637c64b5",
       "evidence": ""
     },
     {
@@ -601,7 +601,7 @@
       "layer": "perf",
       "name": "TTFB budgets (local, <1500ms)",
       "status": "PASS",
-      "detail": "home=17ms product=13ms",
+      "detail": "home=16ms product=13ms",
       "evidence": ""
     },
     {
@@ -612,6 +612,96 @@
       "name": "Request-ID echo (proxy → response header)",
       "status": "PASS",
       "detail": "observed",
+      "evidence": ""
+    },
+    {
+      "id": "I01-IDENTITY-AUTH",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Identity endpoints require auth (401 without cookie)",
+      "status": "PASS",
+      "detail": "401",
+      "evidence": ""
+    },
+    {
+      "id": "I02-IDENTITY-EMAIL-VERIFY",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Email verification (OTP start→confirm→verified)",
+      "status": "PASS",
+      "detail": "emailVerified=true",
+      "evidence": ""
+    },
+    {
+      "id": "I03-IDENTITY-REAUTH",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Re-authentication required for identity change (403)",
+      "status": "PASS",
+      "detail": "403",
+      "evidence": ""
+    },
+    {
+      "id": "I04-IDENTITY-UNIQUENESS",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Duplicate identity value blocked (409)",
+      "status": "PASS",
+      "detail": "409",
+      "evidence": ""
+    },
+    {
+      "id": "I05-IDENTITY-CHANGE-FLOW",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Controlled email change full cycle (request→wrong OTP→verify→apply)",
+      "status": "PASS",
+      "detail": "202/400/200/200",
+      "evidence": ""
+    },
+    {
+      "id": "I06-IDENTITY-SESSION-REVOKE",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Other-device session revoked after identity change (401)",
+      "status": "PASS",
+      "detail": "401",
+      "evidence": ""
+    },
+    {
+      "id": "I07-IDENTITY-RECOVERY-NO-ENUM",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Recovery: uniform response (no enumeration) + wrong OTP rejected",
+      "status": "PASS",
+      "detail": "200/200/400",
+      "evidence": ""
+    },
+    {
+      "id": "I08-IDENTITY-RATELIMIT",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Rate limit on recovery OTP (429)",
+      "status": "PASS",
+      "detail": "429 after ≤7 rapid requests",
+      "evidence": ""
+    },
+    {
+      "id": "I09-IDENTITY-PASSWORD-CHANGE",
+      "area": "security",
+      "priority": "P0",
+      "layer": "identity",
+      "name": "Password change: re-auth enforced + success",
+      "status": "PASS",
+      "detail": "403/200",
       "evidence": ""
     },
     {
@@ -821,7 +911,7 @@
       "layer": "release",
       "name": "Release SHA pinned & recorded",
       "status": "PASS",
-      "detail": "HEAD=66ea70be612a14888e65344f674ba4044d3f50eb branch=arena/01a05f01-aborof",
+      "detail": "HEAD=bfb1fd627940b54779b77b3cf1ae035ccf5332f7 branch=arena/01a05f01-aborof",
       "evidence": ""
     }
   ]

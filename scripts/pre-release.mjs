@@ -40,6 +40,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 // قيم اختبار محلية فقط — تُمرَّر للخادم الذي تفتحه البوابة، ولا تُطبع ولا تُرفع.
 const ADMIN_PW = "gate-admin-password-000";
 const ADMIN_SECRET = "gate-session-secret-0123456789abcdef0123";
+const ADMIN_EMAIL = "owner@gate.local"; // IDENTITY-HARDENING-01: بريد حساب المالك في بيئة البوابة
 const PROD_ENV_NAMES = [
   "VERCEL_TOKEN",
   "VERCEL_ORG_ID",
@@ -507,14 +508,14 @@ async function stageDb() {
 
   // R01: clean migration
   const m1 = runCmd("node", ["--experimental-strip-types", "scripts/migrate-check.mts"], { env });
-  const cleanOk = m1.code === 0 && /schema version 3 \(required 3\)/.test(m1.stdout);
+  const cleanOk = m1.code === 0 && /schema version 4 \(required 4\)/.test(m1.stdout);
   cleanOk
     ? pass(
         "R01-MIGRATE",
         "reliability",
         "P1",
         "database",
-        "Clean migration → schema v3",
+        "Clean migration → schema v4",
         m1.stdout.trim().split("\n")[0]
       )
     : fail(
@@ -522,20 +523,20 @@ async function stageDb() {
         "reliability",
         "P1",
         "database",
-        "Clean migration → schema v3",
+        "Clean migration → schema v4",
         (m1.stdout + m1.stderr).slice(-300)
       );
 
   // R02: idempotency
   const m2 = runCmd("node", ["--experimental-strip-types", "scripts/migrate-check.mts"], { env });
-  const idemOk = m2.code === 0 && /schema version 3 \(required 3\)/.test(m2.stdout);
+  const idemOk = m2.code === 0 && /schema version 4 \(required 4\)/.test(m2.stdout);
   idemOk
     ? pass(
         "R02-MIGRATE-IDEM",
         "reliability",
         "P1",
         "database",
-        "Migration idempotency (rerun → v3)",
+        "Migration idempotency (rerun → v4)",
         "second run OK, version stable"
       )
     : fail(
@@ -562,7 +563,7 @@ async function stageDb() {
       const pk = products.find((r) => r.name === "id" && Number(r.pk) === 1);
       const meta = await c.execute("SELECT version FROM schema_meta WHERE id=1");
       const v = Number(meta.rows[0]?.version);
-      const ok = notNull && hasIdx && !!pk && v === 3;
+      const ok = notNull && hasIdx && !!pk && v === 4;
       ok
         ? pass(
             "R03-SCHEMA",
@@ -602,7 +603,7 @@ async function stageDb() {
     const c2 = createClient({ url: `file:${db2}` });
     const count = await c2.execute("SELECT COUNT(*) n FROM products");
     const ver = await c2.execute("SELECT version FROM schema_meta WHERE id=1");
-    const restored = Number(count.rows[0].n) > 0 && Number(ver.rows[0].version) === 3;
+    const restored = Number(count.rows[0].n) > 0 && Number(ver.rows[0].version) === 4;
     c2.close();
     restored
       ? pass(
@@ -666,6 +667,10 @@ function startServer() {
       TURSO_DATABASE_URL: `file:${dbPath}`,
       ADMIN_PASSWORD: ADMIN_PW,
       ADMIN_SESSION_SECRET: ADMIN_SECRET,
+      // IDENTITY-HARDENING-01 (P0): بيئة اختبار البوابة — hint للمطوّر فقط
+      ADMIN_EMAIL: ADMIN_EMAIL,
+      IDENTITY_DEV_OTP_HINT: "1",
+      IDENTITY_SECURITY_DELAY_MINUTES: "0",
     };
     // detached: نحتاج قتل مجموعة العمليات كاملة (npx + next-server) عند الإيقاف
     // وإلا تبقى عمليات يتيمة تمسك المنفذ (كانت تسبب تلوث تشغيلات لاحقة).
@@ -1344,6 +1349,229 @@ async function stageHttp() {
   ridOk
     ? pass("RC07-RID", "release", "P0", "observability", "Request-ID echo (proxy → response header)", "observed")
     : fail("RC07-RID", "release", "P0", "observability", "Request-ID echo", `got=${rid.headers.get("x-request-id")}`);
+
+  // ── IDENTITY-HARDENING-01 (P0 Security): دورة الهوية الكاملة عبر الـAPI ──
+  // بيئة الخادم: ADMIN_EMAIL + IDENTITY_DEV_OTP_HINT=1 + IDENTITY_SECURITY_DELAY_MINUTES=0
+  const iH = (cookie) => ({ "Content-Type": "application/json", cookie });
+  const iPost = (pathname, body, ip, cookie) =>
+    http(pathname, {
+      method: "POST",
+      headers: cookie ? iH(cookie) : { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      ip,
+    });
+
+  // I01: حالة الهوية تتطلب مصادقة
+  const i01 = await http("/api/identity/status", { ip: "10.0.2.2" });
+  i01.status === 401
+    ? pass(
+        "I01-IDENTITY-AUTH",
+        "security",
+        "P0",
+        "identity",
+        "Identity endpoints require auth (401 without cookie)",
+        `${i01.status}`
+      )
+    : fail("I01-IDENTITY-AUTH", "security", "P0", "identity", "Identity auth", `status=${i01.status}`);
+
+  // I02: توثيق البريد (start → OTP → confirm) — شرط مسبق لأي تغيير
+  const iv1 = await iPost("/api/identity/verify", { mode: "start", kind: "email" }, "10.0.2.2", ck.value);
+  const ivHint = iv1.json?.devOtpHint;
+  const iv2 = await iPost(
+    "/api/identity/verify",
+    { mode: "confirm", kind: "email", code: ivHint },
+    "10.0.2.2",
+    ck.value
+  );
+  const iv3 = await http("/api/identity/status", { ip: "10.0.2.2", headers: { cookie: ck.value } });
+  const emailVerifiedOk =
+    iv1.status === 200 && Boolean(ivHint) && iv2.status === 200 && iv3.json?.emailVerified === true;
+  emailVerifiedOk
+    ? pass(
+        "I02-IDENTITY-EMAIL-VERIFY",
+        "security",
+        "P0",
+        "identity",
+        "Email verification (OTP start→confirm→verified)",
+        "emailVerified=true"
+      )
+    : fail(
+        "I02-IDENTITY-EMAIL-VERIFY",
+        "security",
+        "P0",
+        "identity",
+        "Email verification",
+        `start=${iv1.status} confirm=${iv2.status} verified=${iv3.json?.emailVerified}`
+      );
+
+  // I03: تغيير البريد بدون إعادة مصادثة → 403
+  const i03 = await iPost(
+    "/api/identity/request-change",
+    { kind: "email", newValue: "x@gate.local", password: "wrong-password" },
+    "10.0.2.3",
+    ck.value
+  );
+  i03.status === 403
+    ? pass(
+        "I03-IDENTITY-REAUTH",
+        "security",
+        "P0",
+        "identity",
+        "Re-authentication required for identity change (403)",
+        `${i03.status}`
+      )
+    : fail("I03-IDENTITY-REAUTH", "security", "P0", "identity", "Re-authentication", `status=${i03.status}`);
+
+  // I04: بريد مكرر (نفس القيمة الحالية) → 409
+  const i04 = await iPost(
+    "/api/identity/request-change",
+    { kind: "email", newValue: ADMIN_EMAIL || "owner@test.local", password: ADMIN_PW },
+    "10.0.2.3",
+    ck.value
+  );
+  i04.status === 409
+    ? pass(
+        "I04-IDENTITY-UNIQUENESS",
+        "security",
+        "P0",
+        "identity",
+        "Duplicate identity value blocked (409)",
+        `${i04.status}`
+      )
+    : fail("I04-IDENTITY-UNIQUENESS", "security", "P0", "identity", "Uniqueness", `status=${i04.status}`);
+
+  // جلسة جهاز ثانٍ — يجب أن تُسحب بعد تنفيذ التغيير
+  const iLoginB = await postJson("/api/admin/login", { password: ADMIN_PW }, "10.0.2.5");
+  const ckB = cookieFrom(iLoginB).value;
+
+  // I05: الدورة الكاملة — طلب → OTP خاطئ مرفوض → OTP صحيح → تنفيذ → بريد جديد موثق
+  const i05a = await iPost(
+    "/api/identity/request-change",
+    { kind: "email", newValue: `gate-${Date.now()}@change.local`, password: ADMIN_PW },
+    "10.0.2.4",
+    ck.value
+  );
+  const iReqId = i05a.json?.requestId;
+  const i05Hint = i05a.json?.devOtpHint;
+  const i05b = await iPost("/api/identity/verify-otp", { requestId: iReqId, code: "000000" }, "10.0.2.4", ck.value);
+  const i05c = await iPost("/api/identity/verify-otp", { requestId: iReqId, code: i05Hint }, "10.0.2.4", ck.value);
+  const i05d = await iPost("/api/identity/change-action", { requestId: iReqId, action: "apply" }, "10.0.2.4", ck.value);
+  const i05e = await http("/api/identity/status", { ip: "10.0.2.4", headers: { cookie: ck.value } });
+  const i05ok =
+    i05a.status === 202 &&
+    i05b.status === 400 &&
+    i05c.status === 200 &&
+    i05d.status === 200 &&
+    i05e.json?.emailVerified === true;
+  i05ok
+    ? pass(
+        "I05-IDENTITY-CHANGE-FLOW",
+        "security",
+        "P0",
+        "identity",
+        "Controlled email change full cycle (request→wrong OTP→verify→apply)",
+        `202/${i05b.status}/${i05c.status}/${i05d.status}`
+      )
+    : fail(
+        "I05-IDENTITY-CHANGE-FLOW",
+        "security",
+        "P0",
+        "identity",
+        "Controlled email change",
+        `req=${i05a.status} wrongOtp=${i05b.status} verify=${i05c.status} apply=${i05d.status}`
+      );
+
+  // I06: جلسة الجهاز الآخر أُبطلت بعد تغيير الهوية
+  const i06 = await http("/api/identity/status", { ip: "10.0.2.5", headers: { cookie: ckB } });
+  i06.status === 401
+    ? pass(
+        "I06-IDENTITY-SESSION-REVOKE",
+        "security",
+        "P0",
+        "identity",
+        "Other-device session revoked after identity change (401)",
+        `${i06.status}`
+      )
+    : fail("I06-IDENTITY-SESSION-REVOKE", "security", "P0", "identity", "Session revocation", `status=${i06.status}`);
+
+  // I07: الاسترداد — استجابة موحدة (لا enumeration) + OTP خاطئ مرفوض
+  const i07a = await iPost(
+    "/api/identity/recovery",
+    { mode: "request", email: ADMIN_EMAIL || "owner@test.local" },
+    "10.0.2.6"
+  );
+  const i07b = await iPost("/api/identity/recovery", { mode: "request", email: "nobody-xyz@test.local" }, "10.0.2.6");
+  const i07c = await iPost(
+    "/api/identity/recovery",
+    { mode: "confirm", email: ADMIN_EMAIL || "owner@test.local", code: "999999", newPassword: "xxxxxxxxxxxxxx" },
+    "10.0.2.6"
+  );
+  const enumOk = i07a.status === 200 && i07b.status === 200 && i07c.status === 400;
+  enumOk
+    ? pass(
+        "I07-IDENTITY-RECOVERY-NO-ENUM",
+        "security",
+        "P0",
+        "identity",
+        "Recovery: uniform response (no enumeration) + wrong OTP rejected",
+        `${i07a.status}/${i07b.status}/${i07c.status}`
+      )
+    : fail(
+        "I07-IDENTITY-RECOVERY-NO-ENUM",
+        "security",
+        "P0",
+        "identity",
+        "Recovery no-enumeration",
+        `${i07a.status}/${i07b.status}/${i07c.status}`
+      );
+
+  // I08: rate limit على الاسترداد (5/15د) → 429
+  let i08 = 0;
+  for (let i = 0; i < 7; i++) {
+    i08 = (await iPost("/api/identity/recovery", { mode: "request", email: "any@test.local" }, "10.0.2.7")).status;
+    if (i08 === 429) break;
+  }
+  i08 === 429
+    ? pass(
+        "I08-IDENTITY-RATELIMIT",
+        "security",
+        "P0",
+        "identity",
+        "Rate limit on recovery OTP (429)",
+        `429 after ≤7 rapid requests`
+      )
+    : fail("I08-IDENTITY-RATELIMIT", "security", "P0", "identity", "Recovery rate limit", `last=${i08}`);
+
+  // I09: تغيير كلمة المرور — كلمة خاطئة مرفوضة، صحيحة → ok
+  const i09a = await iPost(
+    "/api/identity/change-password",
+    { currentPassword: "wrong", newPassword: "correct-horse-12345" },
+    "10.0.2.8",
+    ck.value
+  );
+  const i09b = await iPost(
+    "/api/identity/change-password",
+    { currentPassword: ADMIN_PW, newPassword: "correct-horse-12345" },
+    "10.0.2.8",
+    ck.value
+  );
+  i09a.status === 403 && i09b.status === 200
+    ? pass(
+        "I09-IDENTITY-PASSWORD-CHANGE",
+        "security",
+        "P0",
+        "identity",
+        "Password change: re-auth enforced + success",
+        `${i09a.status}/${i09b.status}`
+      )
+    : fail(
+        "I09-IDENTITY-PASSWORD-CHANGE",
+        "security",
+        "P0",
+        "identity",
+        "Password change",
+        `${i09a.status}/${i09b.status}`
+      );
 
   // ── E2E01 critical journey (already exercised above; summarize as one gate) ──
   const e2eOk = [orderOk, idemOk, authOk, authzOk, lifecycleOk, crudOk].every(Boolean);

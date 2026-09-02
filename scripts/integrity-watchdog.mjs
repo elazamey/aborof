@@ -19,7 +19,7 @@
  */
 import { createClient } from "@libsql/client";
 
-const REQUIRED_SCHEMA_VERSION = 3; // طابق src/lib/migrations.ts (v1..v3)
+const REQUIRED_SCHEMA_VERSION = 4; // طابق src/lib/migrations.ts (v1..v4)
 const VALID_STATUSES = ["جديد", "قيد المراجعة", "مؤكد", "قيد الشحن", "مكتمل", "ملغى"];
 
 function parseArgs() {

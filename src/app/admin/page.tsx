@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { CATEGORIES } from "@/lib/seed";
+import SecurityCenter from "./SecurityCenter";
 
 const STATUSES = ["جديد", "قيد المراجعة", "مؤكد", "قيد الشحن", "مكتمل", "ملغى"];
 
 export default function Admin() {
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
-  const [tab, setTab] = useState<"products" | "orders">("products");
+  const [tab, setTab] = useState<"products" | "orders" | "security">("products");
   const [products, setProducts] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
@@ -163,9 +164,14 @@ export default function Admin() {
         <button className={`chip${tab === "orders" ? " active" : ""}`} onClick={() => setTab("orders")}>
           الطلبات ({orders.length})
         </button>
+        <button className={`chip${tab === "security" ? " active" : ""}`} onClick={() => setTab("security")}>
+          🛡️ الأمان
+        </button>
       </div>
       {msg && <div className="alert">{msg}</div>}
-      {tab === "products" ? (
+      {tab === "security" ? (
+        <SecurityCenter />
+      ) : tab === "products" ? (
         <div className="cart-wrap">
           <div className="panel">
             <h3>المنتجات الحالية</h3>

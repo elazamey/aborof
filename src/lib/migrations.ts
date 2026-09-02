@@ -106,6 +106,87 @@ export const MIGRATIONS: Migration[] = [
       await c.execute("CREATE INDEX IF NOT EXISTS idx_orders_idempotency_key ON orders(idempotency_key)");
     },
   },
+  {
+    version: 4,
+    name: "identity-hardening-01",
+    up: async (c) => {
+      // IDENTITY-HARDENING-01 (P0 Security): users / verification_tokens /
+      // identity_change_requests / security_events / sessions — إضافي بحت.
+      // (المخطط مضمَّن هنا — لا استيرادات نسبية — حتى يعمل migrate-check
+      //  مع node --experimental-strip-types الذي يتطلب امتدادًا صريحًا.)
+      await c.batch(
+        [
+          `CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            email_normalized TEXT NOT NULL UNIQUE,
+            email_verified_at INTEGER,
+            phone TEXT,
+            phone_normalized TEXT UNIQUE,
+            phone_verified_at INTEGER,
+            password_hash TEXT,
+            role TEXT NOT NULL DEFAULT 'owner',
+            tenant_id TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_login_at INTEGER
+          )`,
+          `CREATE TABLE IF NOT EXISTS verification_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            token_hash TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            max_attempts INTEGER NOT NULL DEFAULT 5,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            consumed_at INTEGER,
+            created_at INTEGER NOT NULL,
+            request_id TEXT,
+            target TEXT
+          )`,
+          `CREATE TABLE IF NOT EXISTS identity_change_requests (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            current_value_hash TEXT NOT NULL,
+            new_value_normalized TEXT NOT NULL,
+            status TEXT NOT NULL,
+            requested_at INTEGER NOT NULL,
+            verified_at INTEGER,
+            security_delay_until INTEGER,
+            expires_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            created_at INTEGER NOT NULL,
+            request_id TEXT
+          )`,
+          `CREATE TABLE IF NOT EXISTS security_events (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            event TEXT NOT NULL,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            ip TEXT,
+            request_id TEXT,
+            created_at INTEGER NOT NULL
+          )`,
+          `CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            label TEXT,
+            created_at INTEGER NOT NULL,
+            last_seen_at INTEGER NOT NULL,
+            revoked_at INTEGER
+          )`,
+          `CREATE INDEX IF NOT EXISTS idx_verification_tokens_user ON verification_tokens(user_id, kind)`,
+          `CREATE INDEX IF NOT EXISTS idx_identity_change_user ON identity_change_requests(user_id, status)`,
+          `CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at)`,
+          `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+        ],
+        "write"
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
