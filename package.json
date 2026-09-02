@@ -7,13 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "routes:inventory": "node scripts/route-inventory.mjs --check"
+    "typecheck": "tsc --noEmit",
+    "routes:inventory": "node scripts/route-inventory.mjs --check",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "security:gates": "node scripts/security-gates.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
     "next": "^16.3.2",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -21,6 +25,7 @@
     "@types/react-dom": "^18",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.2",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

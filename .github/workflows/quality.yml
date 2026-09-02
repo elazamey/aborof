@@ -11,12 +11,13 @@ concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# أقل صلاحيات ممكنة على مستوى الـ Workflow؛ تُمنح صلاحيات إضافية لكل خطوة عند الحاجة.
 permissions:
   contents: read
 
 jobs:
-  quality:
-    name: Lint, Typecheck, Tests and Build
+  gates:
+    name: Audit, Lint, Typecheck, Security Gates, Tests, Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -32,52 +33,54 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      # تثبيت حتمي اعتمادًا على package-lock.json كمصدر وحيد.
+      - name: Install dependencies (npm ci)
         run: npm ci --no-audit --no-fund
+
+      # بوابة الاعتماديات: يفشل عند أي ثغرة High/Critical في حزم الإنتاج.
+      - name: Dependency audit (High/Critical blocks)
+        run: npm audit --omit=dev --audit-level=high
 
       - name: ESLint
         run: npm run lint
 
-      - name: TypeScript
-        run: npx tsc --noEmit
+      - name: TypeScript type-check
+        run: npm run typecheck
+
+      - name: Static security gates
+        run: npm run security:gates
+
+      - name: Migration files are in sync
+        run: node scripts/sync-migrations.mjs --check
 
       - name: Route inventory and coverage
         run: npm run routes:inventory
 
-      # لا يفشل إذا لم يضف المشروع test script بعد؛ بعد إضافة الاختبارات
-      # يمكن إزالة --if-present لتحويله إلى شرط إلزامي.
-      - name: Tests
-        run: npm run test --if-present
+      # الاختبارات إلزامية: لا --if-present، أي فشل يوقف الـ Pipeline.
+      - name: Unit and integration tests
+        run: npm test
 
       - name: Production build
         run: npm run build
 
-  dependency-audit:
-    name: Dependency Audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # حفظ نتائج البناء كأثر للمراجعة والربط مع الـ SHA.
+      - name: Upload build summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      # يفشل الـ PR عند وجود High أو Critical.
-      - name: npm audit
-        run: npm audit --omit=dev --audit-level=high
+          name: build-summary-${{ github.sha }}
+          path: |
+            .next/
+            !.next/cache
+          retention-days: 7
+          if-no-files-found: ignore
 
   secret-scan:
-    name: Basic Secret Scan
+    name: Secret Scan
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout full history
@@ -86,16 +89,22 @@ jobs:
           fetch-depth: 0
 
       # فحص مجاني أولي للأنماط الأكثر خطورة. لا يغني عن GitHub Secret Scanning.
+      # يُستثنى ملف الـ workflow فقط لأنه يعرّف الأنماط؛ أي نمط اصطناعي في
+      # الاختبارات يُبنى وقت التشغيل فلا يظهر كنص ثابت.
       - name: Scan tracked files for obvious secrets
         shell: bash
         run: |
           set -euo pipefail
           patterns='(AIzaSy[0-9A-Za-z_-]{20,}|gsk_[0-9A-Za-z_-]{20,}|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY)'
           found=0
-          if git grep --cached -n -I -E "$patterns" -- . ':!package-lock.json'; then
+          if git grep --cached -n -I -E "$patterns" -- . \
+              ':!package-lock.json' \
+              ':!.github/workflows/quality.yml' ; then
             found=1
           fi
-          if git grep --cached -n -I -E 'TURSO_AUTH_TOKEN=[A-Za-z0-9_-]{20,}' -- . ':!package-lock.json' ':!.github/workflows/quality.yml' | grep -v 'TURSO_AUTH_TOKEN=your_turso_token'; then
+          if git grep --cached -n -I -E 'TURSO_AUTH_TOKEN=[A-Za-z0-9_-]{20,}' -- . \
+              ':!package-lock.json' ':!.github/workflows/quality.yml' \
+              | grep -v 'TURSO_AUTH_TOKEN=your_turso_token'; then
             found=1
           fi
           if [ "$found" -eq 1 ]; then

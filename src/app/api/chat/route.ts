@@ -1,7 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { getProducts, getFaq, db, ensureSchema } from "@/lib/db";
 import { STORE } from "@/lib/seed";
 import { rateLimit } from "@/lib/rate-limit";
+import { redactSecrets } from "@/lib/errors";
+import { metrics } from "@/lib/observability/metrics";
+import { chatRequestContract, firstZodIssue } from "@/lib/validation/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +27,7 @@ async function buildContext() {
 function systemPrompt(list: string, f: string) {
   return `أنتِ "سيليا"، مساعدة خدمة العملاء الرسمية لمتجر "${STORE.name}" ${STORE.tagline} في مصر.
 
-شخصيتك: فتاة مصرية ودودة، مهذبة، مرحة قليلاً، سريعة ومباشرة. تتحدثين بالعربية المصرية البسيطة المفهومة. تستخدمين إيموجي بسيط أحياناً 🧼✨ بدون مبالغة. ردودك قصيرة (2-5 أسطر) إلا لو العميل طلب تفاصيل.
+شخصيتك: فتاة مصرية ودودة، مهذبة، مرحة قليلاً، سريعة ومباشرة. تتحدثين بالعربية المصرية البسيطة المفهومة. تستخدمين إيموجي بسيط أحيانًا 🧼✨ بدون مبالغة. ردودك قصيرة (2-5 أسطر) إلا لو العميل طلب تفاصيل.
 
 مهامك: تعريف العملاء بالمنتجات والأسعار، ترشيح المنتج المناسب، شرح طريقة الطلب والدفع، والرد على الاستفسارات.
 
@@ -42,7 +46,7 @@ ${list}
 ${f}`;
 }
 
-async function callGemini(sys: string, messages: Msg[], key: string) {
+async function callGemini(sys: string, messages: Msg[], key: string): Promise<string> {
   const models = process.env.GEMINI_MODEL
     ? [process.env.GEMINI_MODEL]
     : ["gemini-flash-latest", "gemini-3.5-flash", "gemini-flash-lite-latest"];
@@ -59,28 +63,23 @@ async function callGemini(sys: string, messages: Msg[], key: string) {
             role: m.role === "assistant" ? "model" : "user",
             parts: [{ text: m.content }],
           })),
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1200,
-            // إيقاف وضع التفكير حتى لا يستهلك التوكنز ويسرّع الرد
-            thinkingConfig: { thinkingBudget: 0 },
-          },
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1200, thinkingConfig: { thinkingBudget: 0 } },
         }),
       }
     );
     if (res.ok) {
       const j = await res.json();
-      const t = j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("") ?? "";
+      const t = j?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text).join("") ?? "";
       if (t.trim()) return t.trim();
-      lastErr = "empty";
+      lastErr = "empty response";
     } else {
       lastErr = await res.text();
     }
   }
-  throw new Error("Gemini: " + lastErr.slice(0, 200));
+  throw new Error("Gemini: " + redactSecrets(lastErr.slice(0, 200)));
 }
 
-async function callGroq(sys: string, messages: Msg[], key: string) {
+async function callGroq(sys: string, messages: Msg[], key: string): Promise<string> {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -91,7 +90,7 @@ async function callGroq(sys: string, messages: Msg[], key: string) {
       messages: [{ role: "system", content: sys }, ...messages],
     }),
   });
-  if (!res.ok) throw new Error("Groq: " + (await res.text()).slice(0, 200));
+  if (!res.ok) throw new Error("Groq: " + redactSecrets((await res.text()).slice(0, 200)));
   const j = await res.json();
   return (j?.choices?.[0]?.message?.content ?? "").trim();
 }
@@ -106,8 +105,11 @@ async function localAnswer(q: string) {
   const bestFaq = faq.map((f) => ({ f, s: score(f.question) })).sort((a, b) => b.s - a.s)[0];
   if (bestFaq && bestFaq.s >= 1) return bestFaq.f.answer;
 
-  const hits = products.map((p) => ({ p, s: score(p.name + " " + p.category + " " + p.description) }))
-    .filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 3);
+  const hits = products
+    .map((p) => ({ p, s: score(p.name + " " + p.category + " " + p.description) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 3);
   if (hits.length)
     return (
       "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n" +
@@ -118,42 +120,56 @@ async function localAnswer(q: string) {
   return `أهلاً بحضرتك في ${STORE.name} 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على ${STORE.phone}.`;
 }
 
-export async function POST(req: NextRequest) {
-  const limit = rateLimit(req, "chat", 30, 10 * 60 * 1000);
-  if (!limit.ok) return NextResponse.json({ error: "تم تجاوز حد الرسائل، حاول بعد قليل" }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
-  try {
-    const { messages = [] } = (await req.json()) as { messages: Msg[] };
-    const clean = messages.slice(-12).filter((m) => m?.content?.trim().length <= 1000);
-    const last = clean[clean.length - 1]?.content ?? "";
-    const { list, f } = await buildContext();
-    const sys = systemPrompt(list, f);
+export const POST = apiHandler("/api/chat", async (req) => {
+  const limit = await rateLimit(req, "chat", 30, 10 * 60 * 1000);
+  if (!limit.ok) throw Errors.rateLimited(limit.retryAfter);
 
-    const gemini = process.env.GEMINI_API_KEY;
-    const groq = process.env.GROQ_API_KEY;
-    let reply = "";
-    let source = "local";
+  const raw = await readJson(req, 40_000);
+  const parsed = chatRequestContract.safeParse(raw);
+  if (!parsed.success) throw Errors.validationFailed(firstZodIssue(parsed.error));
 
-    if (gemini) {
-      try { reply = await callGemini(sys, clean, gemini); source = "gemini"; } catch (e) { console.error(e); }
+  // آخر 12 رسالة فقط، مع التأكد أنها ضمن الحد الأقصى للطول.
+  const clean = parsed.data.messages.slice(-12);
+  const last = clean[clean.length - 1]?.content ?? "";
+
+  const { list, f } = await buildContext();
+  const sys = systemPrompt(list, f);
+
+  const gemini = process.env.GEMINI_API_KEY;
+  const groq = process.env.GROQ_API_KEY;
+  let reply = "";
+  let source = "local";
+
+  if (gemini) {
+    try {
+      reply = await callGemini(sys, clean, gemini);
+      source = "gemini";
+    } catch (e) {
+      metrics.recordAiFailure("gemini");
+      console.error("chat gemini failed:", redactSecrets(String((e as Error)?.message ?? e)));
     }
-    if (!reply && groq) {
-      try { reply = await callGroq(sys, clean, groq); source = "groq"; } catch (e) { console.error(e); }
-    }
-    if (!reply) reply = await localAnswer(last);
-
-    const c = db();
-    if (c) {
-      try {
-        await ensureSchema();
-        await c.execute({ sql: "INSERT INTO chat_logs (question,answer) VALUES (?,?)", args: [last, reply] });
-      } catch {}
-    }
-
-    return NextResponse.json({ reply, source });
-  } catch (e: any) {
-    return NextResponse.json(
-      { reply: `حصل خطأ بسيط 😅 جرّب تاني أو كلمنا واتساب على ${STORE.phone}`, error: String(e?.message) },
-      { status: 200 }
-    );
   }
-}
+  if (!reply && groq) {
+    try {
+      reply = await callGroq(sys, clean, groq);
+      source = "groq";
+    } catch (e) {
+      metrics.recordAiFailure("groq");
+      console.error("chat groq failed:", redactSecrets(String((e as Error)?.message ?? e)));
+    }
+  }
+  if (!reply) reply = await localAnswer(last);
+
+  const c = db();
+  if (c) {
+    try {
+      await ensureSchema();
+      await c.execute({ sql: "INSERT INTO chat_logs (question,answer) VALUES (?,?)", args: [last, reply] });
+    } catch (e) {
+      console.error("chat log failed:", redactSecrets(String((e as Error)?.message ?? e)));
+    }
+  }
+
+  // النجاح فقط هو ما يعيد 200؛ أي فشل غير متوقع يمر عبر الغلاف المركزي.
+  return NextResponse.json({ reply, source });
+});

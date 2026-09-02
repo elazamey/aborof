@@ -52,7 +52,9 @@ git push -u origin main
 | `TURSO_AUTH_TOKEN` | التوكن من Turso |
 | `GEMINI_API_KEY` | مفتاح Gemini (اختياري) |
 | `GROQ_API_KEY` | مفتاح Groq (اختياري) |
-| `ADMIN_PASSWORD` | كلمة مرور لوحة التحكم |
+| `ADMIN_PASSWORD` | كلمة مرور لوحة التحكم (12 حرفًا على الأقل) |
+| `ADMIN_SESSION_SECRET` | سر عشوائي طويل لتوقيع الجلسات (32 حرفًا) |
+| `DIAGNOSTICS_KEY` | (اختياري) مفتاح مستقل تمامًا عن سر الجلسات لنقطة التشخيص |
 
 3. اضغط **Deploy** ← الموقع يشتغل على رابط `https://اسم-المشروع.vercel.app` مجاناً.
 
