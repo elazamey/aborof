@@ -4,6 +4,7 @@ import { STORE } from "@/lib/seed";
 import { rateLimit } from "@/lib/rate-limit";
 import { localAnswer } from "@/lib/chat-local";
 import { log } from "@/lib/log";
+import { CircuitBreaker } from "@/lib/reliability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,6 +103,16 @@ async function callGroq(sys: string, messages: Msg[], key: string) {
   return (j?.choices?.[0]?.message?.content ?? "").trim();
 }
 
+/**
+ * قواطع الدائرة لمزوّدي AI (YEAR-1-RELIABILITY #4):
+ * 3 إخفاقات متتالية → OPEN (30 ثانية) → تجربة استكشافية → نجاحان يغلقان.
+ * الحالة على مستوى العملية (كل نسخة خادم) — كافٍ لمنع قصف المزوّد المتعثر.
+ */
+const aiBreakers = {
+  gemini: new CircuitBreaker({ failureThreshold: 3, cooldownMs: 30_000, successThreshold: 2 }),
+  groq: new CircuitBreaker({ failureThreshold: 3, cooldownMs: 30_000, successThreshold: 2 }),
+};
+
 /** رد احتياطي ذكي من قاعدة البيانات لو مفيش مفتاح API — منقول إلى src/lib/chat-local.ts للاختبار */
 export async function POST(req: NextRequest) {
   const started = Date.now();
@@ -123,19 +134,29 @@ export async function POST(req: NextRequest) {
     let reply = "";
     let source = "local";
 
+    // Circuit breaker لكل مزوّد AI (YEAR-1-RELIABILITY #4): عند فشل متكرر
+    // نتوقف عن قصف المزوّد وننتقل للرد المحلي، ثم نجرب استكشافيًا بعد الهدوء.
     if (gemini) {
       try {
-        reply = await callGemini(sys, clean, gemini);
-        source = "gemini";
+        if (aiBreakers.gemini.allow()) {
+          reply = await callGemini(sys, clean, gemini);
+          aiBreakers.gemini.recordSuccess();
+          source = "gemini";
+        }
       } catch (e) {
+        aiBreakers.gemini.recordFailure();
         console.error(e);
       }
     }
     if (!reply && groq) {
       try {
-        reply = await callGroq(sys, clean, groq);
-        source = "groq";
+        if (aiBreakers.groq.allow()) {
+          reply = await callGroq(sys, clean, groq);
+          aiBreakers.groq.recordSuccess();
+          source = "groq";
+        }
       } catch (e) {
+        aiBreakers.groq.recordFailure();
         console.error(e);
       }
     }

@@ -1,12 +1,12 @@
 {
   "gate": "PRE_RELEASE_GATE",
   "version": 1,
-  "commit_sha": "b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b",
+  "commit_sha": "f01a6e82c97b9d5816defebaa656a29f41d7edfd",
   "branch": "arena/01a05f01-aborof",
-  "timestamp": "2026-09-02T00:33:19.887Z",
+  "timestamp": "2026-09-02T00:43:29.883Z",
   "summary": {
-    "total": 67,
-    "pass": 56,
+    "total": 68,
+    "pass": 57,
     "fail": 0,
     "not_configured": 11,
     "p0": {
@@ -16,8 +16,8 @@
       "not_configured": 3
     },
     "p1": {
-      "total": 42,
-      "pass": 34,
+      "total": 43,
+      "pass": 35,
       "fail": 0,
       "not_configured": 8
     }
@@ -89,7 +89,7 @@
       "area": "quality",
       "priority": "P1",
       "layer": "unit",
-      "name": "Vitest unit tests (54 passed)",
+      "name": "Vitest unit tests (78 passed)",
       "status": "PASS",
       "detail": "exit 0",
       "evidence": ""
@@ -241,7 +241,7 @@
       "layer": "ui",
       "name": "Home page renders (200 + brand)",
       "status": "PASS",
-      "detail": "200 184ms",
+      "detail": "200 188ms",
       "evidence": ""
     },
     {
@@ -271,7 +271,7 @@
       "layer": "cart",
       "name": "Cart page renders (200)",
       "status": "PASS",
-      "detail": "200 13ms",
+      "detail": "200 11ms",
       "evidence": ""
     },
     {
@@ -281,7 +281,7 @@
       "layer": "checkout",
       "name": "Order create (COD) + stock decrement",
       "status": "PASS",
-      "detail": "ORD-09199378-ac4a83a7 stock 40→38",
+      "detail": "ORD-09809315-ac590933 stock 40→38",
       "evidence": ""
     },
     {
@@ -291,7 +291,7 @@
       "layer": "orders",
       "name": "Idempotency: same key → same order, stock decremented once",
       "status": "PASS",
-      "detail": "ORD-09199387-2f1724ee dup=true stock 38→37",
+      "detail": "ORD-09809324-34b4177c dup=true stock 38→37",
       "evidence": ""
     },
     {
@@ -301,7 +301,7 @@
       "layer": "orders",
       "name": "Double submit (different keys) → two distinct orders",
       "status": "PASS",
-      "detail": "ORD-09199401-c2cd3432 ≠ ORD-09199407-887dd8c9",
+      "detail": "ORD-09809338-72d05884 ≠ ORD-09809346-50f61eff",
       "evidence": ""
     },
     {
@@ -501,7 +501,7 @@
       "layer": "perf",
       "name": "TTFB budgets (local, <1500ms)",
       "status": "PASS",
-      "detail": "home=15ms product=12ms",
+      "detail": "home=15ms product=10ms",
       "evidence": ""
     },
     {
@@ -552,6 +552,16 @@
       "name": "Health & readiness endpoints (200)",
       "status": "PASS",
       "detail": "observed during server startup (polled /api/health)",
+      "evidence": ""
+    },
+    {
+      "id": "R07-INTEGRITY",
+      "area": "reliability",
+      "priority": "P1",
+      "layer": "database",
+      "name": "Data integrity invariants (stock, orders, idempotency, orphans, schema)",
+      "status": "PASS",
+      "detail": "watchdog exit 0 — all checks passed",
       "evidence": ""
     },
     {
@@ -711,7 +721,7 @@
       "layer": "release",
       "name": "Release SHA pinned & recorded",
       "status": "PASS",
-      "detail": "HEAD=b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b branch=arena/01a05f01-aborof",
+      "detail": "HEAD=f01a6e82c97b9d5816defebaa656a29f41d7edfd branch=arena/01a05f01-aborof",
       "evidence": ""
     }
   ]

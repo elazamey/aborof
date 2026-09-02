@@ -1,11 +1,11 @@
 # PRE_RELEASE_GATE — Evidence
 
 - **القرار:** RELEASE_BLOCKED
-- **الـ SHA:** `b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b` (فرع: arena/01a05f01-aborof)
-- **التاريخ:** 2026-09-02T00:33:19.887Z
-- **المُلخص:** 56 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 67)
+- **الـ SHA:** `f01a6e82c97b9d5816defebaa656a29f41d7edfd` (فرع: arena/01a05f01-aborof)
+- **التاريخ:** 2026-09-02T00:43:29.883Z
+- **المُلخص:** 57 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 68)
 - **P0:** 22 PASS / 0 FAIL / 3 NOT_CONFIGURED
-- **P1:** 34 PASS / 0 FAIL / 8 NOT_CONFIGURED
+- **P1:** 35 PASS / 0 FAIL / 8 NOT_CONFIGURED
 
 ## Blockers
 
@@ -21,7 +21,7 @@
 | L1-TSC | P1 | quality | PASS | TypeScript (tsc --noEmit) | exit 0 |
 | L1-ROUTES | P1 | quality | PASS | Route inventory & coverage | exit 0 |
 | L1-FMT | P1 | quality | PASS | Prettier format check | exit 0 |
-| L1-UNIT | P1 | quality | PASS | Vitest unit tests (54 passed) | exit 0 |
+| L1-UNIT | P1 | quality | PASS | Vitest unit tests (78 passed) | exit 0 |
 | S04-XSS | P1 | security | PASS | No dangerouslySetInnerHTML in src | grep found 0 matches |
 | S05-SQLI | P1 | security | PASS | Parameterized SQL only (no ${} inside execute on user-input surface) | grep found 0 matches |
 | S06-SECRETS | P1 | security | PASS | No obvious secret patterns in tracked files (HEAD) | git grep 0 hits |
@@ -36,13 +36,13 @@
 | R03-SCHEMA | P1 | reliability | PASS | Constraints & indexes (NOT NULL, PK, idempotency index) | version=3 notnull=true idx=true pk=true |
 | R05-BACKUP | P1 | reliability | PASS | Backup/restore drill (copy → corrupt → restore → verify) | products=1 version=3 |
 | R06-DRILL | P1 | reliability | PASS | Resilience drills L5 (6 drills, injected failures) | exit 0 — DRILL-01..06 PASS |
-| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 184ms |
+| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 188ms |
 | F02-PRODUCTS | P0 | functional | PASS | Products API (list, fields complete) | 12 products |
 | F03-PRODUCT-PAGE | P0 | functional | PASS | Product page (200) + unknown product (404) | detail=200 notfound=404 |
-| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 13ms |
-| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-09199378-ac4a83a7 stock 40→38 |
-| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-09199387-2f1724ee dup=true stock 38→37 |
-| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-09199401-c2cd3432 ≠ ORD-09199407-887dd8c9 |
+| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 11ms |
+| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-09809315-ac590933 stock 40→38 |
+| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-09809324-34b4177c dup=true stock 38→37 |
+| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-09809338-72d05884 ≠ ORD-09809346-50f61eff |
 | F08-VALIDATION | P0 | functional | PASS | Order validation battery (422/400/409/413) |  |
 | F09-AUTH | P0 | functional | PASS | Admin login (401 wrong / 200 right), session, logout | bad=401 good=200 logout→false |
 | S03-COOKIE | P1 | security | PASS | Admin cookie flags (HttpOnly, SameSite=Lax, Secure, Path=/) | observed on Set-Cookie |
@@ -62,12 +62,13 @@
 | PL09-SEO | P1 | platform | PASS | SEO metadata (title + meta description) | observed in <head> |
 | PL10-ROBOTS | P1 | platform | PASS | robots.txt served (disallow /admin, /api) | 200 User-Agent: * |
 | PL12-404 | P1 | platform | PASS | 404 status for unknown pages | observed |
-| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=15ms product=12ms |
+| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=15ms product=10ms |
 | RC07-RID | P0 | release | PASS | Request-ID echo (proxy → response header) | observed |
 | E2E01-JOURNEY | P1 | functional | PASS | Critical journey (products → cart → order → admin → status → cancel) | HTTP-level E2E across F-gates PASS |
 | RC07-LOGS | P0 | release | PASS | Structured JSON logs (server) | 49 log lines observed |
 | RC07-NOLEAK-LOGS | P0 | release | PASS | No secret values in server logs | grep: 0 hits |
 | RC07-HEALTH-READY | P0 | release | PASS | Health & readiness endpoints (200) | observed during server startup (polled /api/health) |
+| R07-INTEGRITY | P1 | reliability | PASS | Data integrity invariants (stock, orders, idempotency, orphans, schema) | watchdog exit 0 — all checks passed |
 | EX01-PAYMENT | P1 | external | PASS | Payment: COD real cycle PASS + gateway NOT_CONFIGURED (contract tested) | PAYMENT_MODE=COD (دفع عند الاستلام) — دورة COD كاملة مُختبَرة فعلياً (F05/F11)؛ بوابة دفع إلكترونية غير مهيأة (لا مزوّد) — العقد مختبر عبر Fake (tests/unit/prov |
 | EX02-EMAIL | P1 | external | NOT_CONFIGURED | Email provider | لا مزوّد بريد مهيأ — لا إشعارات بريد في المتجر؛ العقد مختبر عبر Fake (success/failure/dedupe) |
 | EX03-WHATSAPP | P1 | external | NOT_CONFIGURED | WhatsApp provider | روابط wa.me فقط (لا API) — NOT_CONFIGURED؛ العقد مختبر عبر Fake |
@@ -83,6 +84,6 @@
 | PL08-LAB-METRICS | P1 | platform | NOT_CONFIGURED | Lab metrics (LCP/INP/CLS) | تحتاج أدوات متصفح (Lighthouse/Playwright) — غير متاحة في هذه البيئة (NOT_CONFIGURED) |
 | PL11-SEO-URLS | P1 | platform | NOT_CONFIGURED | Canonical/OG/sitemap/JSON-LD (absolute URLs) | تحتاج PRODUCTION_URL (غير مهيأ بعد) — تُضاف مع اكتمال إعداد الإنتاج (NOT_CONFIGURED) |
 | RC10-EVIDENCE | P0 | release | PASS | Evidence completeness (deploy-result + L5 + rollback) | all present |
-| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b branch=arena/01a05f01-aborof |
+| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=f01a6e82c97b9d5816defebaa656a29f41d7edfd branch=arena/01a05f01-aborof |
 
 _كل النتائج مُلاحَظة من تشغيل فعلي (لا PASS مفترض). الأسماء فقط لأي متغيرات بيئة — لا قيم._

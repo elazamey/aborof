@@ -1108,6 +1108,30 @@ async function stageHttp() {
   db.close();
 }
 
+// ───────────────────────── Data integrity watchdog ─────────────────────────
+
+function stageIntegrity() {
+  console.log("\n════════ STAGE 3b — DATA INTEGRITY WATCHDOG ════════\n");
+  const wd = runCmd("node", ["scripts/integrity-watchdog.mjs", "--db", dbPath]);
+  wd.code === 0
+    ? pass(
+        "R07-INTEGRITY",
+        "reliability",
+        "P1",
+        "database",
+        "Data integrity invariants (stock, orders, idempotency, orphans, schema)",
+        "watchdog exit 0 — all checks passed"
+      )
+    : fail(
+        "R07-INTEGRITY",
+        "reliability",
+        "P1",
+        "database",
+        "Data integrity invariants",
+        (wd.stdout + wd.stderr).slice(-500)
+      );
+}
+
 // ───────────────────────── External services & release stage ─────────────────────────
 
 function stageExternal() {
@@ -1463,6 +1487,7 @@ async function main() {
     await stageHttp();
     await stopServer();
     stageObservability();
+    stageIntegrity();
   } else {
     fail(
       "SERVER",
