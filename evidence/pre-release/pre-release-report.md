@@ -1,8 +1,8 @@
 # PRE_RELEASE_GATE — Evidence
 
 - **القرار:** RELEASE_BLOCKED
-- **الـ SHA:** `6b77ec2df722e1138bfc4fbe87b8062b24a7d6ee` (فرع: arena/01a05f01-aborof)
-- **التاريخ:** 2026-09-02T00:20:15.201Z
+- **الـ SHA:** `b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b` (فرع: arena/01a05f01-aborof)
+- **التاريخ:** 2026-09-02T00:33:19.887Z
 - **المُلخص:** 56 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 67)
 - **P0:** 22 PASS / 0 FAIL / 3 NOT_CONFIGURED
 - **P1:** 34 PASS / 0 FAIL / 8 NOT_CONFIGURED
@@ -36,13 +36,13 @@
 | R03-SCHEMA | P1 | reliability | PASS | Constraints & indexes (NOT NULL, PK, idempotency index) | version=3 notnull=true idx=true pk=true |
 | R05-BACKUP | P1 | reliability | PASS | Backup/restore drill (copy → corrupt → restore → verify) | products=1 version=3 |
 | R06-DRILL | P1 | reliability | PASS | Resilience drills L5 (6 drills, injected failures) | exit 0 — DRILL-01..06 PASS |
-| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 227ms |
+| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 184ms |
 | F02-PRODUCTS | P0 | functional | PASS | Products API (list, fields complete) | 12 products |
 | F03-PRODUCT-PAGE | P0 | functional | PASS | Product page (200) + unknown product (404) | detail=200 notfound=404 |
-| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 15ms |
-| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-08414531-3b1280b9 stock 40→38 |
-| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-08414550-2c7334ff dup=true stock 38→37 |
-| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-08414574-cb487956 ≠ ORD-08414586-c91c493d |
+| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 13ms |
+| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-09199378-ac4a83a7 stock 40→38 |
+| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-09199387-2f1724ee dup=true stock 38→37 |
+| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-09199401-c2cd3432 ≠ ORD-09199407-887dd8c9 |
 | F08-VALIDATION | P0 | functional | PASS | Order validation battery (422/400/409/413) |  |
 | F09-AUTH | P0 | functional | PASS | Admin login (401 wrong / 200 right), session, logout | bad=401 good=200 logout→false |
 | S03-COOKIE | P1 | security | PASS | Admin cookie flags (HttpOnly, SameSite=Lax, Secure, Path=/) | observed on Set-Cookie |
@@ -62,7 +62,7 @@
 | PL09-SEO | P1 | platform | PASS | SEO metadata (title + meta description) | observed in <head> |
 | PL10-ROBOTS | P1 | platform | PASS | robots.txt served (disallow /admin, /api) | 200 User-Agent: * |
 | PL12-404 | P1 | platform | PASS | 404 status for unknown pages | observed |
-| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=20ms product=14ms |
+| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=15ms product=12ms |
 | RC07-RID | P0 | release | PASS | Request-ID echo (proxy → response header) | observed |
 | E2E01-JOURNEY | P1 | functional | PASS | Critical journey (products → cart → order → admin → status → cancel) | HTTP-level E2E across F-gates PASS |
 | RC07-LOGS | P0 | release | PASS | Structured JSON logs (server) | 49 log lines observed |
@@ -83,6 +83,6 @@
 | PL08-LAB-METRICS | P1 | platform | NOT_CONFIGURED | Lab metrics (LCP/INP/CLS) | تحتاج أدوات متصفح (Lighthouse/Playwright) — غير متاحة في هذه البيئة (NOT_CONFIGURED) |
 | PL11-SEO-URLS | P1 | platform | NOT_CONFIGURED | Canonical/OG/sitemap/JSON-LD (absolute URLs) | تحتاج PRODUCTION_URL (غير مهيأ بعد) — تُضاف مع اكتمال إعداد الإنتاج (NOT_CONFIGURED) |
 | RC10-EVIDENCE | P0 | release | PASS | Evidence completeness (deploy-result + L5 + rollback) | all present |
-| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=6b77ec2df722e1138bfc4fbe87b8062b24a7d6ee branch=arena/01a05f01-aborof |
+| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b branch=arena/01a05f01-aborof |
 
 _كل النتائج مُلاحَظة من تشغيل فعلي (لا PASS مفترض). الأسماء فقط لأي متغيرات بيئة — لا قيم._

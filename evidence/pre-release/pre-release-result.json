@@ -1,9 +1,9 @@
 {
   "gate": "PRE_RELEASE_GATE",
   "version": 1,
-  "commit_sha": "6b77ec2df722e1138bfc4fbe87b8062b24a7d6ee",
+  "commit_sha": "b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b",
   "branch": "arena/01a05f01-aborof",
-  "timestamp": "2026-09-02T00:20:15.201Z",
+  "timestamp": "2026-09-02T00:33:19.887Z",
   "summary": {
     "total": 67,
     "pass": 56,
@@ -241,7 +241,7 @@
       "layer": "ui",
       "name": "Home page renders (200 + brand)",
       "status": "PASS",
-      "detail": "200 227ms",
+      "detail": "200 184ms",
       "evidence": ""
     },
     {
@@ -271,7 +271,7 @@
       "layer": "cart",
       "name": "Cart page renders (200)",
       "status": "PASS",
-      "detail": "200 15ms",
+      "detail": "200 13ms",
       "evidence": ""
     },
     {
@@ -281,7 +281,7 @@
       "layer": "checkout",
       "name": "Order create (COD) + stock decrement",
       "status": "PASS",
-      "detail": "ORD-08414531-3b1280b9 stock 40→38",
+      "detail": "ORD-09199378-ac4a83a7 stock 40→38",
       "evidence": ""
     },
     {
@@ -291,7 +291,7 @@
       "layer": "orders",
       "name": "Idempotency: same key → same order, stock decremented once",
       "status": "PASS",
-      "detail": "ORD-08414550-2c7334ff dup=true stock 38→37",
+      "detail": "ORD-09199387-2f1724ee dup=true stock 38→37",
       "evidence": ""
     },
     {
@@ -301,7 +301,7 @@
       "layer": "orders",
       "name": "Double submit (different keys) → two distinct orders",
       "status": "PASS",
-      "detail": "ORD-08414574-cb487956 ≠ ORD-08414586-c91c493d",
+      "detail": "ORD-09199401-c2cd3432 ≠ ORD-09199407-887dd8c9",
       "evidence": ""
     },
     {
@@ -501,7 +501,7 @@
       "layer": "perf",
       "name": "TTFB budgets (local, <1500ms)",
       "status": "PASS",
-      "detail": "home=20ms product=14ms",
+      "detail": "home=15ms product=12ms",
       "evidence": ""
     },
     {
@@ -711,7 +711,7 @@
       "layer": "release",
       "name": "Release SHA pinned & recorded",
       "status": "PASS",
-      "detail": "HEAD=6b77ec2df722e1138bfc4fbe87b8062b24a7d6ee branch=arena/01a05f01-aborof",
+      "detail": "HEAD=b01cfa2dce8dc0cefb35fd24f9b8dc41973ed65b branch=arena/01a05f01-aborof",
       "evidence": ""
     }
   ]
