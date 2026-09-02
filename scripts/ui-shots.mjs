@@ -1,5 +1,6 @@
 // لقطات شاشة للتحقق البصري (Desktop 1440×900 + Mobile 390×844).
-// يتطلب متصفحًا: npx playwright-core install chromium
+// يتطلب متصفحًا: CHROME_PATH=/usr/bin/google-chrome (CI) أو
+//   npm i --no-save playwright-core @sparticuz/chromium (محليًا)
 // التشغيل: node scripts/ui-shots.mjs <BASE_URL>  (افتراضي http://localhost:3000)
 // الإخراج: evidence/ui-cinematic/shots/
 import { chromium } from "playwright-core";
@@ -22,7 +23,11 @@ const viewports = [
   ["mobile", { width: 390, height: 844 }],
 ];
 
-const browser = await chromium.launch({ headless: true });
+const launchOptions = process.env.CHROME_PATH
+  ? { executablePath: process.env.CHROME_PATH }
+  : { args: ["--no-sandbox"] };
+
+const browser = await chromium.launch({ headless: true, ...launchOptions });
 for (const [vname, vp] of viewports) {
   const page = await browser.newPage({ viewport: vp });
   for (const [rname, route] of routes) {
