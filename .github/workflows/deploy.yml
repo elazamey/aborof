@@ -28,7 +28,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - name: Checkout (tag)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ===== Gate: immutable release ref + SHA =====
       - name: Gate — release ref & SHA verification
@@ -94,7 +94,7 @@ jobs:
           echo "✅ Production configuration present (names verified, values never printed)"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
