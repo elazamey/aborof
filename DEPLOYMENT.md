@@ -13,10 +13,17 @@
 | `VERCEL_PROJECT_ID` | Secret | قيمة `projectId` من مشروع Vercel |
 | `TURSO_DATABASE_URL` | Secret | رابط قاعدة Turso |
 | `TURSO_AUTH_TOKEN` | Secret | رمز Turso |
-| `ADMIN_PASSWORD` | Secret | كلمة مرور الإدارة القوية |
-| `ADMIN_SESSION_SECRET` | Secret | سر عشوائي طويل، لا يقل عن 32 بايت |
+| `ADMIN_PASSWORD` | Secret | كلمة مرور الإدارة القوية (12 حرفًا على الأقل) |
+| `ADMIN_SESSION_SECRET` | Secret | سر عشوائي لتوقيع الجلسات فقط، لا يقل عن 32 حرفًا |
 | `GEMINI_API_KEY` أو `GROQ_API_KEY` | Secret اختياري | مفتاح مزود الدردشة |
+| `DIAGNOSTICS_ENABLED` | Variable اختياري | `true` لتفعيل نقطة التشخيص (معطّل في الإنتاج افتراضيًا) |
+| `DIAGNOSTICS_KEY` | Secret اختياري | مفتاح **مستقل** عن `ADMIN_SESSION_SECRET` لنقطة `/api/admin/diagnostics` |
+| `CSP_ENFORCE` | Variable اختياري | `true` لتشديد CSP من وضع المراقبة إلى الحجب |
 | `VERCEL_DEPLOY_ENABLED` | Repository variable | `true` بعد التأكد من الأسرار |
+
+> **فصل الأسرار إلزامي:** `ADMIN_SESSION_SECRET` لتوقيع الجلسات فقط، و`DIAGNOSTICS_KEY`
+> للتشخيص فقط. يفحص حاجز النشر الثابت أنهما غير متطابقين وأن سر الجلسات لا يُذكر
+> خارج وحدتي الجلسات والأسرار.
 
 يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel.
 
@@ -30,9 +37,15 @@
 
 ```bash
 npm ci
+npm audit --omit=dev --audit-level=high
 npm run lint
-npx tsc --noEmit
+npm run typecheck
+npm run security:gates
+node scripts/sync-migrations.mjs --check
 npm run routes:inventory
+npm test
 npm run build
 npm run dev
 ```
+
+تفاصيل الضوابط الأمنية ومصفوفة الإغلاق في [`docs/security/`](docs/security/).

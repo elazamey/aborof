@@ -4,18 +4,72 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Deployment target (production only from main; gates never skip)"
+        required: true
+        default: "production"
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
+# أقل صلاحيات: النشر يحتاج قراءة الكود فقط؛ التوكن في البيئة.
 permissions:
   contents: read
 
 jobs:
+  # بوابات الجودة شرط مسبق للنشر؛ لا يوجد أي exit 0 أو تخطٍ على فرع الإنتاج.
+  quality-gates:
+    name: Quality gates (policy, not advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Dependency audit (blocks on High/Critical)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Lint
+        run: npm run lint
+      - name: Type-check
+        run: npm run typecheck
+      - name: Static security gates
+        run: npm run security:gates
+      - name: Migration files in sync
+        run: node scripts/sync-migrations.mjs --check
+      - name: Unit and integration tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Record SHA
+        id: meta
+        run: echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Upload test/build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-evidence-${{ github.sha }}
+          path: |
+            .next/
+            !.next/cache
+          retention-days: 14
+          if-no-files-found: ignore
+
   deploy:
-    # فعّل النشر بعد إضافة الأسرار والمتغير VERCEL_DEPLOY_ENABLED=true في إعدادات المستودع.
-    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' }}
+    name: Deploy to Vercel Production
+    needs: quality-gates
+    if: ${{ github.ref == 'refs/heads/main' && vars.VERCEL_DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -30,17 +84,48 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
+      # يمنع النشر إذا غابت الأسرار الإلزامية بدل الفشل الصامت أو التخطي.
+      - name: Verify required deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for var in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing required secret $var — refusing to deploy."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "All required deployment secrets are present."
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
-      - name: Validate before deploy
-        run: |
-          npm run lint
-          npx tsc --noEmit
-          npm run routes:inventory
-          npm run build
+      - name: Rebuild production artifact (gates already enforced)
+        run: npm run build
       - name: Pull Vercel production settings
         run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
       - name: Build Vercel artifact
         run: npx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
       - name: Deploy prebuilt artifact
         run: npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+
+  # ملخص نشر مرتبط بالـ SHA ورابط الأثر للرجوع إليه عند الحوادث.
+  report:
+    name: Deployment summary
+    needs: [quality-gates, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## Deployment summary"
+            echo "- Commit SHA: \`${{ github.sha }}\`"
+            echo "- Ref: \`${{ github.ref }}\`"
+            echo "- Quality gates: ${{ needs.quality-gates.result }}"
+            echo "- Deploy: ${{ needs.deploy.result }}"
+            echo "- Evidence artifact: deploy-evidence-${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
