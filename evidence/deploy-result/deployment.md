@@ -58,3 +58,41 @@ Deployment execution: BLOCKED ❌ — VERCEL_DEPLOY_ENABLED != true (مُلاح�
 > التحقق من حضورها يتم **عند التشغيل** عبر "Gate — production configuration presence" (أسماء فقط، لا قيم) — غير ممكن عبر API من الجلسة (403).
 
 بعد الضبط: أُعيد إطلاق الـ tag (force-push) → workflow يعيد البوابات → إن مرّت كلها: deploy + post-deploy → تُسجَّل النتائج المُلاحَظة هنا (DEPLOYMENT_ID، DEPLOYED_SHA، تطابق `RC_CODE == TAG_SHA app-tree == DEPLOYED_SHA`).
+
+---
+
+# TASK-02 — محاولة النشر الثانية (observed)
+
+> **OBSERVED** — كل قيمة من تشغيل GitHub فعلي (run `33583736020`). لا نتائج متوقعة.
+
+## السجل (observed)
+
+| الحقل | القيمة |
+|---|---|
+| **RC_SHA** | `53ca4942ce29766a738991cd726d2183bd96a3cc` (رأس أخضر — 81 PASS / 0 FAIL / 11 NC) |
+| **TAG** | `rc-53ca4942ce29766a738991cd726d2183bd96a3cc` → `53ca4942ce29766a738991cd726d2183bd96a3cc` (مرفوع ومتحقق) |
+| **RC_SHA == TAG_SHA** | ✅ (بوابة الـdeploy "release ref & SHA verification" نجحت بتطابق صارم) |
+| **WORKFLOW_RUN_ID** | `33583736020` |
+| **TIMESTAMP** | 2026-09-02 ~02:34Z |
+| **Gate 3 (migration)** | v5 مثبت محليًا على قاعدة نظيفة (`migrate-check` → schema version 5) — فحص DB الإنتاج لم يُنفَّذ (توقف سابق) |
+| **DEPLOYMENT_ID** | — (لا يوجد — منعت البوابة التنفيذ) |
+| **DEPLOYED_SHA** | — (لم يُنشر شيء) |
+| **POST-DEPLOY (health/ready/product/auth)** | — (لم يُصل إليها — توقف سابق) |
+| **RESULT** | ❌ **BLOCKED — Gate "VERCEL_DEPLOY_ENABLED" فشل (الخطوة 4 من 16، وكل ما بعدها skipped)** |
+
+## خطوات التشغيل (observed من GitHub)
+
+| الخطوة | النتيجة |
+|---|---|
+| Checkout (tag) | ✅ success |
+| **Gate — release ref & SHA verification** | ✅ success — `EXPECTED_SHA == HEAD` (tag → 53ca4942…) |
+| **Gate — VERCEL_DEPLOY_ENABLED** | ❌ failure — المتغير ليس `true` في بيئة Production |
+| Gate — production configuration presence | ⏭ skipped (لم يصل) |
+| migration check → build → deploy → post-deploy | ⏭ skipped كلها — **صفر traffic، صفر تغيير** |
+
+## الاستنتاج (observed)
+
+نفس عائق الدورة السابقة (run `33570046664`): **`VERCEL_DEPLOY_ENABLED` غير مضبوط على `true`** في
+بيئة Production على GitHub. متغيرات/أسرار البيئة غير قابلة للقراءة من جلسة الوكيل (403) —
+التحقق/الضبط يتم من مالك المستودع في GitHub Settings → Environments → Production.
+لا شيء نُشر، ولا شيء تغيّر في الإنتاج.
