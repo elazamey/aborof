@@ -6,6 +6,7 @@ import {
   devOtpHintEnabled,
   deliverOtp,
 } from "@/lib/identity";
+import { recordSecurityEvent } from "@/lib/monitoring";
 import { rateLimit } from "@/lib/rate-limit";
 import { json, ipOf } from "../helpers";
 
@@ -21,6 +22,17 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const limit = rateLimit(request, "identity-recovery", 5, 15 * 60 * 1000);
   if (!limit.ok) {
+    // حدث معدّل — يُحتسب في otp_rate_limit_hits (fail-open: لا يكسر الرد 429)
+    const repo = identityRepo();
+    if (repo) {
+      await recordSecurityEvent(repo, {
+        event: "otp_rate_limited",
+        userId: "",
+        ip: ipOf(request),
+        requestId: request.headers.get("x-request-id"),
+        metadata: { scope: "identity-recovery", limit: 5, windowMs: 15 * 60 * 1000 },
+      }).catch(() => undefined);
+    }
     const response = json({ error: "محاولات كثيرة، حاول بعد قليل" }, 429);
     response.headers.set("Retry-After", String(limit.retryAfter));
     return response;

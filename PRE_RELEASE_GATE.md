@@ -152,9 +152,33 @@ Fresh Environment → Install (npm ci) → Migration (v3) → Seed → Build
 | Performance Budget قبل التصميم                 | ✅                       | PL06/PL07 + قاعدة PR تجاوز budget = FAIL                                  |
 | Mobile-first Checkout                          | 🔶 مخطط                  | مع مرحلة CINEMATIC UI                                                     |
 | SEO Release Audit                              | 🔶 جزئي                  | PL09/PL10/PL12 ✅ · PL11 (canonical/OG/sitemap) NC                        |
-| Error/Business Alerts                          | 🔶 مخطط                  | بعد النشر (monitoring)                                                    |
+| Error/Business Alerts                          | ✅ (هوية)               | M03 + كواشف المراقبة (OTP/recovery/source/session) + لوحة Security Center |
 | Synthetic Monitoring                           | 🔶 مخطط                  | بعد PRODUCTION_URL                                                        |
 | Runbooks                                       | ✅ مسودة                 | `YEAR-1-RELIABILITY.md` §7                                                |
 | Rollback Drill                                 | ✅                       | RC03 + evidence/deploy-result/rollback-readiness.md                       |
 | Deployment Provenance                          | ✅                       | deploy.yml (SHA gate) + RC11 + evidence                                   |
 | Feature Flags / Maintenance Mode / Incident ID | 🔶 مخطط                  | P2 — مع النشر/الواجهة                                                     |
+
+## 10. SECURITY-MONITORING (P0 Security — IDENTITY SECURITY MONITORING HOOKS)
+
+المراقبة الأمنية للهوية مدمجة في البوابة كشرط P0 قبل أول Production:
+
+```
+SECURITY-MONITORING
+├── M01-MONITOR-INSTRUMENTED  — كل الأحداث القانونية (24) مبعوثة فعليًا من التدفقات
+├── M02-MONITOR-METRICS       — عدادات تتحرك بعد دورة OTP حقيقية + لا أسرار في الاستجابة
+├── M03-MONITOR-ALERTS        — كاشف تعسف الاسترداد (WARNING) + حد المعدل يُحتسب
+├── M04-MONITOR-FAILOPEN      — MONITOR_DISABLED=1: المصادقة/التحقق تعمل واللوحة degraded
+└── M05-MONITOR-THRESHOLDS    — العتبات في وحدة سياسة (12 مفتاح MONITOR_*)، لا hard-code
+```
+
+**البنية:** Event (security_events) → Aggregation (metrics خفيف — نفس قاعدة البيانات) →
+Threshold (MonitoringPolicy قابلة للضبط بالبيئة) → Alert (security_alerts، levels
+INFO/WARNING/CRITICAL، dedupe لكل نافذة زمنية) → Dashboard (لوحة المراقبة في Security Center).
+
+**الكواشف:** OTP failure spike · many accounts from one source (IP hash) ·
+impossible identity change (risk score) · recovery abuse · session revoke spike.
+
+**الخصوصية:** لا OTP ولا كلمات مرور ولا رموز جلسات في الأحداث (تطهير metadata + hashes).
+**العزل:** أي فشل في التسجيل/الكشف = degraded ولا يكسر login/verification/change أبدًا.
+**الاحتفاظ:** hot 30 يومًا · audit 365 · alerts 90 (قابلة للضبط).

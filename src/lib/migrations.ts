@@ -187,6 +187,32 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    version: 5,
+    name: "identity-security-monitoring",
+    up: async (c) => {
+      // IDENTITY SECURITY MONITORING (P0): security_alerts — تنبيهات الكواشف
+      // (dedupe عبر alert_key الفريد لكل نافذة زمنية). إضافي بحت.
+      await c.batch(
+        [
+          `CREATE TABLE IF NOT EXISTS security_alerts (
+            id TEXT PRIMARY KEY,
+            alert_key TEXT NOT NULL UNIQUE,
+            level TEXT NOT NULL,
+            type TEXT NOT NULL,
+            user_id TEXT,
+            ip_hash TEXT,
+            message TEXT NOT NULL,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL,
+            resolved_at INTEGER
+          )`,
+          `CREATE INDEX IF NOT EXISTS idx_security_alerts_created ON security_alerts(created_at)`,
+        ],
+        "write"
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

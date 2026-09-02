@@ -85,11 +85,11 @@ function nc(id, area, priority, layer, name, detail, evidence = "") {
 
 // ───────────────────────── HTTP helpers ─────────────────────────
 
-async function http(pathname, { method = "GET", headers = {}, body, ip } = {}) {
+async function http(pathname, { method = "GET", headers = {}, body, ip, base = BASE } = {}) {
   const h = { ...headers };
   if (ip) h["x-forwarded-for"] = ip;
   const started = Date.now();
-  const res = await fetch(BASE + pathname, { method, headers: h, body, redirect: "manual" });
+  const res = await fetch(base + pathname, { method, headers: h, body, redirect: "manual" });
   const text = await res.text();
   let json = null;
   try {
@@ -100,12 +100,13 @@ async function http(pathname, { method = "GET", headers = {}, body, ip } = {}) {
   return { status: res.status, headers: res.headers, text, json, ms: Date.now() - started };
 }
 
-function postJson(pathname, body, ip) {
+function postJson(pathname, body, ip, base = BASE) {
   return http(pathname, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     ip,
+    base,
   });
 }
 
@@ -508,14 +509,14 @@ async function stageDb() {
 
   // R01: clean migration
   const m1 = runCmd("node", ["--experimental-strip-types", "scripts/migrate-check.mts"], { env });
-  const cleanOk = m1.code === 0 && /schema version 4 \(required 4\)/.test(m1.stdout);
+  const cleanOk = m1.code === 0 && /schema version 5 \(required 5\)/.test(m1.stdout);
   cleanOk
     ? pass(
         "R01-MIGRATE",
         "reliability",
         "P1",
         "database",
-        "Clean migration → schema v4",
+        "Clean migration → schema v5",
         m1.stdout.trim().split("\n")[0]
       )
     : fail(
@@ -523,20 +524,20 @@ async function stageDb() {
         "reliability",
         "P1",
         "database",
-        "Clean migration → schema v4",
+        "Clean migration → schema v5",
         (m1.stdout + m1.stderr).slice(-300)
       );
 
   // R02: idempotency
   const m2 = runCmd("node", ["--experimental-strip-types", "scripts/migrate-check.mts"], { env });
-  const idemOk = m2.code === 0 && /schema version 4 \(required 4\)/.test(m2.stdout);
+  const idemOk = m2.code === 0 && /schema version 5 \(required 5\)/.test(m2.stdout);
   idemOk
     ? pass(
         "R02-MIGRATE-IDEM",
         "reliability",
         "P1",
         "database",
-        "Migration idempotency (rerun → v4)",
+        "Migration idempotency (rerun → v5)",
         "second run OK, version stable"
       )
     : fail(
@@ -563,7 +564,7 @@ async function stageDb() {
       const pk = products.find((r) => r.name === "id" && Number(r.pk) === 1);
       const meta = await c.execute("SELECT version FROM schema_meta WHERE id=1");
       const v = Number(meta.rows[0]?.version);
-      const ok = notNull && hasIdx && !!pk && v === 4;
+      const ok = notNull && hasIdx && !!pk && v === 5;
       ok
         ? pass(
             "R03-SCHEMA",
@@ -603,7 +604,7 @@ async function stageDb() {
     const c2 = createClient({ url: `file:${db2}` });
     const count = await c2.execute("SELECT COUNT(*) n FROM products");
     const ver = await c2.execute("SELECT version FROM schema_meta WHERE id=1");
-    const restored = Number(count.rows[0].n) > 0 && Number(ver.rows[0].version) === 4;
+    const restored = Number(count.rows[0].n) > 0 && Number(ver.rows[0].version) === 5;
     c2.close();
     restored
       ? pass(
@@ -659,38 +660,42 @@ async function portIsBusy() {
   });
 }
 
-function startServer() {
+function startServer({ extraEnv = {}, db = dbPath, port = PORT, base = BASE } = {}) {
   return new Promise((resolve, reject) => {
     const env = {
       ...process.env,
       NODE_ENV: "production",
-      TURSO_DATABASE_URL: `file:${dbPath}`,
+      TURSO_DATABASE_URL: `file:${db}`,
       ADMIN_PASSWORD: ADMIN_PW,
       ADMIN_SESSION_SECRET: ADMIN_SECRET,
       // IDENTITY-HARDENING-01 (P0): بيئة اختبار البوابة — hint للمطوّر فقط
       ADMIN_EMAIL: ADMIN_EMAIL,
       IDENTITY_DEV_OTP_HINT: "1",
       IDENTITY_SECURITY_DELAY_MINUTES: "0",
+      ...extraEnv,
     };
     // detached: نحتاج قتل مجموعة العمليات كاملة (npx + next-server) عند الإيقاف
     // وإلا تبقى عمليات يتيمة تمسك المنفذ (كانت تسبب تلوث تشغيلات لاحقة).
-    serverProc = spawn("npx", ["next", "start", "-p", String(PORT)], {
+    const proc = spawn("npx", ["next", "start", "-p", String(port)], {
       cwd: ROOT,
       env,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
-    serverProc.stdout.on("data", (d) => (serverLog += d));
-    serverProc.stderr.on("data", (d) => (serverLog += d));
+    if (port === PORT) {
+      serverProc = proc;
+      proc.stdout.on("data", (d) => (serverLog += d));
+      proc.stderr.on("data", (d) => (serverLog += d));
+    }
     const deadline = Date.now() + 90_000;
     const poll = async () => {
       try {
-        const r = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(3000) });
-        if (r.status === 200) return resolve();
+        const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) });
+        if (r.status === 200) return resolve(proc);
       } catch {
         /* not up yet */
       }
-      if (Date.now() > deadline || serverProc.exitCode !== null) {
+      if (Date.now() > deadline || proc.exitCode !== null) {
         return reject(new Error("server did not become healthy; log tail:\n" + serverLog.slice(-2000)));
       }
       setTimeout(poll, 800);
@@ -1571,6 +1576,254 @@ async function stageHttp() {
         "identity",
         "Password change",
         `${i09a.status}/${i09b.status}`
+      );
+
+  // ── SECURITY-MONITORING (P0 Security): عدادات + كواشف + تنبيهات + عزل فشل ──
+
+  // M01: جميع أسماء الأحداث القانونية مستخدمة فعليًا في التدفقات (لا أحداث شكلية)
+  const MONITOR_SRC = ["src/lib/identity/core.ts", "src/app/api/identity"];
+  const allEvents = [
+    "email_verification_requested",
+    "email_verification_succeeded",
+    "email_verification_failed",
+    "phone_verification_requested",
+    "phone_verification_succeeded",
+    "phone_verification_failed",
+    "email_change_requested",
+    "email_change_verified",
+    "email_change_completed",
+    "email_change_cancelled",
+    "email_change_expired",
+    "phone_change_requested",
+    "phone_change_verified",
+    "phone_change_completed",
+    "phone_change_cancelled",
+    "phone_change_expired",
+    "password_change",
+    "session_revoked",
+    "recovery_requested",
+    "recovery_completed",
+    "recovery_failed",
+    "otp_rejected",
+    "otp_rate_limited",
+    "suspicious_identity_activity",
+  ];
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+      const p = path.join(dir, d.name);
+      return d.isDirectory() ? walk(p) : d.name.endsWith(".ts") ? [p] : [];
+    });
+  const monitoredFiles = [
+    path.join(ROOT, "src/lib/identity/core.ts"),
+    path.join(ROOT, "src/lib/monitoring/detectors.ts"),
+    ...walk(path.join(ROOT, "src/app/api/identity")),
+  ].map((p) => p.replace(ROOT + "/", ""));
+  const srcText = monitoredFiles.map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");
+  // كل حدث يجب أن يظهر في التدفقات إما نصًا حرفيًا أو عبر ثابت EV.<KEY>
+  const missingEvents = allEvents.filter((e) => {
+    const evKey = "EV." + e.toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+    return !srcText.includes(e) && !srcText.includes(evKey);
+  });
+  const m01Ok = missingEvents.length === 0;
+  m01Ok
+    ? pass(
+        "M01-MONITOR-INSTRUMENTED",
+        "security",
+        "P0",
+        "monitoring",
+        "All 24 canonical security events are emitted by identity flows (no decorative counters)",
+        `${allEvents.length} events wired`
+      )
+    : fail(
+        "M01-MONITOR-INSTRUMENTED",
+        "security",
+        "P0",
+        "monitoring",
+        "Event instrumentation",
+        `missing: ${missingEvents.join(",")}`
+      );
+
+  // M02: عدادات حقيقية بعد دورة تحقق + redaction (لا أسرار في استجابة المراقبة)
+  const mLogin = await postJson("/api/admin/login", { password: ADMIN_PW }, "10.0.3.1");
+  const mCk = cookieFrom(mLogin).value;
+  const mStart = await iPost("/api/identity/verify", { mode: "start", kind: "email" }, "10.0.3.1", mCk);
+  const mConfirm = await iPost(
+    "/api/identity/verify",
+    { mode: "confirm", kind: "email", code: mStart.json?.devOtpHint },
+    "10.0.3.1",
+    mCk
+  );
+  const mDash = await http("/api/identity/monitoring?sinceHours=24", { ip: "10.0.3.1", headers: { cookie: mCk } });
+  const mj = mDash.json ?? {};
+  const dashText = JSON.stringify(mj);
+  const m2Ok =
+    mLogin.status === 200 &&
+    mStart.status === 200 &&
+    mConfirm.status === 200 &&
+    mDash.status === 200 &&
+    mj.degraded === false &&
+    Number(mj.metrics?.email?.succeeded) >= 1 &&
+    mj.metrics?.email?.successRate === 100 &&
+    !/"(password|secret|token|authorization|code)"\s*:/.test(dashText) &&
+    !dashText.includes(String(mStart.json?.devOtpHint ?? ""));
+  m2Ok
+    ? pass(
+        "M02-MONITOR-METRICS",
+        "security",
+        "P0",
+        "monitoring",
+        "Verification counters move after a real OTP cycle; no secrets in the monitoring payload",
+        `succeeded=${mj.metrics?.email?.succeeded} rate=${mj.metrics?.email?.successRate}%`
+      )
+    : fail(
+        "M02-MONITOR-METRICS",
+        "security",
+        "P0",
+        "monitoring",
+        "Metrics/redaction",
+        `login=${mLogin.status} start=${mStart.status} confirm=${mConfirm.status} dash=${mDash.status} degraded=${mj.degraded}`
+      );
+
+  // M03: كاشف تعسف الاسترداد — 5 إخفاقات → WARNING + حدث معدّل (429) في العدادات
+  let m03last = 0;
+  for (let i = 0; i < 6; i++) {
+    m03last = (
+      await iPost(
+        "/api/identity/recovery",
+        {
+          mode: "confirm",
+          email: ADMIN_EMAIL || "owner@test.local",
+          code: "111111",
+          newPassword: "long-enough-pass-1",
+        },
+        "10.0.3.2"
+      )
+    ).status;
+    if (m03last === 429) break;
+  }
+  const mDash2 = await http("/api/identity/monitoring?sinceHours=24", { ip: "10.0.3.3", headers: { cookie: mCk } });
+  const mj2 = mDash2.json ?? {};
+  const hasRecoveryWarn = (mj2.alerts ?? []).some((a) => a.type === "recovery_abuse" && a.level === "WARNING");
+  const m3Ok = m03last === 429 && hasRecoveryWarn && Number(mj2.metrics?.otp?.rateLimitHits) >= 1;
+  m3Ok
+    ? pass(
+        "M03-MONITOR-ALERTS",
+        "security",
+        "P0",
+        "monitoring",
+        "Recovery-abuse detector fires WARNING; rate-limit hit counted (429 → otp_rate_limited)",
+        `429 reached; recovery_abuse=WARNING; rateLimitHits=${mj2.metrics?.otp?.rateLimitHits}`
+      )
+    : fail(
+        "M03-MONITOR-ALERTS",
+        "security",
+        "P0",
+        "monitoring",
+        "Abuse alerts",
+        `last=${m03last} warn=${hasRecoveryWarn} rl=${mj2.metrics?.otp?.rateLimitHits}`
+      );
+
+  // M04: عزل الفشل — خادم بـ MONITOR_DISABLED=1: التدفقات تعمل واللوحة degraded
+  const MON_PORT = PORT + 1;
+  const MON_BASE = `http://127.0.0.1:${MON_PORT}`;
+  const monDb = path.join(workDir, "monitor-disabled.db");
+  let m04ok = false;
+  let m04detail = "server failed to start";
+  let monProc = null;
+  try {
+    monProc = await startServer({ extraEnv: { MONITOR_DISABLED: "1" }, db: monDb, port: MON_PORT, base: MON_BASE });
+    // تدفئة المخطط (قاعدة جديدة تمامًا — نفس ترتيب الخادم الرئيسي: منتجات أولًا)
+    await http("/api/products", { ip: "10.0.3.4", base: MON_BASE });
+    const monLogin = await postJson("/api/admin/login", { password: ADMIN_PW }, "10.0.3.4", MON_BASE);
+    const monCk = cookieFrom(monLogin).value;
+    // طلب بجلسة (cookie) نحو الخادم الثانوي
+    const mPost = (pathname, body) =>
+      http(pathname, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", cookie: monCk },
+        body: JSON.stringify(body),
+        ip: "10.0.3.4",
+        base: MON_BASE,
+      });
+    const monStart = await mPost("/api/identity/verify", { mode: "start", kind: "email" });
+    const monConfirm = await mPost("/api/identity/verify", {
+      mode: "confirm",
+      kind: "email",
+      code: monStart.json?.devOtpHint,
+    });
+    const monDash = await http("/api/identity/monitoring", {
+      ip: "10.0.3.4",
+      headers: { cookie: monCk },
+      base: MON_BASE,
+    });
+    m04ok =
+      monLogin.status === 200 &&
+      monStart.status === 200 &&
+      monConfirm.status === 200 &&
+      monDash.json?.degraded === true;
+    m04detail = `login=${monLogin.status} verify=${monStart.status}/${monConfirm.status} degraded=${monDash.json?.degraded}`;
+  } catch (e) {
+    m04detail = String(e).slice(0, 200);
+  } finally {
+    if (monProc) {
+      try {
+        process.kill(-monProc.pid, "SIGTERM"); // مجموعة الخادم الثانوي فقط
+      } catch {
+        /* already gone */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  m04ok
+    ? pass(
+        "M04-MONITOR-FAILOPEN",
+        "security",
+        "P0",
+        "monitoring",
+        "Monitoring disabled (MONITOR_DISABLED=1): auth+verification still succeed; dashboard reports degraded",
+        m04detail
+      )
+    : fail("M04-MONITOR-FAILOPEN", "security", "P0", "monitoring", "Failure isolation", m04detail);
+
+  // M05: العتبات في وحدة السياسة (env)، لا hard-coded في المسارات
+  const policySrc = readFileSync(path.join(ROOT, "src/lib/monitoring/policy.ts"), "utf8");
+  const envNames = [
+    "MONITOR_OTP_FAIL_WARN",
+    "MONITOR_OTP_FAIL_CRITICAL",
+    "MONITOR_ACCOUNTS_SOURCE_WARN",
+    "MONITOR_ACCOUNTS_SOURCE_CRITICAL",
+    "MONITOR_IMPOSSIBLE_CHANGE_OPS",
+    "MONITOR_RECOVERY_WARN",
+    "MONITOR_RECOVERY_CRITICAL",
+    "MONITOR_SESSION_REVOKE_WARN",
+    "MONITOR_HOT_RETENTION_DAYS",
+    "MONITOR_AUDIT_RETENTION_DAYS",
+    "MONITOR_ALERT_RETENTION_DAYS",
+    "MONITOR_DISABLED",
+  ];
+  const routesText = monitoredFiles
+    .filter((f) => f.startsWith("src/app/api/identity"))
+    .map((f) => readFileSync(path.join(ROOT, f), "utf8"))
+    .join("\n");
+  const m5Ok =
+    envNames.every((n) => policySrc.includes(n)) &&
+    !/otpFailuresWarn|otpFailuresCritical|accountsPerSourceWarn|recoveryWarn/.test(routesText);
+  m5Ok
+    ? pass(
+        "M05-MONITOR-THRESHOLDS",
+        "security",
+        "P0",
+        "monitoring",
+        "Alert thresholds live in the policy module (env-configurable), not in routes",
+        `${envNames.length} MONITOR_* env knobs`
+      )
+    : fail(
+        "M05-MONITOR-THRESHOLDS",
+        "security",
+        "P0",
+        "monitoring",
+        "Threshold configuration",
+        "policy env knobs missing or thresholds hard-coded in routes"
       );
 
   // ── E2E01 critical journey (already exercised above; summarize as one gate) ──

@@ -6,11 +6,12 @@ import {
   IdentityRepo,
   OtpKind,
   OtpRecord,
-  SecurityEvent,
   SessionRecord,
   User,
 } from "./types";
 import { normalizeEmail, normalizePhone, sha256Hex } from "./normalize";
+import { EV } from "../monitoring/types";
+import { recordSecurityEvent } from "../monitoring/events";
 import { Clock, checkOtp, generateOtp, hashSecret, hashToken, newId, verifySecret } from "./otp";
 
 /**
@@ -22,16 +23,12 @@ import { Clock, checkOtp, generateOtp, hashSecret, hashToken, newId, verifySecre
 export type Ctx = { ip: string | null; requestId: string | null };
 
 async function audit(repo: IdentityRepo, userId: string, event: string, meta: Record<string, unknown>, ctx: Ctx) {
-  const e: SecurityEvent = {
-    id: newId(),
-    userId,
-    event,
-    metadata: JSON.stringify(meta),
-    ip: ctx.ip,
-    requestId: ctx.requestId,
-    createdAt: Date.now(),
-  };
-  await repo.createSecurityEvent(e);
+  // Fail-open: فشل تسجيل/كشف أحداث المراقبة لا يكسر تدفقات الهوية أبدًا.
+  await recordSecurityEvent(
+    repo,
+    { event, userId, ip: ctx.ip, requestId: ctx.requestId, metadata: meta },
+    { detect: true }
+  ).catch(() => undefined);
 }
 
 export function hashValue(normalized: string): string {
@@ -139,7 +136,13 @@ export async function requestIdentityChange(args: {
   });
 
   await deliverOtp(kind, normalized, code, kind === "email" ? "email_change" : "phone_change").catch(() => undefined);
-  await audit(repo, user.id, "identity.change.requested", { kind, requestId: request.id }, ctx);
+  await audit(
+    repo,
+    user.id,
+    kind === "email" ? EV.EMAIL_CHANGE_REQUESTED : EV.PHONE_CHANGE_REQUESTED,
+    { kind, requestId: request.id, newValueHash: hashValue(request.newValueNormalized) },
+    ctx
+  );
 
   return {
     ok: true,
@@ -169,6 +172,13 @@ export async function verifyChangeOtp(args: {
   if (now() > req.expiresAt) {
     req.status = "EXPIRED";
     await repo.updateChangeRequest(req);
+    await audit(
+      repo,
+      user.id,
+      req.kind === "email" ? EV.EMAIL_CHANGE_EXPIRED : EV.PHONE_CHANGE_EXPIRED,
+      { reason: "expired", requestId: req.id },
+      ctx
+    );
     return { ok: false, error: "انتهت مهلة طلب التغيير", status: 410 };
   }
 
@@ -187,9 +197,18 @@ export async function verifyChangeOtp(args: {
   if (!res.ok) {
     if (res.reason === "attempts_exceeded" || res.reason === "expired" || res.reason === "used") {
       req.status = res.reason === "attempts_exceeded" ? "EXPIRED" : req.status;
-      if (res.reason === "attempts_exceeded") await repo.updateChangeRequest(req);
+      if (res.reason === "attempts_exceeded") {
+        await repo.updateChangeRequest(req);
+        await audit(
+          repo,
+          user.id,
+          req.kind === "email" ? EV.EMAIL_CHANGE_EXPIRED : EV.PHONE_CHANGE_EXPIRED,
+          { reason: "attempts_exceeded", requestId },
+          ctx
+        );
+      }
     }
-    await audit(repo, user.id, "identity.otp.failed", { requestId, reason: res.reason }, ctx);
+    await audit(repo, user.id, EV.OTP_REJECTED, { kind: req.kind, requestId, reason: res.reason }, ctx);
     return { ok: false, error: "رمز التحقق غير صحيح أو منتهٍ", status: 400 };
   }
 
@@ -198,7 +217,13 @@ export async function verifyChangeOtp(args: {
   req.status = "NEW_VALUE_VERIFIED";
   req.verifiedAt = now();
   await repo.updateChangeRequest(req);
-  await audit(repo, user.id, "identity.otp.verified", { requestId }, ctx);
+  await audit(
+    repo,
+    user.id,
+    req.kind === "email" ? EV.EMAIL_CHANGE_VERIFIED : EV.PHONE_CHANGE_VERIFIED,
+    { requestId },
+    ctx
+  );
   return { ok: true, status: pendingDisplayStatus(req, now()) };
 }
 
@@ -228,6 +253,13 @@ export async function applyIdentityChange(args: {
   if (now() > req.expiresAt) {
     req.status = "EXPIRED";
     await repo.updateChangeRequest(req);
+    await audit(
+      repo,
+      user.id,
+      req.kind === "email" ? EV.EMAIL_CHANGE_EXPIRED : EV.PHONE_CHANGE_EXPIRED,
+      { reason: "expired", requestId: req.id },
+      ctx
+    );
     return { ok: false, error: "انتهت مهلة طلب التغيير", status: 410 };
   }
   if (req.status !== "NEW_VALUE_VERIFIED") {
@@ -255,8 +287,21 @@ export async function applyIdentityChange(args: {
   // إبطال جلسات الأجهزة الأخرى — لا يبقى المهاجم في جلسة قديمة
   if (keepSessionId) await repo.revokeOtherSessions(user.id, keepSessionId);
   else await repo.revokeAllSessions(user.id);
+  await audit(
+    repo,
+    user.id,
+    EV.SESSION_REVOKED,
+    { scope: keepSessionId ? "other" : "all", reason: "identity_change" },
+    ctx
+  );
 
-  await audit(repo, user.id, "identity.change.completed", { kind: req.kind, requestId: req.id }, ctx);
+  await audit(
+    repo,
+    user.id,
+    req.kind === "email" ? EV.EMAIL_CHANGE_COMPLETED : EV.PHONE_CHANGE_COMPLETED,
+    { kind: req.kind, requestId: req.id },
+    ctx
+  );
   return { ok: true, user: updated };
 }
 
@@ -274,7 +319,13 @@ export async function cancelIdentityChange(args: {
   req.status = "CANCELLED";
   req.completedAt = now();
   await repo.updateChangeRequest(req);
-  await audit(repo, user.id, "identity.change.cancelled", { requestId: req.id }, ctx);
+  await audit(
+    repo,
+    user.id,
+    req.kind === "email" ? EV.EMAIL_CHANGE_CANCELLED : EV.PHONE_CHANGE_CANCELLED,
+    { requestId: req.id },
+    ctx
+  );
   return { ok: true };
 }
 
@@ -301,7 +352,14 @@ export async function changePassword(args: {
   await repo.updateUser(updated);
   if (keepSessionId) await repo.revokeOtherSessions(user.id, keepSessionId);
   else await repo.revokeAllSessions(user.id);
-  await audit(repo, user.id, "identity.password.changed", {}, ctx);
+  await audit(repo, user.id, EV.PASSWORD_CHANGE, {}, ctx);
+  await audit(
+    repo,
+    user.id,
+    EV.SESSION_REVOKED,
+    { scope: keepSessionId ? "other" : "all", reason: "password_change" },
+    ctx
+  );
   return { ok: true };
 }
 
@@ -340,7 +398,13 @@ export async function startVerification(args: {
     target: normalized,
   });
   await deliverOtp(kind, normalized, code, kind === "email" ? "email_verify" : "phone_verify").catch(() => undefined);
-  await audit(repo, user.id, "identity.verification.requested", { kind }, ctx);
+  await audit(
+    repo,
+    user.id,
+    kind === "email" ? EV.EMAIL_VERIFICATION_REQUESTED : EV.PHONE_VERIFICATION_REQUESTED,
+    { kind, targetHash: sha256Hex(normalized) },
+    ctx
+  );
   return { ok: true, devOtpHint: devOtpHint ? code : undefined };
 }
 
@@ -362,7 +426,13 @@ export async function confirmVerification(args: {
     await repo.updateOtp(rec);
   });
   if (!res.ok) {
-    await audit(repo, user.id, "identity.otp.failed", { kind, reason: res.reason }, ctx);
+    await audit(
+      repo,
+      user.id,
+      kind === "email" ? EV.EMAIL_VERIFICATION_FAILED : EV.PHONE_VERIFICATION_FAILED,
+      { kind, reason: res.reason },
+      ctx
+    );
     return { ok: false, error: "رمز التحقق غير صحيح أو منتهٍ", status: 400 };
   }
   rec.consumedAt = now();
@@ -379,7 +449,13 @@ export async function confirmVerification(args: {
     updated.phoneVerifiedAt = now();
   }
   await repo.updateUser(updated);
-  await audit(repo, user.id, "identity.verification.completed", { kind }, ctx);
+  await audit(
+    repo,
+    user.id,
+    kind === "email" ? EV.EMAIL_VERIFICATION_SUCCEEDED : EV.PHONE_VERIFICATION_SUCCEEDED,
+    { kind },
+    ctx
+  );
   return { ok: true, user: updated };
 }
 
@@ -416,10 +492,11 @@ export async function requestRecovery(args: {
       target: normalized,
     });
     await deliverOtp("email", normalized, code, "password_reset").catch(() => undefined);
-    await audit(repo, user.id, "identity.recovery.requested", {}, ctx);
+    await audit(repo, user.id, EV.RECOVERY_REQUESTED, { emailHash: sha256Hex(normalized) }, ctx);
     return { ok: true, devOtpHint: devOtpHint ? code : undefined };
   }
-  await audit(repo, "", "identity.recovery.unknown-email", {}, ctx);
+  // استجابة موحدة + حدث موحّد (لا فرق بين موجود/غير موجود) — منع enumeration
+  await audit(repo, "", EV.RECOVERY_REQUESTED, { unknown: true, emailHash: sha256Hex(normalized) }, ctx);
   return { ok: true };
 }
 
@@ -435,24 +512,40 @@ export async function confirmRecovery(args: {
   const { repo, email, code, newPassword, ctx, now, policy = DEFAULT_POLICY } = args;
   const normalized = normalizeEmail(email);
   const user = normalized ? await repo.getUserByEmail(normalized) : null;
-  if (!user) return { ok: false, error: "رمز التحقق غير صحيح", status: 400 };
+  if (!user) {
+    await audit(
+      repo,
+      "",
+      EV.RECOVERY_FAILED,
+      { reason: "no_account", emailHash: normalized ? sha256Hex(normalized) : null },
+      ctx
+    );
+    return { ok: false, error: "رمز التحقق غير صحيح", status: 400 };
+  }
   if (newPassword.length < policy.minPasswordLength) {
     return { ok: false, error: `كلمة المرور يجب ألا تقل عن ${policy.minPasswordLength} أحرف`, status: 400 };
   }
   const rec = await latestOtp(repo, user.id, "password_reset");
-  if (!rec) return { ok: false, error: "ابدأ الاسترداد أولًا", status: 410 };
+  if (!rec) {
+    await audit(repo, user.id, EV.RECOVERY_FAILED, { reason: "no_otp" }, ctx);
+    return { ok: false, error: "ابدأ الاسترداد أولًا", status: 410 };
+  }
   const res = checkOtp(rec, code, now(), async (attempts, consumed) => {
     rec.attempts = attempts;
     if (consumed) rec.consumedAt = now();
     await repo.updateOtp(rec);
   });
-  if (!res.ok) return { ok: false, error: "رمز التحقق غير صحيح أو منتهٍ", status: 400 };
+  if (!res.ok) {
+    await audit(repo, user.id, EV.RECOVERY_FAILED, { reason: res.reason }, ctx);
+    return { ok: false, error: "رمز التحقق غير صحيح أو منتهٍ", status: 400 };
+  }
   rec.consumedAt = now();
   await repo.updateOtp(rec);
   const updated: User = { ...user, passwordHash: hashSecret(newPassword), updatedAt: now() };
   await repo.updateUser(updated);
   await repo.revokeAllSessions(user.id); // إبطال كل الجلسات بعد الاسترداد
-  await audit(repo, user.id, "identity.recovery.completed", {}, ctx);
+  await audit(repo, user.id, EV.SESSION_REVOKED, { scope: "all", reason: "recovery" }, ctx);
+  await audit(repo, user.id, EV.RECOVERY_COMPLETED, {}, ctx);
   return { ok: true };
 }
 

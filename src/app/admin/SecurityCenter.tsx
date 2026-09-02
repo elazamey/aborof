@@ -44,15 +44,36 @@ export default function SecurityCenter() {
   const [newPw, setNewPw] = useState("");
   const [code, setCode] = useState("");
   const [activeRequest, setActiveRequest] = useState<string | null>(null);
+  const [mon, setMon] = useState<{
+    degraded: boolean;
+    sinceHours?: number;
+    hotWindowDays?: number;
+    metrics?: {
+      email: { successRate: number | null };
+      phone: { successRate: number | null };
+      otp: { rejections: number; rateLimitHits: number };
+      identityChanges: { attempts: number };
+      recovery: { attempts: number };
+      sessionRevocations: number;
+      suspiciousEvents: number;
+    };
+    alerts?: { id: string; level: string; message: string; createdAt: number }[];
+  } | null>(null);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/identity/status");
     if (r.ok) setSt(await r.json());
   }, []);
 
+  const loadMon = useCallback(async () => {
+    const r = await fetch("/api/identity/monitoring");
+    if (r.ok) setMon(await r.json());
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadMon();
+  }, [load, loadMon]);
 
   async function api(path: string, body: unknown): Promise<{ ok: boolean; error?: string; data?: unknown }> {
     const r = await fetch(path, {
@@ -299,6 +320,58 @@ export default function SecurityCenter() {
           ) : (
             <p style={{ fontSize: ".85rem", color: "var(--muted)" }}>لا أحداث بعد.</p>
           )}
+        </div>
+        <div className="panel" style={{ marginTop: 16 }}>
+          <h3>📊 المراقبة الأمنية</h3>
+          {mon === null ? null : mon.degraded ? (
+            <p style={{ fontSize: ".85rem", color: "var(--muted)" }}>
+              ⚠️ القياس غير متاح حاليًا (degraded) — التدفقات تعمل بشكل طبيعي.
+            </p>
+          ) : mon.metrics ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                <span className="chip">
+                  بريد: {mon.metrics.email.successRate === null ? "—" : `${mon.metrics.email.successRate}%`}{" "}
+                  {mon.metrics.email.successRate !== null && mon.metrics.email.successRate >= 90 ? "✅" : "⚠️"}
+                </span>
+                <span className="chip">
+                  هاتف: {mon.metrics.phone.successRate === null ? "—" : `${mon.metrics.phone.successRate}%`}{" "}
+                  {mon.metrics.phone.successRate !== null && mon.metrics.phone.successRate >= 90 ? "✅" : "⚠️"}
+                </span>
+                <span className="chip">OTP رفض: {mon.metrics.otp.rejections}</span>
+                <span className="chip">حدود معدل: {mon.metrics.otp.rateLimitHits}</span>
+                <span className="chip">تغييرات هوية: {mon.metrics.identityChanges.attempts}</span>
+                <span className="chip">محاولات استرداد: {mon.metrics.recovery.attempts}</span>
+                <span className="chip">إبطال جلسات: {mon.metrics.sessionRevocations}</span>
+                <span className="chip">
+                  نشاط مشبوه: {mon.metrics.suspiciousEvents} {mon.metrics.suspiciousEvents > 0 ? "⚠️" : "✅"}
+                </span>
+              </div>
+              <p style={{ fontSize: ".75rem", color: "var(--muted)" }}>
+                نافذة: آخر {mon.sinceHours} ساعة — عدادات ساخنة {mon.hotWindowDays} يومًا
+              </p>
+              {mon.alerts && mon.alerts.length ? (
+                <>
+                  <h4 style={{ fontSize: ".9rem", margin: "8px 0 4px" }}>🚨 التنبيهات (آخر 7 أيام)</h4>
+                  {mon.alerts
+                    .slice(0, 8)
+                    .map((a: { id: string; level: string; message: string; createdAt: number }) => (
+                      <p key={a.id} style={{ fontSize: ".8rem", margin: "2px 0" }}>
+                        <span
+                          className={`chip${a.level === "CRITICAL" ? " active" : ""}`}
+                          style={{ fontSize: ".7rem" }}
+                        >
+                          {a.level}
+                        </span>{" "}
+                        {new Date(a.createdAt).toLocaleString("ar-EG")} — {a.message}
+                      </p>
+                    ))}
+                </>
+              ) : (
+                <p style={{ fontSize: ".85rem", color: "var(--muted)" }}>لا تنبيهات في الأيام السبعة الأخيرة. ✅</p>
+              )}
+            </>
+          ) : null}
         </div>
       </div>
     </div>

@@ -1,17 +1,17 @@
 {
   "gate": "PRE_RELEASE_GATE",
   "version": 1,
-  "commit_sha": "bfb1fd627940b54779b77b3cf1ae035ccf5332f7",
+  "commit_sha": "d038d4d00932fd32fe82758727b4adff4b2c2ff7",
   "branch": "arena/01a05f01-aborof",
-  "timestamp": "2026-09-02T01:56:16.142Z",
+  "timestamp": "2026-09-02T02:28:08.312Z",
   "summary": {
-    "total": 87,
-    "pass": 76,
+    "total": 92,
+    "pass": 81,
     "fail": 0,
     "not_configured": 11,
     "p0": {
-      "total": 34,
-      "pass": 31,
+      "total": 39,
+      "pass": 36,
       "fail": 0,
       "not_configured": 3
     },
@@ -89,7 +89,7 @@
       "area": "quality",
       "priority": "P1",
       "layer": "unit",
-      "name": "Vitest unit tests (129 passed)",
+      "name": "Vitest unit tests (152 passed)",
       "status": "PASS",
       "detail": "exit 0",
       "evidence": ""
@@ -261,7 +261,7 @@
       "layer": "perf",
       "name": "Bundle size budget (total static JS ≤ 1200 kB)",
       "status": "PASS",
-      "detail": "total=612 kB (12 chunks)",
+      "detail": "total=614 kB (12 chunks)",
       "evidence": ""
     },
     {
@@ -269,9 +269,9 @@
       "area": "reliability",
       "priority": "P1",
       "layer": "database",
-      "name": "Clean migration → schema v4",
+      "name": "Clean migration → schema v5",
       "status": "PASS",
-      "detail": "[migrate] OK — schema version 4 (required 4)",
+      "detail": "[migrate] OK — schema version 5 (required 5)",
       "evidence": ""
     },
     {
@@ -279,7 +279,7 @@
       "area": "reliability",
       "priority": "P1",
       "layer": "database",
-      "name": "Migration idempotency (rerun → v4)",
+      "name": "Migration idempotency (rerun → v5)",
       "status": "PASS",
       "detail": "second run OK, version stable",
       "evidence": ""
@@ -291,7 +291,7 @@
       "layer": "database",
       "name": "Constraints & indexes (NOT NULL, PK, idempotency index)",
       "status": "PASS",
-      "detail": "version=4 notnull=true idx=true pk=true",
+      "detail": "version=5 notnull=true idx=true pk=true",
       "evidence": ""
     },
     {
@@ -301,7 +301,7 @@
       "layer": "database",
       "name": "Backup/restore drill (copy → corrupt → restore → verify)",
       "status": "PASS",
-      "detail": "products=1 version=4",
+      "detail": "products=1 version=5",
       "evidence": ""
     },
     {
@@ -321,7 +321,7 @@
       "layer": "ui",
       "name": "Home page renders (200 + brand)",
       "status": "PASS",
-      "detail": "200 183ms",
+      "detail": "200 203ms",
       "evidence": ""
     },
     {
@@ -351,7 +351,7 @@
       "layer": "cart",
       "name": "Cart page renders (200)",
       "status": "PASS",
-      "detail": "200 11ms",
+      "detail": "200 12ms",
       "evidence": ""
     },
     {
@@ -361,7 +361,7 @@
       "layer": "checkout",
       "name": "Order create (COD) + stock decrement",
       "status": "PASS",
-      "detail": "ORD-14174571-f75f31b0 stock 40→38",
+      "detail": "ORD-16083807-51f851b0 stock 40→38",
       "evidence": ""
     },
     {
@@ -371,7 +371,7 @@
       "layer": "orders",
       "name": "Idempotency: same key → same order, stock decremented once",
       "status": "PASS",
-      "detail": "ORD-14174580-9d155e54 dup=true stock 38→37",
+      "detail": "ORD-16083818-a3c3a226 dup=true stock 38→37",
       "evidence": ""
     },
     {
@@ -381,7 +381,7 @@
       "layer": "orders",
       "name": "Double submit (different keys) → two distinct orders",
       "status": "PASS",
-      "detail": "ORD-14174593-e2792e70 ≠ ORD-14174600-637c64b5",
+      "detail": "ORD-16083833-844e5ed9 ≠ ORD-16083841-38a9bee1",
       "evidence": ""
     },
     {
@@ -601,7 +601,7 @@
       "layer": "perf",
       "name": "TTFB budgets (local, <1500ms)",
       "status": "PASS",
-      "detail": "home=16ms product=13ms",
+      "detail": "home=14ms product=16ms",
       "evidence": ""
     },
     {
@@ -702,6 +702,56 @@
       "name": "Password change: re-auth enforced + success",
       "status": "PASS",
       "detail": "403/200",
+      "evidence": ""
+    },
+    {
+      "id": "M01-MONITOR-INSTRUMENTED",
+      "area": "security",
+      "priority": "P0",
+      "layer": "monitoring",
+      "name": "All 24 canonical security events are emitted by identity flows (no decorative counters)",
+      "status": "PASS",
+      "detail": "24 events wired",
+      "evidence": ""
+    },
+    {
+      "id": "M02-MONITOR-METRICS",
+      "area": "security",
+      "priority": "P0",
+      "layer": "monitoring",
+      "name": "Verification counters move after a real OTP cycle; no secrets in the monitoring payload",
+      "status": "PASS",
+      "detail": "succeeded=2 rate=100%",
+      "evidence": ""
+    },
+    {
+      "id": "M03-MONITOR-ALERTS",
+      "area": "security",
+      "priority": "P0",
+      "layer": "monitoring",
+      "name": "Recovery-abuse detector fires WARNING; rate-limit hit counted (429 → otp_rate_limited)",
+      "status": "PASS",
+      "detail": "429 reached; recovery_abuse=WARNING; rateLimitHits=2",
+      "evidence": ""
+    },
+    {
+      "id": "M04-MONITOR-FAILOPEN",
+      "area": "security",
+      "priority": "P0",
+      "layer": "monitoring",
+      "name": "Monitoring disabled (MONITOR_DISABLED=1): auth+verification still succeed; dashboard reports degraded",
+      "status": "PASS",
+      "detail": "login=200 verify=200/200 degraded=true",
+      "evidence": ""
+    },
+    {
+      "id": "M05-MONITOR-THRESHOLDS",
+      "area": "security",
+      "priority": "P0",
+      "layer": "monitoring",
+      "name": "Alert thresholds live in the policy module (env-configurable), not in routes",
+      "status": "PASS",
+      "detail": "12 MONITOR_* env knobs",
       "evidence": ""
     },
     {
@@ -911,7 +961,7 @@
       "layer": "release",
       "name": "Release SHA pinned & recorded",
       "status": "PASS",
-      "detail": "HEAD=bfb1fd627940b54779b77b3cf1ae035ccf5332f7 branch=arena/01a05f01-aborof",
+      "detail": "HEAD=d038d4d00932fd32fe82758727b4adff4b2c2ff7 branch=arena/01a05f01-aborof",
       "evidence": ""
     }
   ]

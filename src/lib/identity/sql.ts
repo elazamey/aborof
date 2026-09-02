@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client";
 import { ChangeRequest, IdentityRepo, OtpKind, OtpRecord, SecurityEvent, SessionRecord, User } from "./types";
+import type { SecurityAlert } from "../monitoring/types";
 import { newId } from "./otp";
 
 /**
@@ -61,6 +62,18 @@ export const IDENTITY_SCHEMA = [
     request_id TEXT,
     created_at INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS security_alerts (
+    id TEXT PRIMARY KEY,
+    alert_key TEXT NOT NULL UNIQUE,
+    level TEXT NOT NULL,
+    type TEXT NOT NULL,
+    user_id TEXT,
+    ip_hash TEXT,
+    message TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER
+  )`,
   `CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -73,6 +86,7 @@ export const IDENTITY_SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_verification_tokens_user ON verification_tokens(user_id, kind)`,
   `CREATE INDEX IF NOT EXISTS idx_identity_change_user ON identity_change_requests(user_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_alerts_created ON security_alerts(created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
 ];
 
@@ -339,6 +353,54 @@ export function createSqlIdentityRepo(c: Client): IdentityRepo {
       ]);
       return r.rows.map((row) => rowToEvent(row as Row));
     },
+    async listSecurityEventsSince(since, limit) {
+      const r = await c.execute(
+        "SELECT * FROM security_events WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
+        [since, limit ?? 1000]
+      );
+      return r.rows.map((row) => rowToEvent(row as Row));
+    },
+    async sumOtpAttemptsSince(since) {
+      const r = await c.execute(
+        "SELECT COALESCE(SUM(attempts), 0) AS n FROM verification_tokens WHERE created_at >= ?",
+        [since]
+      );
+      return Number(r.rows[0]?.n ?? 0);
+    },
+    async createAlert(a) {
+      await c.execute(
+        `INSERT INTO security_alerts (id, alert_key, level, type, user_id, ip_hash, message, metadata, created_at, resolved_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [a.id, a.alertKey, a.level, a.type, a.userId, a.ipHash, a.message, a.metadata, a.createdAt, a.resolvedAt]
+      );
+    },
+    async listAlerts(since, limit) {
+      const r = await c.execute(
+        "SELECT * FROM security_alerts WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
+        [since, limit ?? 200]
+      );
+      return r.rows.map((row) => rowToAlert(row as Row));
+    },
+    async deleteSecurityEventsOlderThan(ts) {
+      await c.execute("DELETE FROM security_events WHERE created_at < ?", [ts]);
+    },
+    async deleteAlertsOlderThan(ts) {
+      await c.execute("DELETE FROM security_alerts WHERE created_at < ?", [ts]);
+    },
+  };
+}
+
+function rowToAlert(r: Row): SecurityAlert {
+  return {
+    id: String(r.id),
+    alertKey: String(r.alert_key),
+    level: String(r.level) as "INFO" | "WARNING" | "CRITICAL",
+    type: String(r.type),
+    userId: r.user_id === null || r.user_id === undefined ? null : String(r.user_id),
+    ipHash: r.ip_hash === null || r.ip_hash === undefined ? null : String(r.ip_hash),
+    message: String(r.message),
+    metadata: String(r.metadata),
+    createdAt: Number(r.created_at),
+    resolvedAt: r.resolved_at === null || r.resolved_at === undefined ? null : Number(r.resolved_at),
   };
 }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminSession, ADMIN_COOKIE, isAdminConfigured, passwordMatches, sessionMaxAge } from "@/lib/auth";
+import { ensureSchema } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
 import { createSessionRecord, ensureOwner, identityRepo, policyFromEnv } from "@/lib/identity";
 
@@ -24,6 +25,9 @@ export async function POST(request: Request) {
     if (typeof body?.password !== "string" || !passwordMatches(body.password)) {
       return NextResponse.json({ error: "بيانات الدخول غير صحيحة" }, { status: 401 });
     }
+
+    // تأكد من جاهزية المخطط قبل أول استخدام (قاعدة جديدة تمامًا)
+    await ensureSchema();
 
     // IDENTITY-HARDENING-01: تسجيل الدخول ينشئ/يحدّث حساب المالك + جلسة قابلة للإبطال
     const repo = identityRepo();

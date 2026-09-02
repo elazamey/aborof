@@ -59,6 +59,10 @@ export type ChangeRequest = {
   requestId: string | null;
 };
 
+import type { SecurityAlert } from "../monitoring/types";
+
+export type { SecurityAlert } from "../monitoring/types";
+
 export type SessionRecord = {
   id: string;
   userId: string;
@@ -102,6 +106,12 @@ export interface IdentityRepo {
   revokeAllSessions(userId: string): Promise<void>;
   createSecurityEvent(e: SecurityEvent): Promise<void>;
   listSecurityEvents(userId: string, limit: number): Promise<SecurityEvent[]>;
+  listSecurityEventsSince(since: number, limit?: number): Promise<SecurityEvent[]>;
+  sumOtpAttemptsSince(since: number): Promise<number>;
+  createAlert(a: SecurityAlert): Promise<void>;
+  listAlerts(since: number, limit?: number): Promise<SecurityAlert[]>;
+  deleteSecurityEventsOlderThan(ts: number): Promise<void>;
+  deleteAlertsOlderThan(ts: number): Promise<void>;
 }
 
 export type IdentityPolicy = {

@@ -7,6 +7,8 @@ import {
   devOtpHintEnabled,
   deliverOtp,
 } from "@/lib/identity";
+import { rateLimit } from "@/lib/rate-limit";
+import { recordSecurityEvent } from "@/lib/monitoring";
 import { json, ipOf } from "../helpers";
 
 export const runtime = "nodejs";
@@ -28,6 +30,20 @@ export async function POST(request: Request) {
   const ctx = { ip: ipOf(request), requestId: request.headers.get("x-request-id") };
 
   if (mode === "start") {
+    // معدّل إرسال OTP للتحقق — سياسة لكل عملية (5/15 دقيقة لكل حساب)
+    const sendLimit = rateLimit(request, `identity-otp-send-${kind}`, 5, 15 * 60 * 1000);
+    if (!sendLimit.ok) {
+      await recordSecurityEvent(repo, {
+        event: "otp_rate_limited",
+        userId: s.user.id,
+        ip: ipOf(request),
+        requestId: request.headers.get("x-request-id"),
+        metadata: { scope: `identity-otp-send-${kind}`, limit: 5, windowMs: 15 * 60 * 1000 },
+      }).catch(() => undefined);
+      const response = json({ error: "محاولات كثيرة، حاول بعد قليل" }, 429);
+      response.headers.set("Retry-After", String(sendLimit.retryAfter));
+      return response;
+    }
     const value = kind === "email" ? s.user.email : String(body?.value ?? "");
     const result = await startVerification({
       repo,

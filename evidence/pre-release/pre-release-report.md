@@ -1,10 +1,10 @@
 # PRE_RELEASE_GATE — Evidence
 
 - **القرار:** RELEASE_BLOCKED
-- **الـ SHA:** `bfb1fd627940b54779b77b3cf1ae035ccf5332f7` (فرع: arena/01a05f01-aborof)
-- **التاريخ:** 2026-09-02T01:56:16.142Z
-- **المُلخص:** 76 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 87)
-- **P0:** 31 PASS / 0 FAIL / 3 NOT_CONFIGURED
+- **الـ SHA:** `d038d4d00932fd32fe82758727b4adff4b2c2ff7` (فرع: arena/01a05f01-aborof)
+- **التاريخ:** 2026-09-02T02:28:08.313Z
+- **المُلخص:** 81 PASS / 0 FAIL / 11 NOT_CONFIGURED (إجمالي 92)
+- **P0:** 36 PASS / 0 FAIL / 3 NOT_CONFIGURED
 - **P1:** 45 PASS / 0 FAIL / 8 NOT_CONFIGURED
 
 ## Blockers
@@ -21,7 +21,7 @@
 | L1-TSC | P1 | quality | PASS | TypeScript (tsc --noEmit) | exit 0 |
 | L1-ROUTES | P1 | quality | PASS | Route inventory & coverage | exit 0 |
 | L1-FMT | P1 | quality | PASS | Prettier format check | exit 0 |
-| L1-UNIT | P1 | quality | PASS | Vitest unit tests (129 passed) | exit 0 |
+| L1-UNIT | P1 | quality | PASS | Vitest unit tests (152 passed) | exit 0 |
 | S04-XSS | P1 | security | PASS | No dangerouslySetInnerHTML in src | grep found 0 matches |
 | S05-SQLI | P1 | security | PASS | Parameterized SQL only (no ${} inside execute on user-input surface) | grep found 0 matches |
 | S06-SECRETS | P1 | security | PASS | No obvious secret patterns in tracked files (HEAD) | git grep 0 hits |
@@ -38,19 +38,19 @@
 | RC02-ROLLBACK | P0 | release | PASS | Migrations additive (no DROP/RENAME) | inspection OK |
 | RC03-ROLLBACK-EVID | P0 | release | PASS | Rollback readiness evidence | evidence/deploy-result/rollback-readiness.md (observed drill) |
 | L2-BUILD | P1 | quality | PASS | Production build (next build) | exit 0 |
-| PL07-BUNDLE | P1 | platform | PASS | Bundle size budget (total static JS ≤ 1200 kB) | total=612 kB (12 chunks) |
-| R01-MIGRATE | P1 | reliability | PASS | Clean migration → schema v4 | [migrate] OK — schema version 4 (required 4) |
-| R02-MIGRATE-IDEM | P1 | reliability | PASS | Migration idempotency (rerun → v4) | second run OK, version stable |
-| R03-SCHEMA | P1 | reliability | PASS | Constraints & indexes (NOT NULL, PK, idempotency index) | version=4 notnull=true idx=true pk=true |
-| R05-BACKUP | P1 | reliability | PASS | Backup/restore drill (copy → corrupt → restore → verify) | products=1 version=4 |
+| PL07-BUNDLE | P1 | platform | PASS | Bundle size budget (total static JS ≤ 1200 kB) | total=614 kB (12 chunks) |
+| R01-MIGRATE | P1 | reliability | PASS | Clean migration → schema v5 | [migrate] OK — schema version 5 (required 5) |
+| R02-MIGRATE-IDEM | P1 | reliability | PASS | Migration idempotency (rerun → v5) | second run OK, version stable |
+| R03-SCHEMA | P1 | reliability | PASS | Constraints & indexes (NOT NULL, PK, idempotency index) | version=5 notnull=true idx=true pk=true |
+| R05-BACKUP | P1 | reliability | PASS | Backup/restore drill (copy → corrupt → restore → verify) | products=1 version=5 |
 | R06-DRILL | P1 | reliability | PASS | Resilience drills L5 (6 drills, injected failures) | exit 0 — DRILL-01..06 PASS |
-| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 183ms |
+| F01-HOME | P0 | functional | PASS | Home page renders (200 + brand) | 200 203ms |
 | F02-PRODUCTS | P0 | functional | PASS | Products API (list, fields complete) | 12 products |
 | F03-PRODUCT-PAGE | P0 | functional | PASS | Product page (200) + unknown product (404) | detail=200 notfound=404 |
-| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 11ms |
-| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-14174571-f75f31b0 stock 40→38 |
-| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-14174580-9d155e54 dup=true stock 38→37 |
-| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-14174593-e2792e70 ≠ ORD-14174600-637c64b5 |
+| F04-CART | P0 | functional | PASS | Cart page renders (200) | 200 12ms |
+| F05-ORDER-COD | P0 | functional | PASS | Order create (COD) + stock decrement | ORD-16083807-51f851b0 stock 40→38 |
+| F06-IDEMPOTENCY | P0 | functional | PASS | Idempotency: same key → same order, stock decremented once | ORD-16083818-a3c3a226 dup=true stock 38→37 |
+| F07-DOUBLE-SUBMIT | P0 | functional | PASS | Double submit (different keys) → two distinct orders | ORD-16083833-844e5ed9 ≠ ORD-16083841-38a9bee1 |
 | F08-VALIDATION | P0 | functional | PASS | Order validation battery (422/400/409/413) |  |
 | F09-AUTH | P0 | functional | PASS | Admin login (401 wrong / 200 right), session, logout | bad=401 good=200 logout→false |
 | S03-COOKIE | P1 | security | PASS | Admin cookie flags (HttpOnly, SameSite=Lax, Secure, Path=/) | observed on Set-Cookie |
@@ -72,7 +72,7 @@
 | PL09-SEO | P1 | platform | PASS | SEO metadata (title + meta description) | observed in <head> |
 | PL10-ROBOTS | P1 | platform | PASS | robots.txt served (disallow /admin, /api) | 200 User-Agent: * |
 | PL12-404 | P1 | platform | PASS | 404 status for unknown pages | observed |
-| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=16ms product=13ms |
+| PL06-TTFB | P1 | platform | PASS | TTFB budgets (local, <1500ms) | home=14ms product=16ms |
 | RC07-RID | P0 | release | PASS | Request-ID echo (proxy → response header) | observed |
 | I01-IDENTITY-AUTH | P0 | security | PASS | Identity endpoints require auth (401 without cookie) | 401 |
 | I02-IDENTITY-EMAIL-VERIFY | P0 | security | PASS | Email verification (OTP start→confirm→verified) | emailVerified=true |
@@ -83,6 +83,11 @@
 | I07-IDENTITY-RECOVERY-NO-ENUM | P0 | security | PASS | Recovery: uniform response (no enumeration) + wrong OTP rejected | 200/200/400 |
 | I08-IDENTITY-RATELIMIT | P0 | security | PASS | Rate limit on recovery OTP (429) | 429 after ≤7 rapid requests |
 | I09-IDENTITY-PASSWORD-CHANGE | P0 | security | PASS | Password change: re-auth enforced + success | 403/200 |
+| M01-MONITOR-INSTRUMENTED | P0 | security | PASS | All 24 canonical security events are emitted by identity flows (no decorative counters) | 24 events wired |
+| M02-MONITOR-METRICS | P0 | security | PASS | Verification counters move after a real OTP cycle; no secrets in the monitoring payload | succeeded=2 rate=100% |
+| M03-MONITOR-ALERTS | P0 | security | PASS | Recovery-abuse detector fires WARNING; rate-limit hit counted (429 → otp_rate_limited) | 429 reached; recovery_abuse=WARNING; rateLimitHits=2 |
+| M04-MONITOR-FAILOPEN | P0 | security | PASS | Monitoring disabled (MONITOR_DISABLED=1): auth+verification still succeed; dashboard reports degraded | login=200 verify=200/200 degraded=true |
+| M05-MONITOR-THRESHOLDS | P0 | security | PASS | Alert thresholds live in the policy module (env-configurable), not in routes | 12 MONITOR_* env knobs |
 | E2E01-JOURNEY | P1 | functional | PASS | Critical journey (products → cart → order → admin → status → cancel) | HTTP-level E2E across F-gates PASS |
 | RC07-LOGS | P0 | release | PASS | Structured JSON logs (server) | 106 log lines observed |
 | RC07-NOLEAK-LOGS | P0 | release | PASS | No secret values in server logs | grep: 0 hits |
@@ -103,6 +108,6 @@
 | PL08-LAB-METRICS | P1 | platform | NOT_CONFIGURED | Lab metrics (LCP/INP/CLS) | تحتاج أدوات متصفح (Lighthouse/Playwright) — غير متاحة في هذه البيئة (NOT_CONFIGURED) |
 | PL11-SEO-URLS | P1 | platform | NOT_CONFIGURED | Canonical/OG/sitemap/JSON-LD (absolute URLs) | تحتاج PRODUCTION_URL (غير مهيأ بعد) — تُضاف مع اكتمال إعداد الإنتاج (NOT_CONFIGURED) |
 | RC10-EVIDENCE | P0 | release | PASS | Evidence completeness (deploy-result + L5 + rollback) | all present |
-| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=bfb1fd627940b54779b77b3cf1ae035ccf5332f7 branch=arena/01a05f01-aborof |
+| RC11-SHA | P0 | release | PASS | Release SHA pinned & recorded | HEAD=d038d4d00932fd32fe82758727b4adff4b2c2ff7 branch=arena/01a05f01-aborof |
 
 _كل النتائج مُلاحَظة من تشغيل فعلي (لا PASS مفترض). الأسماء فقط لأي متغيرات بيئة — لا قيم._
