@@ -1,0 +1,39 @@
+# PRE_RELEASE_GATE — CI job مستقل (بوابة الإصدار الرسمية).
+#
+# القاعدة: البوابة مطلوبة قبل أي Production Release.
+# ملاحظة: من المتوقع أن تبقى حمراء (RELEASE_BLOCKED) حتى يكتمل إعداد الإنتاج
+# (Production Config / Monitoring / Post-deploy) — هذا مقصود، وليس خطأً.
+#
+# يمنع تشغيل نسخ قديمة من نفس الفرع عند وصول تحديث أحدث.
+on:
+  push:
+    branches: [main, "arena/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pre-release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-release-gate:
+    name: PRE_RELEASE_GATE
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run the gate
+        run: npm run pre-release

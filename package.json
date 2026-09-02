@@ -14,8 +14,9 @@
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:drill": "node scripts/resilience-drill.mjs",
     "verify": "npm run lint && npx tsc --noEmit && npm run routes:inventory && npm run format:check && npm run test:unit && npm run build && npm run test:smoke",
-    "release:check": "npm run verify && npm run test:drill",
-    "routes:inventory": "node scripts/route-inventory.mjs --check"
+    "release:check": "npm run verify && npm run test:drill && npm run pre-release",
+    "routes:inventory": "node scripts/route-inventory.mjs --check",
+    "pre-release": "node scripts/pre-release.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
