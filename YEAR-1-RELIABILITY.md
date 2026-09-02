@@ -43,20 +43,20 @@
 
 ## 3. الوحدات الـ12 (YEAR-1-RELIABILITY)
 
-| #   | الوحدة                    | الحالة            | الدليل / التنفيذ                                                                              |
-| --- | ------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| #   | الوحدة                    | الحالة            | الدليل / التنفيذ                                                                                             |
+| --- | ------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
 | 01  | PRE_RELEASE_GATE          | ✅ **نشط ومُثبت** | `scripts/pre-release.mjs` — 66 بوابة (بعد R07 + C1/C2 + S06B + S10 + PL13-PL17 UI) — `evidence/pre-release/` |
-| 02  | CONTINUOUS_MONITORING     | 🔶 جاهز جزئيًا    | `synthetic-monitor.yml` (كل 15 دقيقة) — الفعّال يتطلب `PRODUCTION_URL`                        |
-| 03  | DATA_INTEGRITY            | ✅ **منفّذ**      | `scripts/integrity-watchdog.mjs` + بوابة R07 — 7 فحوصات invariants                            |
-| 04  | BACKUP_RESTORE            | ✅ منفّذ (عقد)    | بوابة R05 (نسخ→تلف→استعادة→تحقق) + `migrate-check` — الجدولة بعد النشر                        |
-| 05  | FAILURE_INJECTION         | ✅ منفّذ          | `FAULT_INJECTION` (fail/delay) + DRILL-01..06                                                 |
-| 06  | INCIDENT_RESPONSE         | 🔶 مسودة          | القسم 7 أدناه (SEV + Runbooks) — توثيق + تنفيذ عند أول incident                               |
-| 07  | DEPENDENCY_SECURITY       | ✅ منفّذ          | `npm audit` في CI (يفشل عند High/Critical) + secret scan + EX07                               |
-| 08  | REGRESSION_VAULT          | ✅ أساسه موجود    | 54 اختبار وحدة (أغلبها regressions موثّقة) — يُضاف كل incident                                |
-| 09  | RELEASE_PROVENANCE        | ✅ منفّذ          | `evidence/pre-release/pre-release-result.json` (SHA, timestamp, gate results)                 |
-| 10  | SLO_ERROR_BUDGET          | ✅ آلة الحساب     | `src/lib/reliability/slo.ts` (ErrorBudget) — التغذية الفعلية بعد النشر                        |
-| 11  | DISASTER_RECOVERY         | 🔶 مسودة          | Runbook أدناه + drill أولي (R05) — تمرين كامل ربع سنوي                                        |
-| 12  | MONTHLY_RESILIENCE_DRILLS | 🔶 مخطط           | جدول القسم 9 — أول تمرين بعد النشر                                                            |
+| 02  | CONTINUOUS_MONITORING     | 🔶 جاهز جزئيًا    | `synthetic-monitor.yml` (كل 15 دقيقة) — الفعّال يتطلب `PRODUCTION_URL`                                       |
+| 03  | DATA_INTEGRITY            | ✅ **منفّذ**      | `scripts/integrity-watchdog.mjs` + بوابة R07 — 7 فحوصات invariants                                           |
+| 04  | BACKUP_RESTORE            | ✅ منفّذ (عقد)    | بوابة R05 (نسخ→تلف→استعادة→تحقق) + `migrate-check` — الجدولة بعد النشر                                       |
+| 05  | FAILURE_INJECTION         | ✅ منفّذ          | `FAULT_INJECTION` (fail/delay) + DRILL-01..06                                                                |
+| 06  | INCIDENT_RESPONSE         | 🔶 مسودة          | القسم 7 أدناه (SEV + Runbooks) — توثيق + تنفيذ عند أول incident                                              |
+| 07  | DEPENDENCY_SECURITY       | ✅ منفّذ          | `npm audit` في CI (يفشل عند High/Critical) + secret scan + EX07                                              |
+| 08  | REGRESSION_VAULT          | ✅ أساسه موجود    | 54 اختبار وحدة (أغلبها regressions موثّقة) — يُضاف كل incident                                               |
+| 09  | RELEASE_PROVENANCE        | ✅ منفّذ          | `evidence/pre-release/pre-release-result.json` (SHA, timestamp, gate results)                                |
+| 10  | SLO_ERROR_BUDGET          | ✅ آلة الحساب     | `src/lib/reliability/slo.ts` (ErrorBudget) — التغذية الفعلية بعد النشر                                       |
+| 11  | DISASTER_RECOVERY         | 🔶 مسودة          | Runbook أدناه + drill أولي (R05) — تمرين كامل ربع سنوي                                                       |
+| 12  | MONTHLY_RESILIENCE_DRILLS | 🔶 مخطط           | جدول القسم 9 — أول تمرين بعد النشر                                                                           |
 
 ---
 
