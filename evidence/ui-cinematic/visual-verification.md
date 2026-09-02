@@ -29,16 +29,32 @@
 - [ ] الـcheckout: يعمل بدون 3D — أسرع وأسهل من الرئيسية
 - [ ] الإيموجي يظهر على جميع المقاسات، وبدون أي WebGL (صفر تبعيات)
 
-### 3) لقطات شاشة آلية — جاهزة لأي بيئة بها متصفح
+### 3) لقطات شاشة حقيقية (نُفّذت في CI — google-chrome على ubuntu-latest)
 
-الساندبوكس الحالي لا يملك متصفحًا (CDN تحميل المتصفحات محجوب) — نفس سبب بقاء `E2E02-BROWSER` و`PL08-LAB-METRICS` على NOT_CONFIGURED. أُضيف سكربت جاهز:
+التُقطت 8 لقطات عبر `scripts/ui-shots.mjs` ضد خادم الإنتاج الحقيقي (`next start`) داخل GitHub Actions (متصفح حقيقي + شبكة كاملة)، وسُحبت إلى الفرع في `evidence/ui-cinematic/shots/`:
+
+| اللقطة | الحجم | الوجهة |
+| ------ | ----- | ------ |
+| `desktop-home.png` (1440×900) | 1.2 MB | الرئيسية — الهيرو + البطاقات |
+| `desktop-product.png` | 410 KB | صفحة منتج + مشابهات |
+| `desktop-cart.png` | 250 KB | السلة (فارغة) |
+| `desktop-admin.png` | 287 KB | لوحة التحكم |
+| `mobile-home.png` (390×844) | 945 KB | الرئيسية موبايل |
+| `mobile-product.png` | 334 KB | صفحة منتج موبايل |
+| `mobile-cart.png` | 181 KB | السلة موبايل |
+| `mobile-admin.png` | 181 KB | لوحة التحكم موبايل |
+
+مرجع التشغيل: run `33580222532` (success) — commit `75225dd`.
+
+### 4) سكربت اللقطات (مستدام)
 
 ```bash
-npm i --no-save playwright-core && npx playwright-core install chromium
-node scripts/ui-shots.mjs http://localhost:3000   # → evidence/ui-cinematic/shots/
+npm i --no-save playwright-core
+CHROME_PATH=/usr/bin/google-chrome node scripts/ui-shots.mjs http://localhost:3000
+# أو محليًا مع متصفح مثبت: node scripts/ui-shots.mjs http://localhost:3000
 ```
 
-يُنتج 8 لقطات: {home, product, cart, admin} × {desktop 1440×900, mobile 390×844} ويحفظها في `evidence/ui-cinematic/shots/`.
+يُنتج 8 لقطات ويحفظها في `evidence/ui-cinematic/shots/`.
 
 ## ماذا يضمن فحص الـUI داخل البوابة؟ (PASS في آخر تشغيل)
 
