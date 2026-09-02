@@ -96,3 +96,25 @@ Deployment execution: BLOCKED ❌ — VERCEL_DEPLOY_ENABLED != true (مُلاح�
 بيئة Production على GitHub. متغيرات/أسرار البيئة غير قابلة للقراءة من جلسة الوكيل (403) —
 التحقق/الضبط يتم من مالك المستودع في GitHub Settings → Environments → Production.
 لا شيء نُشر، ولا شيء تغيّر في الإنتاج.
+
+---
+
+# معايير قبول TASK-02 — قرار المالك (2026-09-02)
+
+> **قرار/عقد إطلاق** — ليس نتيجة مفترضة. يُطبَّق على كل محاولة نشر قادمة.
+
+```text
+Configuration        → VERCEL_DEPLOY_ENABLED=true + PRODUCTION_URL + الأسرار السبعة (أسماء فقط)
+Immutable RC         → rc-53ca4942ce29766a738991cd726d2183bd96a3cc (لا tag جديد)
+RC_SHA == TAG_SHA    → شرط إجباري
+Production migration → v5 (على DB الإنتاج، قبل أي traffic)
+Build → Vercel deploy → Deployment ID
+DEPLOYED_SHA         → يجب إثبات أن التطبيق الذي يخدم Production فعلًا مرتبط بنفس RC:
+                        GitHub RC SHA == deployment source/revision == deployed production revision
+                        (مجرد وجود Deployment ID ليس نجاحًا)
+Health → Ready → Homepage → Known product → Auth/security smoke → Post-deploy smoke
+```
+
+- **أي عنصر يفشل** (بما فيه تعذّر إثبات DEPLOYED_SHA == RC) → `Deployment Gate = BLOCKED` + تحليل السبب، دون إعادة تشغيل عمياء.
+- **TASK-02 = PASS** فقط عند: RC_SHA ✅ + TAG_SHA ✅ + DEPLOYED_SHA ✅ + Health ✅ + Ready ✅ + Smoke ✅.
+- عندها فقط يُفتح TASK-03: 24–72h Production Observation → Synthetic Monitoring → Error/Latency/DB/Auth checks → Soft Launch (بدون أي تغيير كود أثناء الانتظار).
