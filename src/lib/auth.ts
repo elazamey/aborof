@@ -58,6 +58,12 @@ export function verifyAdminSession(token: string | undefined) {
   return Date.now() - issuedAt <= SESSION_MAX_AGE * 1000;
 }
 
+/**
+ * تحقق من سلامة توكن الإدارة (HMAC + صلاحية) فقط — ليس تفويضًا بذاته.
+ * ⚠️ لا تستخدمه لأي قرار صلاحية في مسار: السلطة الوحيدة للتفويض هي
+ *    authenticateAdminRequest (تفحص جدول sessions — نشط وغير مُبطَل).
+ * هذه الدالة محفوظة للاختبارات وكتحقق مكوّن فرعي داخل authenticateAdminRequest.
+ */
 export function isAdminRequest(request: Request) {
   const cookieHeader = request.headers.get("cookie") ?? "";
   const token = cookieHeader

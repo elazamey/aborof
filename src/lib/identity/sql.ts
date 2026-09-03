@@ -88,6 +88,10 @@ export const IDENTITY_SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_security_alerts_created ON security_alerts(created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+  `CREATE TABLE IF NOT EXISTS otp_cooldowns (
+    cooldown_key TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  )`,
 ];
 
 type Row = Record<string, unknown>;
@@ -187,6 +191,10 @@ export function createSqlIdentityRepo(c: Client): IdentityRepo {
       const r = await c.execute("SELECT * FROM users WHERE phone_normalized = ?", [normalized]);
       return r.rows[0] ? rowToUser(r.rows[0] as Row) : null;
     },
+    async getOwner() {
+      const r = await c.execute("SELECT * FROM users WHERE role = 'owner' LIMIT 1");
+      return r.rows[0] ? rowToUser(r.rows[0] as Row) : null;
+    },
     async createUser(u) {
       await c.execute(
         `INSERT INTO users (id, email, email_normalized, email_verified_at, phone, phone_normalized, phone_verified_at,
@@ -265,6 +273,23 @@ export function createSqlIdentityRepo(c: Client): IdentityRepo {
         o.consumedAt,
         o.id,
       ]);
+    },
+    async acquireOtpCooldown(key, now, cooldownMs) {
+      const expiresAt = now + cooldownMs;
+      // جملة واحدة ذرّية: إدراج جديد أو تحديث فقط إن كانت الفتحة منتهية.
+      // rowsAffected === 1 → الحجز نجح (إرسال مسموح)؛ === 0 → لا تزال في cooldown.
+      const r = await c.execute(
+        `INSERT INTO otp_cooldowns (cooldown_key, expires_at) VALUES (?, ?)
+         ON CONFLICT(cooldown_key) DO UPDATE SET expires_at = excluded.expires_at
+         WHERE otp_cooldowns.expires_at <= ?`,
+        [key, expiresAt, now]
+      );
+      if (r.rowsAffected === 1) return { ok: true, retryAfterMs: 0 };
+      // لا تزال في cooldown — اقرأ المتبقي فقط (لـ Retry-After دقيق)؛
+      // القرار نفسه (رفض) حُسم ذرّيًا في الجملة أعلاه.
+      const cur = await c.execute("SELECT expires_at FROM otp_cooldowns WHERE cooldown_key = ?", [key]);
+      const remaining = Number(cur.rows[0]?.expires_at ?? 0) - now;
+      return { ok: false, retryAfterMs: Math.max(0, remaining) };
     },
     async createChangeRequest(cr) {
       await c.execute(

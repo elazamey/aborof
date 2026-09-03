@@ -87,11 +87,20 @@ export interface IdentityRepo {
   getUserById(id: string): Promise<User | null>;
   getUserByEmail(normalized: string): Promise<User | null>;
   getUserByPhone(normalized: string): Promise<User | null>;
+  getOwner(): Promise<User | null>;
   createUser(u: User): Promise<void>;
   updateUser(u: User): Promise<void>;
   createOtp(o: OtpRecord): Promise<void>;
   getOtpById(id: string): Promise<OtpRecord | null>;
   listOtps(userId: string, kind: OtpKind): Promise<OtpRecord[]>;
+  /**
+   * cooldown إعادة إرسال OTP من حالة مستمرة (DB) — عملية ذرّية (atomic):
+   * يحاول حجز الفتحة `key` حتى `now + cooldownMs`؛ إن كانت فتحة نشطة قائمة
+   * (expires_at > now) يرفض ويعيد الميلي ثانية المتبقية لـ Retry-After دقيق.
+   * لا يوجد نافذة SELECT→check→INSERT (قرار واحد داخل جملة SQL واحدة)،
+   * لذا لا يستطيع إرسالان متزامنان تجاوز الـcooldown معًا.
+   */
+  acquireOtpCooldown(key: string, now: number, cooldownMs: number): Promise<{ ok: boolean; retryAfterMs: number }>;
   updateOtp(o: OtpRecord): Promise<void>;
   createChangeRequest(c: ChangeRequest): Promise<void>;
   getChangeRequestById(id: string): Promise<ChangeRequest | null>;

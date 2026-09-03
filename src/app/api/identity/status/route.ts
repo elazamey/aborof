@@ -1,4 +1,4 @@
-import { requireSession, identityRepo, policyFromEnv } from "@/lib/identity";
+import { authenticateAdminRequest, identityRepo, policyFromEnv } from "@/lib/identity";
 import { json } from "../helpers";
 
 export const runtime = "nodejs";
@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /** Security Center — حالة الهوية، الجلسات النشطة، طلبات التغيير المعلقة، الأحداث الأخيرة */
 export async function GET(request: Request) {
-  const s = await requireSession(request);
+  const s = await authenticateAdminRequest(request);
   if ("error" in s) return json({ error: s.error }, s.status);
   const repo = identityRepo();
   if (!repo) return json({ error: "قاعدة البيانات غير متاحة" }, 503);

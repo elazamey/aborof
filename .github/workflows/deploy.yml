@@ -173,3 +173,11 @@ jobs:
           curl -fsS -o /dev/null "$PRODUCTION_URL/"
           curl -fsS -o /dev/null "$PRODUCTION_URL/product/p1"
           echo "✅ Post-deploy verification PASSED"
+
+      # ===== Post-Deploy Verification: proxy-trust (P2#2) =====
+      # يثبت السلوك الفعلي في Vercel: هل يستبدل x-forwarded-for المزوّرة بعنوان
+      # العميل الحقيقي أم يمرّرها؟ عبر نقطة تشخيص /api/diag/ip (لا أسرار، لا بيانات منتج).
+      - name: Post-deploy proxy-trust verification
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: node scripts/verify-proxy-trust.mjs

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, ensureSchema, getProducts } from "@/lib/db";
-import { isAdminRequest } from "@/lib/auth";
+import { authenticateAdminRequest } from "@/lib/identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +39,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!isAdminRequest(request)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = await authenticateAdminRequest(request);
+  if (!auth.ok)
+    return NextResponse.json({ error: auth.status === 503 ? auth.error : "unauthorized" }, { status: auth.status });
 
   try {
     const body = await request.json();
@@ -84,7 +86,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!isAdminRequest(request)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = await authenticateAdminRequest(request);
+  if (!auth.ok)
+    return NextResponse.json({ error: auth.status === 503 ? auth.error : "unauthorized" }, { status: auth.status });
   const id = new URL(request.url).searchParams.get("id");
   if (!id || id.length > 80) return NextResponse.json({ error: "معرف غير صالح" }, { status: 422 });
 

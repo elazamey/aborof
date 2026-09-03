@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { ADMIN_COOKIE, isAdminRequest } from "@/lib/auth";
+import { ADMIN_COOKIE } from "@/lib/auth";
+import { authenticateAdminRequest } from "@/lib/identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  return NextResponse.json({ authenticated: isAdminRequest(request) });
+  const auth = await authenticateAdminRequest(request);
+  return NextResponse.json({ authenticated: auth.ok });
 }
 
 export async function POST() {

@@ -152,7 +152,7 @@ Fresh Environment → Install (npm ci) → Migration (v3) → Seed → Build
 | Performance Budget قبل التصميم                 | ✅                       | PL06/PL07 + قاعدة PR تجاوز budget = FAIL                                  |
 | Mobile-first Checkout                          | 🔶 مخطط                  | مع مرحلة CINEMATIC UI                                                     |
 | SEO Release Audit                              | 🔶 جزئي                  | PL09/PL10/PL12 ✅ · PL11 (canonical/OG/sitemap) NC                        |
-| Error/Business Alerts                          | ✅ (هوية)               | M03 + كواشف المراقبة (OTP/recovery/source/session) + لوحة Security Center |
+| Error/Business Alerts                          | ✅ (هوية)                | M03 + كواشف المراقبة (OTP/recovery/source/session) + لوحة Security Center |
 | Synthetic Monitoring                           | 🔶 مخطط                  | بعد PRODUCTION_URL                                                        |
 | Runbooks                                       | ✅ مسودة                 | `YEAR-1-RELIABILITY.md` §7                                                |
 | Rollback Drill                                 | ✅                       | RC03 + evidence/deploy-result/rollback-readiness.md                       |

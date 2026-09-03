@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db, ensureSchema, getProducts } from "@/lib/db";
 import { STORE } from "@/lib/seed";
-import { isAdminRequest } from "@/lib/auth";
+import { authenticateAdminRequest } from "@/lib/identity";
 import { calculateShipping, GOVERNORATES } from "@/lib/shipping";
 import { rateLimit } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
@@ -200,7 +200,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  if (!isAdminRequest(request)) return responseError("unauthorized", 401);
+  const auth = await authenticateAdminRequest(request);
+  if (!auth.ok) return responseError(auth.status === 503 ? auth.error : "unauthorized", auth.status);
   const c = db();
   if (!c) return responseError("قاعدة البيانات غير مربوطة", 503);
   try {
@@ -217,7 +218,8 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   const started = Date.now();
-  if (!isAdminRequest(request)) return responseError("unauthorized", 401);
+  const auth = await authenticateAdminRequest(request);
+  if (!auth.ok) return responseError(auth.status === 503 ? auth.error : "unauthorized", auth.status);
   const limit = rateLimit(request, "admin-order-update", 30, 10 * 60 * 1000);
   if (!limit.ok) return responseError("محاولات كثيرة، حاول بعد قليل", 429, limit.retryAfter);
   let body: any;

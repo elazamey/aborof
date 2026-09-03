@@ -43,11 +43,27 @@ export function pendingDisplayStatus(c: ChangeRequest, now: number): ChangeStatu
   return "NEW_VALUE_VERIFIED";
 }
 
+/**
+ * فرض cooldown إعادة إرسال OTP من حالة مستمرة (DB) — ذرّيًا.
+ * يعيد null (مسموح بالإرسال) أو نتيجة رفض 429 مع retryAfterMs (المتبقي بالمللي).
+ */
+async function enforceOtpCooldown(
+  repo: IdentityRepo,
+  key: string,
+  now: Clock,
+  cooldownMs: number
+): Promise<{ ok: false; error: string; status: number; retryAfterMs: number } | null> {
+  const t = now();
+  const r = await repo.acquireOtpCooldown(key, t, cooldownMs);
+  if (r.ok) return null;
+  return { ok: false, error: "أعد المحاولة بعد انتهاء مهلة إعادة الإرسال", status: 429, retryAfterMs: r.retryAfterMs };
+}
+
 // ───────────────────────── طلب تغيير الهوية ─────────────────────────
 
 export type RequestChangeResult =
   | { ok: true; requestId: string; status: ChangeStatus; channel: "email" | "phone"; devOtpHint?: string }
-  | { ok: false; error: string; status?: number };
+  | { ok: false; error: string; status?: number; retryAfterMs?: number };
 
 export async function requestIdentityChange(args: {
   repo: IdentityRepo;
@@ -99,6 +115,11 @@ export async function requestIdentityChange(args: {
     return { ok: false, error: "هذه القيمة مستخدمة من حساب آخر", status: 409 };
   }
 
+  // 3.5) cooldown إعادة الإرسال — من حالة مستمرة (DB)، ذرّيًا
+  const otpKind: OtpKind = kind === "email" ? "email_change" : "phone_change";
+  const cooldown = await enforceOtpCooldown(repo, `otp:${user.id}:${otpKind}`, now, policy.otpResendCooldownMs);
+  if (cooldown) return cooldown;
+
   // 4) تأخير أمني حسب الصلاحية
   const delayMs = user.role === "owner" ? policy.ownerSecurityDelayMs : policy.regularSecurityDelayMs;
   const request: ChangeRequest = {
@@ -123,7 +144,7 @@ export async function requestIdentityChange(args: {
   await repo.createOtp({
     id: newId(),
     userId: user.id,
-    kind: kind === "email" ? "email_change" : "phone_change",
+    kind: otpKind,
     channel: kind,
     tokenHash: hashSecret(code),
     expiresAt: current + policy.otpTtlMs,
@@ -375,18 +396,26 @@ export async function startVerification(args: {
   policy?: IdentityPolicy;
   devOtpHint?: boolean;
   deliverOtp: (channel: "email" | "phone", address: string, code: string, kind: OtpKind) => Promise<void>;
-}): Promise<{ ok: true; otpId?: string; devOtpHint?: string } | { ok: false; error: string; status?: number }> {
+}): Promise<
+  | { ok: true; otpId?: string; devOtpHint?: string }
+  | { ok: false; error: string; status?: number; retryAfterMs?: number }
+> {
   const { repo, user, kind, value, ctx, now, policy = DEFAULT_POLICY, devOtpHint = false, deliverOtp } = args;
   const normalized = kind === "email" ? normalizeEmail(value) : normalizePhone(value);
   if (!normalized) return { ok: false, error: "القيمة غير صالحة", status: 400 };
   const dup = kind === "email" ? await repo.getUserByEmail(normalized) : await repo.getUserByPhone(normalized);
   if (dup && dup.id !== user.id) return { ok: false, error: "مستخدمة من حساب آخر", status: 409 };
 
+  // cooldown إعادة الإرسال — من حالة مستمرة (DB)، ذرّيًا
+  const otpKind: OtpKind = kind === "email" ? "email_verify" : "phone_verify";
+  const cooldown = await enforceOtpCooldown(repo, `otp:${user.id}:${otpKind}`, now, policy.otpResendCooldownMs);
+  if (cooldown) return cooldown;
+
   const code = generateOtp();
   await repo.createOtp({
     id: newId(),
     userId: user.id,
-    kind: kind === "email" ? "email_verify" : "phone_verify",
+    kind: otpKind,
     channel: kind,
     tokenHash: hashSecret(code),
     expiresAt: now() + policy.otpTtlMs,
@@ -469,10 +498,19 @@ export async function requestRecovery(args: {
   policy?: IdentityPolicy;
   devOtpHint?: boolean;
   deliverOtp: (channel: "email", address: string, code: string, kind: OtpKind) => Promise<void>;
-}): Promise<{ ok: true; devOtpHint?: string }> {
+}): Promise<{ ok: true; devOtpHint?: string } | { ok: false; error: string; status: number; retryAfterMs?: number }> {
   const { repo, email, ctx, now, policy = DEFAULT_POLICY, devOtpHint = false, deliverOtp } = args;
   const normalized = normalizeEmail(email);
   if (!normalized) return { ok: true }; // استجابة موحدة حتى للبريد غير الصالح
+  // cooldown إعادة الإرسال — مفتاح موحّد لكل بريد (موجود أو غير موجود) حتى لا
+  // يتسرّب وجود الحساب عبر فرق 429/200، ولمنع إغراق صندوق الضحية برسائل متتالية.
+  const cooldown = await enforceOtpCooldown(
+    repo,
+    `otp:recovery:${sha256Hex(normalized)}`,
+    now,
+    policy.otpResendCooldownMs
+  );
+  if (cooldown) return cooldown;
   const user = await repo.getUserByEmail(normalized);
   // استجابة موحدة — لا كشف عن وجود/عدم وجود الحساب (منع enumeration)
   if (user) {

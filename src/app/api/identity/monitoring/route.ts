@@ -1,4 +1,4 @@
-import { identityRepo, requireSession } from "@/lib/identity";
+import { identityRepo, authenticateAdminRequest } from "@/lib/identity";
 import {
   computeMetrics,
   evaluateAlerts,
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * يطبّق الاحتفاظ (prune)، ويجمع العدادات. أي فشل → degraded (لا 500).
  */
 export async function GET(request: Request) {
-  const s = await requireSession(request);
+  const s = await authenticateAdminRequest(request);
   if ("error" in s) return json({ error: s.error }, s.status);
   if (s.user.role !== "owner" && s.user.role !== "admin") {
     return json({ error: "غير مصرح", status: 403 }, 403);

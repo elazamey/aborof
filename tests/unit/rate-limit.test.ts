@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { rateLimit, rateLimitMapSize } from "@/lib/rate-limit";
 
 function req(ip: string): Request {
@@ -6,8 +6,13 @@ function req(ip: string): Request {
 }
 
 describe("rate limiter (rate-limit.ts)", () => {
+  beforeEach(() => {
+    // محاكاة حدود الثقة: Vercel runtime (المصدر الموثوق لعنوان العميل).
+    vi.stubEnv("VERCEL", "1");
+  });
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("allows up to the limit then rejects with Retry-After", () => {
@@ -32,6 +37,14 @@ describe("rate limiter (rate-limit.ts)", () => {
     expect(rateLimit(req("3.3.3.3"), "scopeB", 1, 60_000).ok).toBe(true);
     expect(rateLimit(req("3.3.3.3"), "scopeA", 1, 60_000).ok).toBe(false);
     expect(rateLimit(req("4.4.4.4"), "scopeA", 1, 60_000).ok).toBe(true);
+  });
+
+  it("outside Vercel: spoofed XFF does not create per-client buckets (shared 'anonymous')", () => {
+    vi.stubEnv("VERCEL", "");
+    // عميلان بقيمتي XFF مختلفتين — لكن خارج حدود الثقة لا يُوثَّق أي عنوان:
+    // كلاهما يقع في الدلو المشترك "anonymous" (best-effort، وليس per-client).
+    expect(rateLimit(req("1.1.1.1"), "shared-scope", 1, 60_000).ok).toBe(true);
+    expect(rateLimit(req("2.2.2.2"), "shared-scope", 1, 60_000).ok).toBe(false);
   });
 
   it("is bounded: expired buckets are pruned when the map grows", () => {

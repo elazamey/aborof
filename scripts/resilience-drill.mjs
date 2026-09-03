@@ -32,6 +32,9 @@ const ADMIN_SECRET = "drill-session-secret-0123456789abcdef";
 const BASE_ENV = {
   ...process.env,
   NODE_ENV: "production",
+  // يحاكي حد الثقة الإنتاجي (Vercel) — لأن D02 يحاكي عملاء مختلفين عبر
+  // رؤوس x-forwarded-for مميزة، وهي لا تُوثَق إلا داخل حدود Vercel (P2#2).
+  VERCEL: "1",
   TURSO_DATABASE_URL: `file:${dbPath}`,
   ADMIN_PASSWORD,
   ADMIN_SESSION_SECRET: ADMIN_SECRET,
@@ -348,11 +351,13 @@ async function run() {
     const expired = mkToken(Date.now() - 9 * 60 * 60 * 1000);
     r = await get("http://127.0.0.1:3314", "/api/orders", { headers: { cookie: `aborof_admin_session=${expired}` } });
     check("D04: جلسة منتهية → 401", r.res.status === 401, String(r.res.status));
-    const valid = mkToken(Date.now());
-    r = await get("http://127.0.0.1:3314", "/api/orders", { headers: { cookie: `aborof_admin_session=${valid}` } });
-    check("D04: جلسة صالحة → 200", r.res.status === 200, String(r.res.status));
-    const tampered = `${valid.slice(0, -3)}AAA`;
-    r = await get("http://127.0.0.1:3314", "/api/orders", { headers: { cookie: `aborof_admin_session=${tampered}` } });
+    // جلسة صالحة = تسجيل دخول حقيقي (ينشئ صف sessions) — مصدر التفويض الوحيد.
+    // (كان التوكن يُصاغ HMAC فقط بلا صف جلسة؛ مع authenticateAdminRequest يجب وجود الصف.)
+    const validCookie = await adminCookie("http://127.0.0.1:3314");
+    r = await get("http://127.0.0.1:3314", "/api/orders", { headers: { cookie: validCookie } });
+    check("D04: جلسة صالحة (login حقيقي) → 200", r.res.status === 200, String(r.res.status));
+    const tampered = `${validCookie.slice(0, -3)}AAA`;
+    r = await get("http://127.0.0.1:3314", "/api/orders", { headers: { cookie: tampered } });
     check("D04: توقيع مزوّر → 401", r.res.status === 401, String(r.res.status));
     r = await get("http://127.0.0.1:3314", "/api/orders", { headers: { cookie: "aborof_admin_session=not-a-token" } });
     check("D04: كوكي غير صالح → 401", r.res.status === 401, String(r.res.status));
@@ -362,7 +367,9 @@ async function run() {
 
   // ---------- DRILL-05: missing critical env → startup fail ----------
   console.log("\n── DRILL-05: نقص متغير بيئة حرج (بدون TURSO_DATABASE_URL) ──");
-  const s5 = startServer(3315, { TURSO_DATABASE_URL: "" });
+  // مسار الإقلاع الصارم خاص ببيئة غير-Vercel (process.exit(1))؛ على Vercel
+  // يُرصد عبر health checks. لذا نجعل هذه الحالة صراحةً خارج حدود الثقة.
+  const s5 = startServer(3315, { TURSO_DATABASE_URL: "", VERCEL: "" });
   try {
     const exited = await new Promise((resolve) => {
       const t = setTimeout(() => resolve(false), 20_000);

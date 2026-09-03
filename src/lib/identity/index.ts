@@ -2,7 +2,7 @@ import { ADMIN_COOKIE, isAdminConfigured, verifyAdminSession } from "@/lib/auth"
 import { db } from "@/lib/db";
 import { DEFAULT_POLICY, IdentityPolicy, IdentityRepo, SessionRecord, User } from "./types";
 import { normalizeEmail } from "./normalize";
-import { hashSecret, hashToken, newId } from "./otp";
+import { hashSecret, hashToken, newId, verifySecret } from "./otp";
 import { createSqlIdentityRepo } from "./sql";
 import { sessionActive } from "./core";
 
@@ -50,35 +50,63 @@ export async function deliverOtp(
   console.log(`[identity] otp ${kind} → ${channel}:${address} (delivery provider NOT_CONFIGURED)`);
 }
 
-/** الجلسة الحالية (واعية بالإبطال) للعمليات الحساسة — عكس isAdminRequest الثابتة */
-export async function requireSession(
-  request: Request
-): Promise<{ user: User; sessionId: string } | { error: string; status: number }> {
-  const r = identityRepo();
-  if (!r) return { error: "قاعدة البيانات غير متاحة", status: 503 };
+export type AuthResult = { ok: true; user: User; sessionId: string } | { ok: false; error: string; status: number };
+
+/**
+ * authenticateAdminRequest — نقطة السلطة الوحيدة لتفويض الإدارة.
+ * كل مسار محمي (orders / products / admin-session / identity/*) يمر من هنا،
+ * ولا يوجد أي مسار بديل للتحقق من صلاحية الإدارة.
+ *
+ * الدلالات:
+ *  - HMAC (verifyAdminSession) = إثبات سلامة الرمز وحيازته فقط — ليس تفويضًا بذاته.
+ *  - جدول sessions = السلطة الوحيدة للتفويض: يجب أن يوجد سجل نشط غير مُبطَل
+ *    (revoked_at IS NULL) ضمن sessionMaxAgeMs.
+ *  - قاعدة البيانات غير متاحة → 503 (fail-closed): لا تفويض افتراضي أبدًا.
+ */
+export async function authenticateAdminRequest(
+  request: Request,
+  repo: IdentityRepo | null = identityRepo()
+): Promise<AuthResult> {
+  if (!repo) return { ok: false, error: "قاعدة البيانات غير متاحة", status: 503 };
   const cookieHeader = request.headers.get("cookie") ?? "";
   const token = cookieHeader
     .split(";")
     .map((p) => p.trim())
     .find((p) => p.startsWith(`${ADMIN_COOKIE}=`))
     ?.slice(ADMIN_COOKIE.length + 1);
-  if (!token || !verifyAdminSession(token)) return { error: "غير مصرح", status: 401 };
+  if (!token || !verifyAdminSession(token)) return { ok: false, error: "غير مصرح", status: 401 };
 
-  const session = await r.getSessionByTokenHash(hashToken(token));
-  if (!session) return { error: "غير مصرح", status: 401 };
+  const session = await repo.getSessionByTokenHash(hashToken(token));
+  if (!session) return { ok: false, error: "غير مصرح", status: 401 };
   const active = await sessionActive(session, Date.now(), policyFromEnv().sessionMaxAgeMs);
-  if (!active) return { error: "غير مصرح", status: 401 };
+  if (!active) return { ok: false, error: "غير مصرح", status: 401 };
 
-  const user = await r.getUserById(session.userId);
-  if (!user) return { error: "غير مصرح", status: 401 };
-  return { user, sessionId: session.id };
+  const user = await repo.getUserById(session.userId);
+  if (!user) return { ok: false, error: "غير مصرح", status: 401 };
+  return { ok: true, user, sessionId: session.id };
 }
 
-/** بذر/تحديث حساب المالك عند أول تسجيل دخول — الهوية تُوثَّق عبر OTP لاحقًا */
+/**
+ * مصدر الحقيقة الوحيد للتحقق من كلمة المرور: users.password_hash.
+ * (البيئة ADMIN_PASSWORD هي bootstrap فقط — انظر ensureOwner).
+ * لا يوجد مالك أو لا يوجد hash → فشل مغلق (false) — لا إنشاء حالة تلقائية هنا.
+ */
+export function verifyOwnerCredentials(user: User | null, input: string): boolean {
+  if (!user || !user.passwordHash || typeof input !== "string" || input.length === 0) return false;
+  return verifySecret(input, user.passwordHash);
+}
+
+/**
+ * بذر حساب المالك عند أول تسجيل دخول (bootstrap فقط) — الهوية تُوثَّق عبر OTP لاحقًا.
+ * كلمة المرور تُؤخذ من ADMIN_PASSWORD عند الإنشاء فقط؛ بعدها users.password_hash
+ * هو المصدر الوحيد (لا يُحدَّث الهاش عند كل استدعاء لاحق).
+ */
 export async function ensureOwner(r: IdentityRepo, now = Date.now()): Promise<User> {
-  const email = normalizeEmail(process.env.ADMIN_EMAIL ?? "owner@aborof.store")!;
-  const existing = await r.getUserByEmail(email);
+  // المالك الوحيد يُعرَّف بالدور (role='owner') لا بالبريد — حتى لا يُنشأ مالك ثانٍ
+  // عند تغيير البريد لاحقًا. الدخول يجب ألا يُنشئ حالة غير متوقعة (fail-closed).
+  const existing = await r.getOwner();
   if (existing) return existing;
+  const email = normalizeEmail(process.env.ADMIN_EMAIL ?? "owner@aborof.store")!;
   const user: User = {
     id: newId(),
     email,

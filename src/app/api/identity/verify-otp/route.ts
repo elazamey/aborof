@@ -1,4 +1,4 @@
-import { requireSession, identityRepo, verifyChangeOtp } from "@/lib/identity";
+import { authenticateAdminRequest, identityRepo, verifyChangeOtp } from "@/lib/identity";
 import { json, ipOf } from "../helpers";
 
 export const runtime = "nodejs";
@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /** تحقق OTP القيمة الجديدة لطلب تغيير معلق */
 export async function POST(request: Request) {
-  const s = await requireSession(request);
+  const s = await authenticateAdminRequest(request);
   if ("error" in s) return json({ error: s.error }, s.status);
   const repo = identityRepo();
   if (!repo) return json({ error: "قاعدة البيانات غير متاحة" }, 503);

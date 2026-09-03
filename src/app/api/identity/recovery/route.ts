@@ -54,7 +54,14 @@ export async function POST(request: Request) {
       devOtpHint: devOtpHintEnabled(),
       deliverOtp,
     });
-    // نفس الرد دائمًا — لا فرق بين "بريد موجود" و"غير موجود"
+    // رد موحّد دائمًا إلا عند cooldown إعادة الإرسال — 429 موحّد لكل بريد
+    // (موجود أو غير موجود) فلا يتسرّب وجود الحساب.
+    if (!result.ok) {
+      const status = result.status ?? 429;
+      const response = json({ error: result.error }, status);
+      if (result.retryAfterMs) response.headers.set("Retry-After", String(Math.ceil(result.retryAfterMs / 1000)));
+      return response;
+    }
     return json({ ok: true, hint: result.devOtpHint ? "dev" : undefined });
   }
 

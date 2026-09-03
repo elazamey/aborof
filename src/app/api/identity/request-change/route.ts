@@ -1,5 +1,5 @@
 import {
-  requireSession,
+  authenticateAdminRequest,
   identityRepo,
   requestIdentityChange,
   policyFromEnv,
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 /** طلب تغيير الهوية: إعادة مصادثة → تحقق من القيمة الجديدة (OTP) → تأخير أمني → تنفيذ */
 export async function POST(request: Request) {
-  const s = await requireSession(request);
+  const s = await authenticateAdminRequest(request);
   if ("error" in s) return json({ error: s.error }, s.status);
   const repo = identityRepo();
   if (!repo) return json({ error: "قاعدة البيانات غير متاحة" }, 503);
@@ -51,6 +51,11 @@ export async function POST(request: Request) {
     devOtpHint: devOtpHintEnabled(),
     deliverOtp,
   });
-  if (!result.ok) return json({ error: result.error }, result.status ?? 400);
+  if (!result.ok) {
+    const status = result.status ?? 400;
+    const response = json({ error: result.error }, status);
+    if (result.retryAfterMs) response.headers.set("Retry-After", String(Math.ceil(result.retryAfterMs / 1000)));
+    return response;
+  }
   return json(result, 202);
 }

@@ -213,6 +213,22 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    version: 6,
+    name: "otp-resend-cooldown",
+    up: async (c) => {
+      // P2#1: cooldown إعادة إرسال OTP — حالة مستمرة في DB (وليس in-memory).
+      // cooldown_key الفريد يُستخدم في UPSERT ذري واحد (ON CONFLICT DO UPDATE
+      // WHERE expires_at <= now) لمنع سباق SELECT→check→INSERT عند الإرسال
+      // المتزامن عبر عدة instances. إضافي بحت (لا DROP/RENAME).
+      await c.execute(
+        `CREATE TABLE IF NOT EXISTS otp_cooldowns (
+          cooldown_key TEXT PRIMARY KEY,
+          expires_at INTEGER NOT NULL
+        )`
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

@@ -17,6 +17,7 @@ export class MemoryRepo implements IdentityRepo {
   sessions = new Map<string, SessionRecord>();
   events: SecurityEvent[] = [];
   alerts: SecurityAlert[] = [];
+  cooldowns = new Map<string, number>();
 
   async getUserById(id: string) {
     return this.users.get(id) ?? null;
@@ -26,6 +27,9 @@ export class MemoryRepo implements IdentityRepo {
   }
   async getUserByPhone(normalized: string) {
     return [...this.users.values()].find((u) => u.phoneNormalized === normalized) ?? null;
+  }
+  async getOwner() {
+    return [...this.users.values()].find((u) => u.role === "owner") ?? null;
   }
   async createUser(u: User) {
     this.users.set(u.id, u);
@@ -44,6 +48,15 @@ export class MemoryRepo implements IdentityRepo {
   }
   async updateOtp(o: OtpRecord) {
     this.otps.set(o.id, o);
+  }
+  async acquireOtpCooldown(key: string, now: number, cooldownMs: number) {
+    // ذرّي (قرار واحد بلا await وسيط — يطابق UPSERT في طبقة SQL)
+    const expiresAt = this.cooldowns.get(key);
+    if (expiresAt !== undefined && expiresAt > now) {
+      return { ok: false, retryAfterMs: expiresAt - now };
+    }
+    this.cooldowns.set(key, now + cooldownMs);
+    return { ok: true, retryAfterMs: 0 };
   }
   async createChangeRequest(c: ChangeRequest) {
     this.changes.set(c.id, c);

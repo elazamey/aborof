@@ -509,14 +509,14 @@ async function stageDb() {
 
   // R01: clean migration
   const m1 = runCmd("node", ["--experimental-strip-types", "scripts/migrate-check.mts"], { env });
-  const cleanOk = m1.code === 0 && /schema version 5 \(required 5\)/.test(m1.stdout);
+  const cleanOk = m1.code === 0 && /schema version 6 \(required 6\)/.test(m1.stdout);
   cleanOk
     ? pass(
         "R01-MIGRATE",
         "reliability",
         "P1",
         "database",
-        "Clean migration → schema v5",
+        "Clean migration → schema v6",
         m1.stdout.trim().split("\n")[0]
       )
     : fail(
@@ -524,20 +524,20 @@ async function stageDb() {
         "reliability",
         "P1",
         "database",
-        "Clean migration → schema v5",
+        "Clean migration → schema v6",
         (m1.stdout + m1.stderr).slice(-300)
       );
 
   // R02: idempotency
   const m2 = runCmd("node", ["--experimental-strip-types", "scripts/migrate-check.mts"], { env });
-  const idemOk = m2.code === 0 && /schema version 5 \(required 5\)/.test(m2.stdout);
+  const idemOk = m2.code === 0 && /schema version 6 \(required 6\)/.test(m2.stdout);
   idemOk
     ? pass(
         "R02-MIGRATE-IDEM",
         "reliability",
         "P1",
         "database",
-        "Migration idempotency (rerun → v5)",
+        "Migration idempotency (rerun → v6)",
         "second run OK, version stable"
       )
     : fail(
@@ -564,7 +564,7 @@ async function stageDb() {
       const pk = products.find((r) => r.name === "id" && Number(r.pk) === 1);
       const meta = await c.execute("SELECT version FROM schema_meta WHERE id=1");
       const v = Number(meta.rows[0]?.version);
-      const ok = notNull && hasIdx && !!pk && v === 5;
+      const ok = notNull && hasIdx && !!pk && v === 6;
       ok
         ? pass(
             "R03-SCHEMA",
@@ -604,7 +604,7 @@ async function stageDb() {
     const c2 = createClient({ url: `file:${db2}` });
     const count = await c2.execute("SELECT COUNT(*) n FROM products");
     const ver = await c2.execute("SELECT version FROM schema_meta WHERE id=1");
-    const restored = Number(count.rows[0].n) > 0 && Number(ver.rows[0].version) === 5;
+    const restored = Number(count.rows[0].n) > 0 && Number(ver.rows[0].version) === 6;
     c2.close();
     restored
       ? pass(
@@ -665,6 +665,10 @@ function startServer({ extraEnv = {}, db = dbPath, port = PORT, base = BASE } = 
     const env = {
       ...process.env,
       NODE_ENV: "production",
+      // يحاكي حد الثقة الإنتاجي (Vercel) — الفحوص الوظيفية ترسل رؤوس
+      // x-forwarded-for مميزة لمحاكاة عملاء مختلفين، وهي لا تُوثَّق إلا
+      // داخل حدود Vercel (P2#2). خارجها ينهار الجميع في دلو anonymous.
+      VERCEL: "1",
       TURSO_DATABASE_URL: `file:${db}`,
       ADMIN_PASSWORD: ADMIN_PW,
       ADMIN_SESSION_SECRET: ADMIN_SECRET,
@@ -1450,9 +1454,12 @@ async function stageHttp() {
   const ckB = cookieFrom(iLoginB).value;
 
   // I05: الدورة الكاملة — طلب → OTP خاطئ مرفوض → OTP صحيح → تنفيذ → بريد جديد موثق
+  // GATE_OWNER_EMAIL: البريد الحالي للمالك بعد التغيير — يُستخدم لاحقًا (M03)
+  // لأن ensureOwner/الاسترداد يجب أن يستهدفا البريد الفعلي لا ADMIN_EMAIL القديم.
+  const GATE_OWNER_EMAIL = `gate-${Date.now()}@change.local`;
   const i05a = await iPost(
     "/api/identity/request-change",
-    { kind: "email", newValue: `gate-${Date.now()}@change.local`, password: ADMIN_PW },
+    { kind: "email", newValue: GATE_OWNER_EMAIL, password: ADMIN_PW },
     "10.0.2.4",
     ck.value
   );
@@ -1548,15 +1555,18 @@ async function stageHttp() {
     : fail("I08-IDENTITY-RATELIMIT", "security", "P0", "identity", "Recovery rate limit", `last=${i08}`);
 
   // I09: تغيير كلمة المرور — كلمة خاطئة مرفوضة، صحيحة → ok
+  // GATE_NEW_PW: بعد نجاح التغيير يكون users.password_hash هو مصدر الحقيقة الوحيد،
+  // لذا تُستخدم هذه القيمة في أي تسجيل دخول لاحق على الخادم نفسه (انظر M02).
+  const GATE_NEW_PW = "correct-horse-12345";
   const i09a = await iPost(
     "/api/identity/change-password",
-    { currentPassword: "wrong", newPassword: "correct-horse-12345" },
+    { currentPassword: "wrong", newPassword: GATE_NEW_PW },
     "10.0.2.8",
     ck.value
   );
   const i09b = await iPost(
     "/api/identity/change-password",
-    { currentPassword: ADMIN_PW, newPassword: "correct-horse-12345" },
+    { currentPassword: ADMIN_PW, newPassword: GATE_NEW_PW },
     "10.0.2.8",
     ck.value
   );
@@ -1644,12 +1654,22 @@ async function stageHttp() {
       );
 
   // M02: عدادات حقيقية بعد دورة تحقق + redaction (لا أسرار في استجابة المراقبة)
-  const mLogin = await postJson("/api/admin/login", { password: ADMIN_PW }, "10.0.3.1");
+  // بعد I09 غيّر كلمة المرور إلى GATE_NEW_PW — كلمة ADMIN_PW لم تعد صالحة للدخول
+  // (مصدر الحقيقة = users.password_hash)؛ نتوقع 401 لو استخدمنا القديمة.
+  const mLogin = await postJson("/api/admin/login", { password: GATE_NEW_PW }, "10.0.3.1");
   const mCk = cookieFrom(mLogin).value;
-  const mStart = await iPost("/api/identity/verify", { mode: "start", kind: "email" }, "10.0.3.1", mCk);
+  // ملاحظة P2#1: نوع الهاتف (phone_verify) بدل البريد — لأن البريد أُرسل له OTP تحقق
+  // في I02 خلال نافذة cooldown (60s)، وإعادة الإرسال محجوبة عمدًا (سلوك P2#1 الصحيح).
+  // الهاتف نوع مختلف (مفتاح cooldown مختلف) ويمنح تغطية HTTP لمسار التحقق بالهاتف.
+  const mStart = await iPost(
+    "/api/identity/verify",
+    { mode: "start", kind: "phone", value: "+201111111111" },
+    "10.0.3.1",
+    mCk
+  );
   const mConfirm = await iPost(
     "/api/identity/verify",
-    { mode: "confirm", kind: "email", code: mStart.json?.devOtpHint },
+    { mode: "confirm", kind: "phone", code: mStart.json?.devOtpHint },
     "10.0.3.1",
     mCk
   );
@@ -1662,8 +1682,8 @@ async function stageHttp() {
     mConfirm.status === 200 &&
     mDash.status === 200 &&
     mj.degraded === false &&
-    Number(mj.metrics?.email?.succeeded) >= 1 &&
-    mj.metrics?.email?.successRate === 100 &&
+    Number(mj.metrics?.phone?.succeeded) >= 1 &&
+    mj.metrics?.phone?.successRate === 100 &&
     !/"(password|secret|token|authorization|code)"\s*:/.test(dashText) &&
     !dashText.includes(String(mStart.json?.devOtpHint ?? ""));
   m2Ok
@@ -1673,7 +1693,7 @@ async function stageHttp() {
         "P0",
         "monitoring",
         "Verification counters move after a real OTP cycle; no secrets in the monitoring payload",
-        `succeeded=${mj.metrics?.email?.succeeded} rate=${mj.metrics?.email?.successRate}%`
+        `succeeded=${mj.metrics?.phone?.succeeded} rate=${mj.metrics?.phone?.successRate}%`
       )
     : fail(
         "M02-MONITOR-METRICS",
@@ -1692,7 +1712,7 @@ async function stageHttp() {
         "/api/identity/recovery",
         {
           mode: "confirm",
-          email: ADMIN_EMAIL || "owner@test.local",
+          email: GATE_OWNER_EMAIL,
           code: "111111",
           newPassword: "long-enough-pass-1",
         },
@@ -1998,6 +2018,45 @@ function stageExternal() {
     "لا يوجد نشر إنتاج بعد (deployment.md = BLOCKED) — يُنفَّذ بعد TASK-02",
     "evidence/deploy-result/post-deploy.md"
   );
+
+  // ── P2#2 proxy-trust post-deploy verification ──
+  // يثبت أن النشر الفعلي في Vercel يتصرف وفقًا للموثّق رسميًا (استبدال
+  // x-forwarded-for المزوّرة) عبر نقطة /api/diag/ip. بدون PRODUCTION_URL = NOT_CONFIGURED.
+  {
+    const pt = runCmd(process.execPath, ["scripts/verify-proxy-trust.mjs"]);
+    const m = pt.stdout.match(/proxy-trust:\s*(\d+)\s*PASS\s*\/\s*(\d+)\s*FAIL\s*\/\s*(\d+)\s*NOT_CONFIGURED/);
+    if (m && Number(m[2]) > 0) {
+      fail(
+        "P2#2-PROXY-TRUST",
+        "release",
+        "P0",
+        "deploy",
+        "Proxy-trust post-deploy verification (Vercel)",
+        "verified runtime diverged from documented proxy behavior",
+        "evidence/deploy-result/post-deploy.md"
+      );
+    } else if (m && Number(m[1]) > 0) {
+      pass(
+        "P2#2-PROXY-TRUST",
+        "release",
+        "P0",
+        "deploy",
+        "Proxy-trust post-deploy verification (Vercel)",
+        "verified runtime matches documented proxy behavior",
+        "evidence/deploy-result/post-deploy.md"
+      );
+    } else {
+      nc(
+        "P2#2-PROXY-TRUST",
+        "release",
+        "P0",
+        "deploy",
+        "Proxy-trust post-deploy verification (Vercel)",
+        "PRODUCTION_URL غير مهيأ بعد — يُنفَّذ عند اكتمال نشر الإنتاج (NOT_CONFIGURED)",
+        "evidence/deploy-result/post-deploy.md"
+      );
+    }
+  }
 
   // ── RC08 browser E2E / PL08 lab metrics ──
   nc(

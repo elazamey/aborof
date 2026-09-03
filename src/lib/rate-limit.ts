@@ -1,3 +1,5 @@
+import { clientIp } from "@/lib/client-ip";
+
 type Bucket = { count: number; resetAt: number };
 
 const buckets = new Map<string, Bucket>();
@@ -23,8 +25,12 @@ function prune(now: number) {
 }
 
 export function rateLimit(request: Request, scope: string, limit: number, windowMs: number) {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const key = `${scope}:${forwarded || request.headers.get("x-real-ip") || "anonymous"}`;
+  // عنوان العميل من المصدر الموثوق فقط (Vercel). خارج حدود الثقة لا يوجد
+  // per-client IP rate limiting موثوق: "anonymous" هو shared/best-effort bucket
+  // لمنع الثقة في IP مزوّر — وليس إثباتًا لهوية العميل ولا equivalent
+  // لـ per-client rate limiting.
+  const ip = clientIp(request);
+  const key = `${scope}:${ip ?? "anonymous"}`;
   const now = Date.now();
   // الحفاظ على الحجم محدوداً: تنظيف الدلاء المنتهية عند الاقتراب من الحد
   if (buckets.size >= MAX_BUCKETS) prune(now);
