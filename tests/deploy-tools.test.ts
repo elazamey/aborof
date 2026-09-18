@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createClient, type Client } from "@libsql/client";
@@ -140,5 +141,38 @@ describe("scripts/verify-turso — تقرير آلي", () => {
     const row9 = parsed.rows.find((r) => r.id === "row-9");
     assert.equal(row9?.ok, false);
     assert.match(String(row9?.detail), /products=1 \/ product_search=0/);
+  });
+});
+
+describe(".github/workflows/deploy.yml — بوابة النشر", () => {
+  const workflow = fs.readFileSync(".github/workflows/deploy.yml", "utf8");
+
+  test("شرط وظيفة النشر يقرأ مخرج وظيفة البوابة لا `vars` (لأن متغيرات البيئة غير مرئية في if على مستوى الوظيفة)", () => {
+    assert.match(
+      workflow,
+      /if:\s*\$\{\{\s*needs\.deploy-gate\.outputs\.enabled == 'true'\s*\}\}/,
+      "وظيفة deploy يجب أن تعتمد على needs.deploy-gate.outputs.enabled"
+    );
+    assert.doesNotMatch(
+      workflow,
+      /if:.*vars\.VERCEL_DEPLOY_ENABLED/,
+      "لا يجوز قراءة VERCEL_DEPLOY_ENABLED في شرط على مستوى الوظيفة — ستكون فارغة دائمًا مع متغيرات البيئة"
+    );
+  });
+
+  test("وظيفة البوابة تقرأ المتغير داخل خطوة env وتصدّره كمخرج", () => {
+    assert.match(workflow, /deploy-gate:/, "وظيفة deploy-gate مفقودة");
+    assert.match(workflow, /GATE_VALUE: \$\{\{\s*vars\.VERCEL_DEPLOY_ENABLED\s*\}\}/, "البوابة يجب أن تمرّر المتغير عبر env داخل الخطوة");
+    assert.match(workflow, /enabled=\$?\(?.*GITHUB_OUTPUT|echo "enabled=(true|false)" >> "\$GITHUB_OUTPUT"/, "البوابة يجب أن تكتب enabled في GITHUB_OUTPUT");
+  });
+
+  test("وظيفة النشر تبقى `skipped` عند إغلاق البوابة (needs على البوابة وبدون شرط ref فقط)", () => {
+    assert.match(workflow, /needs:\s*\[quality-gates,\s*deploy-gate\]/, "وظيفة deploy يجب أن تعتمد على quality-gates و deploy-gate");
+    assert.match(workflow, /github\.ref == 'refs\/heads\/main'/, "بوابة النشر مقصورة على main");
+  });
+
+  test("ملخص النشر يعرض حالة البوابة", () => {
+    assert.match(workflow, /needs:\s*\[quality-gates,\s*deploy-gate,\s*deploy\]/, "وظيفة report يجب أن تعتمد على وظائف البوابة والنشر");
+    assert.match(workflow, /Deploy gate \(VERCEL_DEPLOY_ENABLED\)/, "الملخص يجب أن يذكر حالة البوابة");
   });
 });
