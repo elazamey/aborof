@@ -91,7 +91,10 @@ jobs:
             exit 0
           fi
 
-          MODELS="${MODEL_INPUT}"
+          # ${MODEL_INPUT:-} بدل ${MODEL_INPUT}: يُبقي الافتراضي آمنًا حتى لو صار
+          # المُشغِّل push/schedule/workflow_call حيث لا وجود لمدخلات dispatch
+          # (مع set -u كان المتغير غير المُعيَّن يُسقط الخطوة قبل تجربة أي نموذج).
+          MODELS="${MODEL_INPUT:-}"
           if [ -z "$MODELS" ]; then
             # نفس سلسلة النماذج الافتراضية في كود التطبيق.
             MODELS="gemini-flash-latest gemini-3.5-flash gemini-flash-lite-latest"
