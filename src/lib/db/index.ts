@@ -6,12 +6,14 @@ import { metrics } from "@/lib/observability/metrics";
 
 let _client: Client | null = null;
 let _ready: Promise<void> | null = null;
+let _clientOverride: Client | null = null;
 
 export function hasDB() {
-  return Boolean(process.env.TURSO_DATABASE_URL);
+  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL);
 }
 
 export function db(): Client | null {
+  if (_clientOverride) return _clientOverride;
   if (!hasDB()) return null;
   if (!_client) {
     _client = createClient({
@@ -20,6 +22,23 @@ export function db(): Client | null {
     });
   }
   return _client;
+}
+
+/**
+ * حقن عميل مخصص للاختبارات (يُقرأ قبل مدخل البيئة). يُستخدم مع عميل
+ * ملف مؤقت كي تكون كل خطوات الاختبار على نفس حالة قاعدة البيانات.
+ */
+export function setDbClientForTest(client: Client): void {
+  _clientOverride = client;
+  _ready = null;
+}
+
+/**
+ * تجهيز قاعدة البيانات عبر العميل المحقون (إن وُجد) — يُستخدم في اختبارات
+ * التكامل لتشغيل الهجرات على عميل ملف مؤقت بالضبط كما يعمل في الإنتاج.
+ */
+export async function migrateDbSchemaForTest(client: Client): Promise<void> {
+  await runMigrations(client);
 }
 
 /**
