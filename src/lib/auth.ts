@@ -47,8 +47,26 @@ export function isAdminRequest(request: Request) {
   return verifyAdminSession(token);
 }
 
+/**
+ * تشخيص دقيق لمشكلات تهيئة الإدارة دون كشف أي قيمة: يعيد رسائل تسمّي
+ * المتغير الناقص أو غير الصالح بعينه، لتظهر في رسالة 503 بدل رسالة عامة.
+ */
+export function adminConfigIssues(): string[] {
+  const issues: string[] = [];
+  if (!process.env.ADMIN_PASSWORD) {
+    issues.push("ADMIN_PASSWORD غير مُعيَّن");
+  }
+  const sessionSecret = process.env.ADMIN_SESSION_SECRET;
+  if (!sessionSecret) {
+    issues.push("ADMIN_SESSION_SECRET غير مُعيَّن");
+  } else if (sessionSecret.length < 32) {
+    issues.push("ADMIN_SESSION_SECRET يجب ألا يقل عن 32 حرفًا");
+  }
+  return issues;
+}
+
 export function isAdminConfigured() {
-  return Boolean(process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET && process.env.ADMIN_SESSION_SECRET.length >= 32);
+  return adminConfigIssues().length === 0;
 }
 
 export function passwordMatches(input: string) {

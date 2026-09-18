@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
-import { createAdminSession, ADMIN_COOKIE, isAdminConfigured, passwordMatches, sessionMaxAge } from "@/lib/auth";
+import { createAdminSession, ADMIN_COOKIE, adminConfigIssues, passwordMatches, sessionMaxAge } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { adminLoginContract, firstZodIssue } from "@/lib/validation/contracts";
 
@@ -11,8 +11,9 @@ export const POST = apiHandler("/api/admin/login", async (request) => {
   const limit = await rateLimit(request, "admin-login", 8, 10 * 60 * 1000);
   if (!limit.ok) throw Errors.rateLimited(limit.retryAfter);
 
-  if (!isAdminConfigured()) {
-    throw Errors.serviceUnavailable("لوحة الإدارة غير مهيأة بعد.");
+  const configIssues = adminConfigIssues();
+  if (configIssues.length > 0) {
+    throw Errors.serviceUnavailable(`لوحة الإدارة غير مهيأة بعد: ${configIssues.join("، ")}.`);
   }
 
   const raw = await readJson(request, 4_000);
