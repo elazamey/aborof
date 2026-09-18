@@ -63,6 +63,11 @@ export interface McpToolExecutionContext {
 export interface McpTool {
   definition: McpToolDefinition;
   policy: McpToolPolicy;
+  /**
+   * بوابة علم خاصة بالأداة تُقرأ عند كل نداء (لا عند التسجيل).
+   * غيابها يعني «مفعّلة متى كانت الطبقة مفعّلة».
+   */
+  isEnabled?: () => boolean;
   validate(raw: unknown): McpToolValidation;
   run(value: unknown, ctx: McpToolExecutionContext): Promise<string | McpToolOutput>;
 }

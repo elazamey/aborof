@@ -4,6 +4,7 @@ import { hasDB } from "@/lib/db";
 import { auditSecretConfiguration, diagnosticsKeyMatches, isDiagnosticsEnabled } from "@/lib/secrets";
 import { isAdminRequest } from "@/lib/auth";
 import { snapshot } from "@/lib/observability/metrics";
+import { getMcpRegistry, ragPolicySnapshot } from "@/lib/ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,12 @@ export const GET = apiHandler("/api/admin/diagnostics", async (request) => {
     diagnostics_enabled: true,
     db_configured: hasDB(),
     secret_warnings: warnings,
+    // لقطات سياسة فقط: أسماء أدوات وحدود مقيّدة — لا أي قيمة سرية.
+    tools: {
+      enabled: getMcpRegistry().isEnabled(),
+      visible: getMcpRegistry().listTools().map((tool) => tool.name),
+    },
+    rag: ragPolicySnapshot(),
     metrics: metricsSnapshot,
   });
 });

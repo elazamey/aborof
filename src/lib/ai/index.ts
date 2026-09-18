@@ -19,12 +19,30 @@ export {
   NvidiaNimProvider,
   resolveNimBaseUrl,
 } from "./providers/nvidia-nim";
-export { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
+export { ALL_MCP_TOOLS, getMcpRegistry, isMcpToolsEnabled } from "./mcp";
+export {
+  buildKnowledgeBase,
+  getKnowledgeBase,
+  invalidateKnowledgeBase,
+  isRagEnabled,
+  ragPolicySnapshot,
+  resolveEngineName,
+  resolveMemoryEngine,
+  searchKnowledge,
+} from "./memory";
 export { MAX_PRODUCT_CARDS, extractProductCards } from "./cards";
 export { runToolLoop } from "./tools/run-tool-loop";
 export { openAiCompatibleChat } from "./tools/openai-compatible";
 export type { McpToolDefinition, McpToolOutput, McpToolResult } from "./mcp";
 export type { ProductCard } from "./cards";
+export type {
+  KnowledgeHit,
+  KnowledgeSearchResult,
+  MemoryDocument,
+  MemoryDocumentKind,
+  MemoryEngine,
+  MemoryEngineName,
+} from "./memory";
 export type {
   OpenAIChatMessage,
   OpenAIToolDefinition,

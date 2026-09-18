@@ -132,11 +132,19 @@ export class McpToolRegistry {
     return [...this.tools.keys()].sort();
   }
 
-  /** الأسماء المرئية الآن: الطبقة مفعّلة + القائمة المسموح بها. */
+  /**
+   * الأسماء المرئية الآن: الطبقة مفعّلة + بوابة الأداة الخاصة + القائمة المسموح
+   * بها. الفحص كلنداء لا مرة واحدة، فأي علم يتغير يسري فورًا بلا إعادة تشغيل.
+   */
   private visibleNames(): string[] {
     if (!isMcpToolsEnabled()) return [];
     const allowed = new Set(resolveAllowedToolNames(this.registeredNames()));
-    return this.registeredNames().filter((name) => allowed.has(name));
+    return this.registeredNames().filter((name) => {
+      if (!allowed.has(name)) return false;
+      const tool = this.tools.get(name);
+      if (!tool) return false;
+      return tool.isEnabled ? tool.isEnabled() === true : true;
+    });
   }
 
   /** `tools/list` — لا يعرض شيئًا عندما تكون الطبقة معطلة. */
