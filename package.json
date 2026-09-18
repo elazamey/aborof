@@ -9,6 +9,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "routes:inventory": "node scripts/route-inventory.mjs --check",
+    "verify:secrets": "node scripts/verify-deploy-secrets.mjs",
+    "verify:turso": "node scripts/verify-turso.mjs",
+    "smoke:prod": "node scripts/smoke-production.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "security:gates": "node scripts/security-gates.mjs"
   },
