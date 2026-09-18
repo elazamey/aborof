@@ -5,12 +5,31 @@
 
 ---
 
+## أ) تحديث الحالة بعد دمج PR #11 (2026-09-18 06:57Z)
+
+تم الدمج فعليًا (merge commit `9a4f3e1`) وتشغّل الـ Workflow `Deploy to Vercel` (تشغيل `35317168194`) — **وظيفة النشر ظهرت `skipped` مرة أخرى**، فتشغيل النشر ظلّ على `main` من دون نشر. التشخيص الكامل:
+
+| # | الدليل | الاستنتاج |
+|---|---|---|
+| 1 | `gh api …/actions/runs/35317168194/jobs` ⇒ `Deploy to Vercel Production: skipped` مع أن الفرع `main` | الشرط `vars.VERCEL_DEPLOY_ENABLED == 'true'` رآها **فارغة** |
+| 2 | المرجع: `jobs.<id>.if` يُقيَّم في طور التجميع قبل الدخول إلى البيئة، ولا يرى متغيرات البيئة (والنطاقات المسموحة `github, needs, vars, inputs`) | المتغير المضبوط على بيئة `production` **غير مرئي أبدًا** لشرط على مستوى الوظيفة — إعداد صحيح بنية خاطئة |
+| 3 | `gh api /repos/.../environments/production` ⇒ `{"name":"Production", "protection_rules":[{"type":"branch_policy"}], "deployment_branch_policy":{"protected_branches":true}}` | أسماء البيئات **غير حساسة لحالة الأحرف**، فـ `production` في الـ Workflow تحل إلى البيئة `Production` التي عليها سياسة «الفروع المحمية فقط» |
+| 4 | `gh api /repos/.../branches/main` ⇒ `{"protected": false}` | `main` غير محمي ⇒ حتى بعد إصلاح البوابة، سترفض قاعدة الحماية وظيفة النشر |
+
+**الإصلاح 1 (كود — في هذا الفرع):** أُضيفت وظيفة `Deploy gate (VERCEL_DEPLOY_ENABLED)` مرتبطة بـ `environment: production` تقرأ المتغير **داخل خطوة shell** (حيث نطاق البيئة فعّال) وتبثّه كمخرج، ووظيفة النشر صارت `needs: [quality-gates, deploy-gate]` بشرط `needs.deploy-gate.outputs.enabled == 'true'` — فيبقى السلوك موثّقًا (`skipped` عند الإغلاق) ويعمل المتغير من نطاق البيئة أو المستودع، مع تحذير مطبوع بالقيمة الفعّالة عند الإغلاق. اختبارات حماية في `tests/deploy-tools.test.ts` تمنع عودة الخطأ.
+
+**الإصلاح 2 (إعداد — بيد المالك، لا يمكن لأي توكن فعله):** **Settings → Environments → Production → Deployment branches** ⇒ اختر *All branches* (أو *Allow custom branches* وأضف `main`). بديل غير متاح عمليًا: تفعيل حماية `main` (حماية الفروع في المستودعات الخاصة تحتاج خطة مدفوعة — الـ API يعيد `Upgrade to GitHub Pro`).
+
+**مسار فوري بديل للإصلاح 1 (بلا دمج كود):** أضف `VERCEL_DEPLOY_ENABLED` في تبويب **Variables** (لا Secrets) على **نطاق المستودع** بقيمة `true`؛ النطاق على مستوى المستودع مرئي لشرط الوظيفة، فيبدأ النشر فورًا مع الـ Workflow الحالي.
+
+---
+
 ## 0) الخلاصة أولًا
 
 | الخطوة | من ينفّذها | الحالة الآن |
 |---|---|---|
 | 1 — فحص الأسرار مقابل DEPLOYMENT.md | **المالك** (أمر واحد أو صفحة الإعدادات) | ⛔ موقوفة: GitHub يمنع أي GitHub App من قراءة أسرار Actions (403 أدناه) — الأدوات جاهزة |
-| 2 — تشغيل workflow النشر ومراقبته | **المالك** (تشغيل) + **الوكيل** (مراقبة) | ⏳ جاهزة للتشغيل؛ آخر تشغيل على main (06:26Z) كانت وظيفة النشر فيه `skipped` |
+| 2 — تشغيل workflow النشر ومراقبته | **المالك** (إعداد البيئة) + **الوكيل** (مراقبة) | 🔴 نُفِّذ الدمج ودار الـ Workflow لكن وظيفة النشر بقيت `skipped` مرتين — السبب الجذري مشخَّص في القسم (أ) مع إصلاحين |
 | 3 — فحصا Turso (اتصال + تطابق هجرات) | **المالك** (تشغيل) أو CI عبر `service-health.yml` | ⏳ أداة الفحص مبنية ومختبرة |
 | 4 — Smoke test + `routes:inventory` | **الوكيل** (قراءة فقط) + **المالك** (الطلبات الكاتبة) | ⏳ `routes:inventory` أخضر محليًا؛ baseline إنتاج مسجَّل |
 | 5 — فتح `ENABLE_ORDER_TRACKING` والتحقق | **المالك** (فتح العلم) + **الوكيل** (تحقق) | ⛔ لا يُفتح إلا بعد اجتياز الصفين 13 و14 |
@@ -92,7 +111,7 @@ Variables → Production**، وأن `ADMIN_SESSION_SECRET` ≠ `DIAGNOSTICS_KEY`
 
 ### علامة النجاح المطلوبة
 
-وظيفة `Deploy to Vercel Production` يجب أن تنتقل من `skipped` إلى `success`، مع نجاح خطوتي:
+وظيفة `Deploy gate (VERCEL_DEPLOY_ENABLED)` تُقرأ فيها القيمة الفعّالة (تظهر في سطر التحذير إن كانت مغلقة)، ثم تنتقل وظيفة `Deploy to Vercel Production` من `skipped` إلى `success` مع نجاح خطوتي:
 
 ```text
 Verify required deployment secrets      → All required deployment secrets are present.
@@ -198,9 +217,19 @@ node scripts/smoke-production.mjs --track "<orderId>" --last4 1234
 | `Deploy to Vercel Production` ⇒ `skipped` | `VERCEL_DEPLOY_ENABLED ≠ "true"` | فعّل المتغير في نطاقه الفعّال |
 | `Deploy to Vercel Production` ⇒ `failure` في خطوة الأسرار | سر إلزامي غائب (الاسم مطبوع) | أضفه وأعد التشغيل |
 
+## 6.1) تشخيص «skipped» في دقيقة واحدة
+
+| الملاحظة | المعنى | الإصلاح |
+|---|---|---|
+| `Deploy gate` رُفضت قبل أي خطوة برسالة `not allowed to deploy to Production due to environment protection rules` | سياسة فروع البيئة «الفروع المحمية فقط» و`main` غير محمي | Environments → Production → Deployment branches → *All branches* |
+| `Deploy gate` نجحت وكتبت `enabled=false` مع القيمة الفعلية | المتغير غائب من النطاقين أو قيمته ليست `true` حرفيًا | أضف/صحّح `VERCEL_DEPLOY_ENABLED=true` في **Variables** (لا Secrets) |
+| القيمة المطبوعة فاضية تمامًا وأنت متأكد من ضبطها | ضُبط في تبويب Secrets، أو على بيئة أخرى غير `production`/`Production` | انقله إلى Variables أو إلى البيئة الصحيحة |
+| `Deploy to Vercel Production` ما زالت `skipped` بينما `Deploy gate` كتبت `enabled=true` | الـ Workflow قديم قبل إصلاح البوابة | تأكد أن آخر دمج إلى main يتضمن `.github/workflows/deploy.yml` الجديد |
+
 ## 7) قواعد ثابتة
 
 - لا كلمة مرور حقيقية في سطر أوامر أو سجل أو ملف متتبَّع؛ الفحص بكلمة خاطئة عمدًا كافٍ.
 - لا تُطبع أي قيمة سرية في أي مخرج (كل الأدوات هنا تطبع الأسماء والحالات فقط).
 - `ENABLE_ORDER_TRACKING` لا يُفتح إلا بعد اجتياز الصفين 13 و14 معًا.
 - أي فحص ناقص = تهيئة يجب إغلاقها قبل إعلان الجاهزية، لا استثناء يُتجاوز.
+- لا تُقرأ بوابة النشر في `if` على مستوى الوظيفة أبدًا (متغيرات البيئة غير مرئية هناك) — البوابة خطوة داخل وظيفة `Deploy gate` فقط.

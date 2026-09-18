@@ -66,13 +66,50 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # بوابة النشر: تُقرأ داخل نطاق البيئة عبر خطوة shell لا عبر `if` على مستوى الوظيفة.
+  #
+  # السبب: GitHub يقيّم شروط `if` على مستوى الوظيفة في طور التجميع قبل الدخول إلى
+  # البيئة، فلا يرى متغيرات البيئة (environment variables) ويراها فارغة دائمًا.
+  # النتيجة السابقة: وظيفة النشر تبقى `skipped` إلى الأبد حتى لو كان
+  # VERCEL_DEPLOY_ENABLED=true مضبوطًا على بيئة production (وهو ما حدث فعلًا).
+  # هذه الوظيفة الصغيرة تُقرأ فيها القيمة داخل خطوة (حيث نطاق البيئة فعّال) ثم
+  # تُصدَّر كمخرج، وتبقى وظيفة النشر `skipped` عند الإغلاق تمامًا كما هو موثّق.
+  deploy-gate:
+    name: Deploy gate (VERCEL_DEPLOY_ENABLED)
+    environment: production
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Read effective VERCEL_DEPLOY_ENABLED
+        id: gate
+        env:
+          # تُقرأ من نطاق البيئة أولًا ثم نطاق المستودع (نفس سلوك GitHub للمتغيرات).
+          GATE_VALUE: ${{ vars.VERCEL_DEPLOY_ENABLED }}
+        run: |
+          set -euo pipefail
+          value="${GATE_VALUE:-}"
+          if [ "$value" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "✅ بوابة النشر مفتوحة: VERCEL_DEPLOY_ENABLED=true في النطاق الفعّال."
+            exit 0
+          fi
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          # طباعة القيمة هنا مقصودة وغير سرية (علم موثّق في DEPLOYMENT.md)، وهي ما
+          # يجعل التشخيص ممكنًا: قيمة فارغة تعني أن المتغير غائب/موضوع في تبويب
+          # Secrets، وقيمة مختلفة تعني خطأ كتابة (المقارنة حرفية وحساسة لحالة الأحرف).
+          echo "::warning::بوابة النشر مغلقة: VERCEL_DEPLOY_ENABLED='${value:-<غير معرّف>}' — المطلوب 'true' حرفيًا كـ Variable (لا Secret) في نطاق المستودع أو بيئة production."
+          echo "افتح Settings → Secrets and variables → Actions → Variables وأضف VERCEL_DEPLOY_ENABLED=true."
+
   deploy:
     name: Deploy to Vercel Production
     # ربط النشر ببيئة production على GitHub: يتيح قواعد الحماية (مراجعين/مدة انتظار)
     # ويجعل أسرار النشر مقصورة على هذه البيئة فقط.
     environment: production
-    needs: quality-gates
-    if: ${{ github.ref == 'refs/heads/main' && vars.VERCEL_DEPLOY_ENABLED == 'true' }}
+    needs: [quality-gates, deploy-gate]
+    if: ${{ needs.deploy-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -117,7 +154,7 @@ jobs:
   # ملخص نشر مرتبط بالـ SHA ورابط الأثر للرجوع إليه عند الحوادث.
   report:
     name: Deployment summary
-    needs: [quality-gates, deploy]
+    needs: [quality-gates, deploy-gate, deploy]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -129,6 +166,7 @@ jobs:
             echo "- Commit SHA: \`${{ github.sha }}\`"
             echo "- Ref: \`${{ github.ref }}\`"
             echo "- Quality gates: ${{ needs.quality-gates.result }}"
+            echo "- Deploy gate (VERCEL_DEPLOY_ENABLED): ${{ needs.deploy-gate.outputs.enabled || 'closed/غير معرّف' }}"
             echo "- Deploy: ${{ needs.deploy.result }}"
             echo "- Evidence artifact: deploy-evidence-${{ github.sha }}"
           } >> "$GITHUB_STEP_SUMMARY"

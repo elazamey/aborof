@@ -2,13 +2,24 @@
 
 ## النشر التلقائي
 
-يحتوي المستودع على Workflow باسم `Deploy to Vercel` ينفذ فحوصات الجودة ثم ينشر فرع `main` إلى بيئة Vercel الإنتاجية. حماية النشر متعمدة: لا يبدأ الـ Workflow حتى يكون متغير المستودع `VERCEL_DEPLOY_ENABLED` مساويًا للنص `true`.
+يحتوي المستودع على Workflow باسم `Deploy to Vercel` ينفذ فحوصات الجودة ثم ينشر فرع `main` إلى بيئة Vercel الإنتاجية. حماية النشر متعمدة: لا تبدأ وظيفة النشر حتى يكون المتغير `VERCEL_DEPLOY_ENABLED` مساويًا حرفيًا للنص `true`، ويُقرأ من نطاق **بيئة `production`** أولًا ثم نطاق المستودع.
+
+> **لماذا وظيفة `Deploy gate` منفصلة؟** GitHub يقيّم شرط `if` على مستوى الوظيفة في طور التجميع **قبل** الدخول إلى البيئة، فلا يرى متغيرات البيئة ويراها فارغة دائمًا
+> (توثيق مجتمعي مؤكد: `jobs.<id>.if` يقبل `github, needs, vars, inputs` لكن نطاق البيئة يُحلّ في الطور التالي). لذلك تُقرأ البوابة داخل خطوة في وظيفة
+> `Deploy gate (VERCEL_DEPLOY_ENABLED)` المرتبطة بنفس البيئة، ثم تُصدَّر كمخرج تقرأه وظيفة النشر عبر `needs.deploy-gate.outputs.enabled`.
+> النتيجة: تجاهل هذا التفصيل كان يُبقي وظيفة النشر `skipped` إلى الأبد حتى مع ضبط المتغير على البيئة، وبلا أي رسالة خطأ.
 
 وظيفة النشر مرتبطة أيضًا ببيئة GitHub المسماة `production` (`environment: production`)، أي أنها:
 
 - تقرأ الأسرار والمتغيرات من نطاق البيئة أولًا، ثم ترجع إلى نطاق المستودع إن لم تكن معرّفة هناك؛
 - تخضع لقواعد حماية البيئة إن أضفتها (مراجعون مطلوبون، مدة انتظار، أو قصر النشر على فروع محددة) عبر
   **Settings → Environments → production**، وهي طبقة حماية إضافية فوق شرط الفرع والمتغير.
+
+> ⚠️ **فخ حماية البيئة:** إن كانت سياسة فروع النشر على البيئة «**Protected branches only**» وفرع `main` غير محمي،
+> فسيُرفض أي نشر بقاعدة الحماية (الرسالة: `Branch "main" is not allowed to deploy to Production due to environment protection rules`)
+> حتى لو كان المتغير والأسرار سليمة. اضبطها على **All branches** أو **Allow custom branches** مع `main`، أو فعّل حماية `main`
+> (حماية الفروع في المستودعات الخاصة تحتاج خطة مدفوعة). أسماء البيئات غير حساسة لحالة الأحرف، لذا `production` في الـ Workflow
+> تحل إلى البيئة المسماة `Production`.
 
 أضف في إعدادات المستودع ضمن **Settings → Secrets and variables → Actions** الأسرار التالية، من دون وضع قيمها في الملفات أو الأوامر:
 
@@ -59,6 +70,8 @@
   - `ADMIN_SESSION_SECRET` (32 حرفًا على الأقل، لتوقيع الجلسات فقط)؛
   - اختياري: `DIAGNOSTICS_ENABLED=true` مع `DIAGNOSTICS_KEY` **مستقل تمامًا**، و`CSP_ENFORCE=true`.
 - [ ] `ADMIN_SESSION_SECRET` يختلف عن `DIAGNOSTICS_KEY` (حاجز النشر الثابت يرفض تطابقهما).
+- [ ] `VERCEL_DEPLOY_ENABLED` مضاف في تبويب **Variables** (لا Secrets) ومساوٍ حرفيًا `true` — إمّا متغير مستودع أو متغير بيئة `production`.
+- [ ] حماية بيئة النشر لا تمنع `main`: **Settings → Environments → Production → Deployment branches** مساوية *All branches* (أو سياسة مخصّصة تتضمن `main`).
 - [ ] (المرحلة الثانية، اختياري) إن فُعّل `ENABLE_MCP_TOOLS` فراجع `MCP_ALLOWED_TOOLS` والحدود الثلاثة قبل النشر، وتذكّر أن الطبقة للقراءة فقط وأن أدوات الكتابة تحتاج بوابة `MCP_ALLOW_WRITE_TOOLS` منفصلة.
 - [ ] (المرحلة الثانية، اختياري) إن أُضيف مفتاح NIM فتحقق أن `NVIDIA_NIM_BASE_URL` (إن وُجد) يبدأ بـ `https://` وإلا فالمزود غير متاح.
 - [ ] المتغير `VERCEL_DEPLOY_ENABLED` مساوٍ `true`.
@@ -110,6 +123,19 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
 **الحسم:** حُذف `src/lib/db.ts` وأصبح `@/lib/db` يحل حصريًا إلى `db/index.ts` الذي يشغّل الهجرات (بما فيها `order_items` وقيودها). بعد الدمج تحقق عبر الصف 7 ثم الصفين 10–11 من الجدول أعلاه.
 
 يمكن أيضًا تشغيل وظيفة **Production probe** من تبويب **Actions** للحصول على نتيجة الخطوة 4 من داخل GitHub (بدون أسرار، ومحاولة واحدة لكل تشغيل).
+
+## أدوات التحقق الجاهزة (سكربتات)
+
+بدل تنفيذ الفحوص يدويًا، المستودع يتضمن أدوات تنفّذها بالنيابة عنك:
+
+| الأمر | ما يفحصه | ملاحظة |
+|---|---|---|
+| `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
+| `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
+| `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 + رؤوس الأمان + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط |
+| `npm run routes:inventory` | جرد المسارات وبواباتها (نفس بوابة CI) | يفشل إن غاب أي مسار مطلوب |
+
+تفاصيل الاستخدام والتشخيص في [`handoff/deploy-activation-runbook.md`](handoff/deploy-activation-runbook.md).
 
 ## تشغيل محلي
 

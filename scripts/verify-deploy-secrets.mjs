@@ -13,7 +13,12 @@
  * لا تُطبع أي قيمة سرية مطلقًا: الأسماء ونطاقها فقط (وتواريخ آخر تحديث)،
  * وقيم المتغيرات غير الحساسة (أعلام) حين تكون هي المقصودة بالفحص.
  *
- * كود الخروج: 0 = لا يوجد نقص حاجب، 1 = نقص حاجب (سر إلزامي غائب أو بوابة مغلقة).
+ * حتى بلا صلاحية أسرار، تقرأ الأداة **حماية بيئة النشر** وحالة حماية `main`
+ * (بيانات غير سرية) وترصد الفخ الصامت: سياسة «الفروع المحمية فقط» مع main
+ * غير محمي ⇒ رفض النشر بقاعدة الحماية.
+ *
+ * كود الخروج: 0 = لا يوجد نقص حاجب، 1 = نقص حاجب (سر إلزامي غائب/بوابة مغلقة/
+ * تعارض حماية بيئة)، 2 = تعذّرت القراءة (صلاحية مفقودة) أو استخدام خاطئ.
  */
 import { execFileSync } from "node:child_process";
 
@@ -36,7 +41,7 @@ const SECRETS = [
 ];
 
 const VARIABLES = [
-  { name: "VERCEL_DEPLOY_ENABLED", level: "required", mustEqual: "true", why: "بوابة وظيفة النشر — أي قيمة غير true تُبقيها skipped" },
+  { name: "VERCEL_DEPLOY_ENABLED", level: "required", mustEqual: "true", why: "بوابة وظيفة النشر — يجب أن تكون Variable (لا Secret) وبالقيمة الحرفية true" },
   { name: "ENABLE_AI_AGENT", level: "optional", why: "توجيه /api/chat إلى محرك الوكيل" },
   { name: "AI_PROVIDER_ORDER", level: "optional", why: "ترتيب سلسلة المزودين" },
   { name: "NVIDIA_NIM_BASE_URL", level: "optional", why: "يجب أن يبدأ بـ https:// وإلا خرج المزود من السلسلة" },
@@ -116,29 +121,9 @@ const repoSecrets = gh(`/repos/${repo}/actions/secrets?per_page=100`);
 const repoVariables = gh(`/repos/${repo}/actions/variables?per_page=100`);
 const envSecrets = gh(`/repos/${repo}/environments/${envName}/secrets?per_page=100`);
 const envVariables = gh(`/repos/${repo}/environments/${envName}/variables?per_page=100`);
-
-const allForbidden = [repoSecrets, repoVariables, envSecrets, envVariables].every((r) => !r.ok && r.forbidden);
-if (allForbidden) {
-  if (asJson) {
-    console.log(JSON.stringify({ repo, environment: envName, error: "FORBIDDEN", status: 403, hint: "شغّله بحساب المالك" }, null, 2));
-    process.exit(2);
-  }
-  console.error(
-    [
-      "❌ التوكن الحالي لا يملك صلاحية قراءة أسرار/متغيرات Actions (HTTP 403).",
-      "",
-      "هذا متوقع لأي GitHub App أو توكن روبوت — الصلاحية ملك لحساب المالك. نفّذ:",
-      "  1) على جهازك:  gh auth status   (تأكد أنه حسابك الإداري، لا حساب بوت)",
-      `  2) ثم:          node scripts/verify-deploy-secrets.mjs --repo ${repo} --env ${envName}`,
-      "أو من الواجهة: Settings → Secrets and variables → Actions (انسخ الأسماء وقارنها بالجدول أدناه).",
-      "",
-      "الأسماء المطلوبة للمقارنة اليدوية:",
-      `  أسرار إلزامية: ${SECRETS.filter((s) => s.level === "required").map((s) => s.name).join(", ")}`,
-      `  متغيرات: ${VARIABLES.map((v) => v.name).join(", ")}`,
-    ].join("\n")
-  );
-  process.exit(2);
-}
+// معلومات البيئة ونظام حماية الفرع: تُقرأ بصلاحية عادية (بلا صلاحية أسرار) لأنها ليست سرية.
+const environment = gh(`/repos/${repo}/environments/${envName}`);
+const mainBranch = gh(`/repos/${repo}/branches/main`);
 
 const secrets = new Map();
 const variables = new Map();
@@ -156,51 +141,143 @@ for (const entry of envVariables.ok ? envVariables.data.variables ?? [] : []) {
   variables.set(entry.name, { scope: `environment:${envName}`, value: entry.value, updatedAt: entry.updated_at });
 }
 
-const missingSecretNames = SECRETS.filter((s) => !secrets.has(s.name) && !ONE_OF.some((g) => g.names.includes(s.name)));
+const envInfo = environment.ok ? environment.data : null;
+const mainProtected = mainBranch.ok ? Boolean(mainBranch.data.protected) : null;
+const branchPolicy = envInfo?.deployment_branch_policy ?? null;
+const protectionTypes = (envInfo?.protection_rules ?? []).map((rule) => rule.type);
+const environmentWarnings = [];
 const blocking = [];
 
-for (const secret of SECRETS) {
-  if (!secrets.has(secret.name) && secret.level === "required") blocking.push(`سر إلزامي غائب: ${secret.name}`);
+if (envInfo && protectionTypes.includes("required_reviewers")) {
+  environmentWarnings.push(`بيئة «${envInfo.name}» تتطلب مراجعين: كل نشر سينتظر اعتمادًا يدويًا (سلوك مقصود إن أردته).`);
 }
-for (const variable of VARIABLES) {
-  const found = variables.get(variable.name);
-  if (variable.level === "required" && !found) blocking.push(`متغير إلزامي غائب: ${variable.name}`);
-  if (found && variable.mustEqual !== undefined && String(found.value) !== variable.mustEqual) {
-    blocking.push(`بوابة مغلقة: ${variable.name} = ${JSON.stringify(found.value)} (المطلوب ${JSON.stringify(variable.mustEqual)})`);
+if (envInfo && protectionTypes.includes("wait_timer")) {
+  environmentWarnings.push(`بيئة «${envInfo.name}» عليها مدة انتظار: النشر يتأخر قبل البدء.`);
+}
+
+// الفخ الصامت: سياسة «الفروع المحمية فقط» مع main غير محمي ⇒ رفض وظيفة النشر
+// بقاعدة الحماية قبل أي خطوة، وهي حالة لا تُرى في أي سجل أسرار.
+if (envInfo && branchPolicy?.protected_branches === true && mainProtected === false) {
+  blocking.push(
+    `بيئة النشر «${envInfo.name}» تقصر النشر على الفروع المحمية و main غير محمي ⇒ ستُرفض وظيفة النشر بقاعدة الحماية. ` +
+      `الحل: Settings → Environments → ${envInfo.name} → Deployment branches → All branches (أو Allow custom branches + main).`
+  );
+}
+
+if (!mainProtected && envInfo && !branchPolicy) {
+  environmentWarnings.push("main غير محمي: يُنصح بإضافة حماية فرع + required checks قبل تفعيل النشر التلقائي المستمر (يتطلب خطة مدفوعة للمستودعات الخاصة).");
+}
+
+const allForbidden = [repoSecrets, repoVariables, envSecrets, envVariables].every((r) => !r.ok && r.forbidden);
+
+const missingSecretNames = SECRETS.filter((s) => !secrets.has(s.name) && !ONE_OF.some((g) => g.names.includes(s.name)));
+
+if (!allForbidden) {
+  for (const secret of SECRETS) {
+    if (!secrets.has(secret.name) && secret.level === "required") blocking.push(`سر إلزامي غائب: ${secret.name}`);
+  }
+  for (const variable of VARIABLES) {
+    const found = variables.get(variable.name);
+    if (variable.level === "required" && !found) blocking.push(`متغير إلزامي غائب: ${variable.name}`);
+    if (found && variable.mustEqual !== undefined && String(found.value) !== variable.mustEqual) {
+      blocking.push(`بوابة مغلقة: ${variable.name} = ${JSON.stringify(found.value)} (المطلوب ${JSON.stringify(variable.mustEqual)})`);
+    }
+  }
+  // بوابة النشر يجب أن تكون Variable لا Secret: الشروط تقرأ `vars`، والقيمة في
+  // تبويب Secrets لا تظهر هناك أبدًا (سبب شائع لتخطي النشر بلا أي رسالة).
+  if (secrets.has("VERCEL_DEPLOY_ENABLED")) {
+    blocking.push(
+      "VERCEL_DEPLOY_ENABLED موضوع في تبويب Secrets — يجب أن يكون Variable؛ الشروط تقرأ `vars` فقط، فالقيمة كسرّ تبقى غير مرئية."
+    );
   }
 }
 
 const report = {
   repo,
   environment: envName,
+  environmentResolvedName: envInfo?.name ?? null,
+  environmentExists: Boolean(envInfo),
+  environmentProtectionRules: protectionTypes,
+  deploymentBranchPolicy: branchPolicy,
+  mainProtected,
   scopesReadable: {
     repo: repoSecrets.ok || repoVariables.ok,
     environment: envSecrets.ok || envVariables.ok,
-    environmentExists: envSecrets.ok || envVariables.ok,
   },
+  environmentWarnings,
   missingSecretNames,
   blocking,
 };
+
+function printEnvironmentSection() {
+  console.log("## بيئة النشر (بيانات غير سرية)\n");
+  if (envInfo) {
+    console.log(`- الاسم الفعلي على GitHub: \`${envInfo.name}\` (الأسماء غير حساسة لحالة الأحرف، فـ \`${envName}\` يحل إليها).`);
+    console.log(`- قواعد الحماية: ${protectionTypes.length ? protectionTypes.map((t) => `\`${t}\``).join(", ") : "لا شيء"}`);
+    const policyLabel = !branchPolicy
+      ? "لا سياسة فروع (كل الفروع مسموحة)"
+      : branchPolicy.protected_branches
+        ? "الفروع المحمية فقط ⚠️"
+        : "فروع مخصّصة مفعّلة";
+    console.log(`- سياسة فروع النشر: ${policyLabel}`);
+    console.log(`- \`main\` محمي؟ ${mainProtected === null ? "تعذّرت القراءة" : mainProtected ? "✅ نعم" : "❌ لا"}`);
+  } else {
+    console.log(`- ⚠️ تعذّرت قراءة البيئة \`${envName}\` (قد لا تكون منشأة بعد؛ تُنشأ تلقائيًا عند أول وظيفة تشير إليها وتكون بلا أسرار حينها).`);
+  }
+  if (environmentWarnings.length) {
+    console.log("");
+    for (const item of environmentWarnings) console.log(`- ⚠️ ${item}`);
+  }
+}
+
+const manualNames = [
+  "الأسماء المطلوبة للمقارنة اليدوية (Settings → Secrets and variables → Actions):",
+  `  أسرار إلزامية: ${SECRETS.filter((s) => s.level === "required").map((s) => s.name).join(", ")}`,
+  `  أسرار اختيارية: ${SECRETS.filter((s) => s.level === "optional").map((s) => s.name).join(", ")}`,
+  `  متغيرات (Variables لا Secrets): ${VARIABLES.map((v) => v.name).join(", ")}`,
+].join("\n");
+
+if (allForbidden) {
+  if (asJson) {
+    console.log(JSON.stringify({ ...report, error: "FORBIDDEN", status: 403, hint: "شغّله بحساب المالك لقراءة الأسرار" }, null, 2));
+    process.exit(2);
+  }
+  console.log(`# فحص أسرار النشر — ${repo} (نطاق البيئة: ${envName})\n`);
+  console.error(
+    [
+      "❌ التوكن الحالي لا يملك صلاحية قراءة أسرار/متغيرات Actions (HTTP 403) — سلوك GitHub المقصود لأي GitHub App.",
+      "نفّذ على جهازك بحساب المالك:",
+      `  node scripts/verify-deploy-secrets.mjs --repo ${repo} --env ${envName}`,
+      "لكن الفحوص غير السرية تعمل هنا بالفعل:",
+      "",
+    ].join("\n")
+  );
+  printEnvironmentSection();
+  console.log(`\n${manualNames}\n`);
+  if (blocking.length) {
+    console.log("❌ نقص حاجب مكتشف بلا صلاحية أسرار:");
+    for (const item of blocking) console.log(`  - ${item}`);
+  }
+  process.exit(blocking.length ? 1 : 2);
+}
 
 if (asJson) {
   console.log(JSON.stringify(report, null, 2));
   process.exit(blocking.length ? 1 : 0);
 }
 
-function cell(present, extra = "") {
-  return present ? `✅ ${extra}`.trim() : "❌ غائب";
-}
-
 console.log(`# فحص أسرار النشر — ${repo} (نطاق البيئة: ${envName})\n`);
 console.log(`قراءة نطاق المستودع: ${report.scopesReadable.repo ? "✅" : "❌"}  |  قراءة نطاق البيئة: ${report.scopesReadable.environment ? "✅" : "❌"}\n`);
 
-console.log("## الأسرار\n");
+printEnvironmentSection();
+
+console.log("\n## الأسرار\n");
 console.log("| السر | الأهمية | الحالة | النطاق | آخر تحديث |");
 console.log("|---|---|---|---|---|");
 for (const secret of SECRETS) {
   const found = secrets.get(secret.name);
   console.log(
-    `| \`${secret.name}\` | ${secret.level === "required" ? "إلزامي" : "اختياري"} | ${cell(Boolean(found))} | ${found?.scope ?? "—"} | ${found ? String(found.updatedAt).slice(0, 10) : "—"} |`
+    `| \`${secret.name}\` | ${secret.level === "required" ? "إلزامي" : "اختياري"} | ${found ? "✅" : "❌ غائب"} | ${found?.scope ?? "—"} | ${found ? String(found.updatedAt).slice(0, 10) : "—"} |`
   );
 }
 
@@ -220,7 +297,7 @@ for (const variable of VARIABLES) {
         ? " ✅"
         : " ❌ (بوابة مغلقة)"
       : "";
-  console.log(`| \`${variable.name}\` | ${variable.level === "required" ? "إلزامي" : "اختياري"} | ${cell(Boolean(found))}${gateNote} | ${value} | ${found?.scope ?? "—"} |`);
+  console.log(`| \`${variable.name}\` | ${variable.level === "required" ? "إلزامي" : "اختياري"} | ${found ? "✅" : "❌ غائب"}${gateNote} | ${value} | ${found?.scope ?? "—"} |`);
 }
 
 console.log("\n## مجموعات «واحد على الأقل»\n");
@@ -233,11 +310,12 @@ for (const group of ONE_OF) {
 console.log("\n## تنبيهات واجبة المراجعة اليدوية\n");
 console.log("- أسرار Actions لا تنتقل تلقائيًا إلى Runtime في Vercel: تأكد من وجود `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` في Vercel Project → Settings → Environment Variables (Production).");
 console.log("- تأكد أن `ADMIN_SESSION_SECRET` يختلف عن `DIAGNOSTICS_KEY` (القيم غير قابلة للقراءة من GitHub، والفحص إلزامي قبل النشر).");
-console.log("- وظيفة النشر مرتبطة بـ `environment: ${envName}`؛ إن لم تكن البيئة موجودة سيُنشئها GitHub عند أول تشغيل ولن تجد أسرارًا مقصورة عليها.");
+console.log("- وظيفة النشر مرتبطة بـ `environment: production`؛ الأسماء غير حساسة لحالة الأحرف، وتقرأ الوظيفة نطاق البيئة ثم نطاق المستودع.");
+console.log("- `VERCEL_DEPLOY_ENABLED` يُقرأ داخل خطوة (وظيفة Deploy gate) لأن GitHub لا يوفر متغيرات البيئة في شروط `if` على مستوى الوظيفة.");
 
 console.log("\n## الخلاصة\n");
 if (blocking.length === 0) {
-  console.log("✅ لا يوجد نقص حاجب: كل الأسرار والمتغيرات الإلزامية حاضرة، وبوابة `VERCEL_DEPLOY_ENABLED` مفتوحة.");
+  console.log("✅ لا يوجد نقص حاجب: كل الأسرار والمتغيرات الإلزامية حاضرة، وبوابة `VERCEL_DEPLOY_ENABLED` مفتوحة، وحماية البيئة لا تمنع النشر.");
 } else {
   console.log("❌ نقص حاجب يجب إغلاقه قبل النشر:");
   for (const item of blocking) console.log(`  - ${item}`);
