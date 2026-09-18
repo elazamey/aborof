@@ -135,7 +135,7 @@ export async function updateOrderStatus(input: OrderStatusInput): Promise<void> 
  *  - يعمل فقط بعاملين معًا: رقم الطلب + آخر 4 أرقام من الهاتف.
  *  - الإخراج مبهم: الحالة + ملخص أصناف بلا هاتف كامل ولا عنوان ولا أسعار مفصلة.
  *  - رسالة الفشل واحدة لا تكشف وجود الطلب من عدمه (يمنع تعداد الطلبات).
- * 
+ *
  * يرمي `Errors.notFound` في كل حالات عدم التطابق برسالة موحّدة.
  */
 export async function trackOrder(
