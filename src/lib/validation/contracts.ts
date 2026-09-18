@@ -105,6 +105,22 @@ export const orderStatusContract = z
   })
   .strict();
 
+/**
+ * عقد تتبع الطلب للعميل — بشدّ أمني مقصود: يأخذ رقم الطلب وآخر 4 أرقام من
+ * الهاتف معًا (لا يسمح بتعداد الطلبات برقم وحده). أي حالة عدم تطابق تُرجع
+ * رسالة موحّدة واحدة لا تكشف وجود الطلب من عدمه.
+ */
+export const trackOrderContract = z
+  .object({
+    id: trimmed(5, 100),
+    phoneLast4: z
+      .string()
+      .regex(/^\d{4}$/, "المطلوب آخر 4 أرقام من رقم الهاتف")
+      .transform((v) => v.replace(/\D/g, ""))
+      .refine((v) => v.length === 4, "المطلوب آخر 4 أرقام من رقم الهاتف"),
+  })
+  .strict();
+
 export const chatMessageContract = z
   .object({
     role: z.enum(["user", "assistant"]),
@@ -121,6 +137,7 @@ export const chatRequestContract = z
 export type ProductUpsertInput = z.infer<typeof productUpsertContract>;
 export type CreateOrderInput = z.infer<typeof createOrderContract>;
 export type OrderStatusInput = z.infer<typeof orderStatusContract>;
+export type TrackOrderInput = z.infer<typeof trackOrderContract>;
 export type ChatRequestInput = z.infer<typeof chatRequestContract>;
 
 /** أول رسالة خطأ من zod بشكل مقروء عربيًا. */
