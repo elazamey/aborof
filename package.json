@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "routes:inventory": "node scripts/route-inventory.mjs --check",
     "test": "node --import tsx --test tests/*.test.ts",
-    "security:gates": "node scripts/security-gates.mjs"
+    "security:gates": "node scripts/security-gates.mjs",
+    "health:providers": "node scripts/health-probe-dry-run.mjs",
+    "health:providers:live": "node scripts/health-probe-dry-run.mjs --live"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

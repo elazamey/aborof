@@ -2,6 +2,9 @@ name: Service health probe
 
 # فحص صامت لخدمات الإنتاج: يدخل السر، ويخرج ✅/❌ فقط.
 #  - Turso: اتصال فعلي عبر @libsql/client (نفس اعتمادية التطبيق) وتنفيذ SELECT 1.
+#  - جاهزية المزودين: scripts/health-probe-dry-run.mjs --live يفحص تكوين Gemini
+#    وGroq وNVIDIA NIM وTurso، وينادي المُهيّأ منها فقط. سياسة صامتة: غياب مفتاح
+#    اختياري ⇒ تحذير لا يفشل الفحص؛ أما مفتاح موجود ومعطّل ⇒ فشل صريح.
 #  - Gemini: ping لنقطة REST نفسها التي يستخدمها /api/chat، مع سلسلة النماذج
 #    الافتراضية في التطبيق (أو نموذج محدد يدويًا). المفتاح اختياري وفق السياسة:
 #    غيابه يعطي تحذيرًا ولا يفشل الفحص، ووجود مفتاح معطّل يفشل الفحص.
@@ -18,6 +21,72 @@ on:
 permissions: {}
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # جاهزية المزودين: نفس سياسة الفحص الصامت — الأسرار تدخل والحالة تخرج.
+  # لا تُطبع أي قيمة سرية؛ السكربت يعرض بصمات مقنّعة ويكتب تقريرًا آليًا (JSON).
+  # ---------------------------------------------------------------------------
+  provider-readiness:
+    name: Provider readiness (dry-run + live, secrets in / status out)
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # السكربت بلا اعتماديات خارجية، فلا حاجة إلى npm ci هنا.
+      - name: Configuration dry-run (always runs, never fails on missing keys)
+        run: node scripts/health-probe-dry-run.mjs
+
+      - name: Live readiness for configured providers
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+          NVIDIA_NIM_BASE_URL: ${{ vars.NVIDIA_NIM_BASE_URL }}
+          NVIDIA_NIM_MODEL: ${{ vars.NVIDIA_NIM_MODEL }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          ENABLE_AI_AGENT: ${{ vars.ENABLE_AI_AGENT }}
+          ENABLE_MCP_TOOLS: ${{ vars.ENABLE_MCP_TOOLS }}
+          ENABLE_RAG: ${{ vars.ENABLE_RAG }}
+          MCP_ALLOWED_TOOLS: ${{ vars.MCP_ALLOWED_TOOLS }}
+        run: |
+          set -o pipefail
+          # مخرج واحد للطرفية، وتقرير JSON آلي للأثر — بلا أي قيمة سرية في أي منهما.
+          node scripts/health-probe-dry-run.mjs --live | tee /tmp/provider-readiness.txt
+          node scripts/health-probe-dry-run.mjs --live --json > /tmp/provider-readiness.json
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## جاهزية المزودين"
+            echo ""
+            echo '```'
+            cat /tmp/provider-readiness.txt 2>/dev/null || echo "(لا مخرج — راجع السجل)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-readiness-${{ github.sha }}
+          path: |
+            /tmp/provider-readiness.txt
+            /tmp/provider-readiness.json
+          retention-days: 14
+          if-no-files-found: ignore
+
   health:
     name: Turso + Gemini health (secrets in, status out)
     runs-on: ubuntu-latest
