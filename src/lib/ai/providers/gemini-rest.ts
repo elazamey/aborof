@@ -9,10 +9,19 @@ const DEFAULT_MODELS = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-flash
 
 export class GeminiRestProvider implements AIAgentProvider {
   readonly name = "gemini";
-  private readonly apiKey: string;
+  /** مفتاح مُمرَّر صريحًا للاختبارات؛ غيابه يُقرأ من البيئة عند كل نداء. */
+  private readonly overrideKey?: string;
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey ?? process.env.GEMINI_API_KEY ?? "";
+    this.overrideKey = apiKey;
+  }
+
+  /**
+   * القراءة عند كل نداء لا عند الإنشاء: القيمة نفسها، لكن لا تبقى نسخة
+   * مهيّأة بمفتاح قديم أو بلا مفتاح بعد تغيّر الإعداد.
+   */
+  private get apiKey(): string {
+    return this.overrideKey ?? process.env.GEMINI_API_KEY ?? "";
   }
 
   isAvailable(): boolean {

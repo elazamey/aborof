@@ -1,18 +1,26 @@
 import { redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
+import { extractProductCards, type ProductCard } from "./cards";
+import { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
 import { GeminiRestProvider } from "./providers/gemini-rest";
 import { GroqProvider } from "./providers/groq";
 import { LocalFallbackProvider } from "./providers/local-fallback";
+import { NvidiaNimProvider } from "./providers/nvidia-nim";
+import { runToolLoop } from "./tools/run-tool-loop";
+import type { ToolCapableProvider } from "./tools/types";
 import type { AgentMessage, AgentOptions, AgentResult, AIAgentProvider } from "./types";
 
 /**
  * محرك الوكيل الذكي — سلسلة تراجع محكمة (المحرك الصامت):
- *   Gemini ← Groq ← الرد المحلي.
+ *   Gemini ← Groq ← NVIDIA NIM ← الرد المحلي.
  *
  *  - كل فشل أو رد فارغ ينتقل صامتًا للمزود التالي (لا 500 للمستخدم).
  *  - كل فشل يُسجَّل في المقاييس مع رسالة محجوبة الأسرار.
  *  - طبقة حماية إضافية لعلم الميزة: إن وصل المحرك والعلم غير مفعّل
  *    فالجواب محلي فورًا (المسار الأساسي للعلم ما زال عند نقطة الاستدعاء).
+ *  - المرحلة الثانية: عندما تُفعَّل طبقة MCP **و** يطلب المستدعي الأدوات
+ *    **و** كان المزود قادرًا عليها، تُشغَّل دورة أدوات محدودة السقف عبر
+ *    `McpToolRegistry`. أي مزود لا يدعم الأدوات يبقى على مساره النصي نفسه.
  *
  * يقبل المحرك قائمة مزودين اختيارية لحقن التبعيات في الاختبارات.
  */
@@ -23,6 +31,7 @@ export class SmartAgentEngine {
     this.providers = providers ?? [
       new GeminiRestProvider(),
       new GroqProvider(),
+      new NvidiaNimProvider(),
       new LocalFallbackProvider(),
     ];
   }
@@ -43,8 +52,14 @@ export class SmartAgentEngine {
     for (const provider of this.providers) {
       if (!provider.isAvailable()) continue;
       try {
-        const reply = await provider.generateResponse(messages, options);
-        if (reply.trim()) return { reply, provider: provider.name };
+        const outcome = await this.invokeProvider(provider, messages, options);
+        if (outcome.reply.trim()) {
+          const result: AgentResult = { reply: outcome.reply, provider: provider.name };
+          if (outcome.toolCalls > 0) result.toolCalls = outcome.toolCalls;
+          // البطاقات تُضاف فقط إن أنتجتها أداة ناجحة، وتبقى الواجهة تعمل بدونها.
+          if (outcome.products.length > 0) result.products = outcome.products;
+          return result;
+        }
       } catch (e) {
         metrics.recordAiFailure(provider.name);
         console.error(
@@ -61,5 +76,34 @@ export class SmartAgentEngine {
   /** الواجهة البسيطة: نص الرد فقط. */
   async processRequest(messages: AgentMessage[], options?: AgentOptions): Promise<string> {
     return (await this.processRequestDetailed(messages, options)).reply;
+  }
+
+  /**
+   * مسار واحد لكل مزود: دورة أدوات إن كان الطلب والأداة والمزود متاحين،
+   * وإلا المسار النصي القديم حرفيًا. أي فشل يرمي للأعلى لتستمر السلسلة الصامتة.
+   */
+  private async invokeProvider(
+    provider: AIAgentProvider,
+    messages: AgentMessage[],
+    options?: AgentOptions
+  ): Promise<{ reply: string; toolCalls: number; products: ProductCard[] }> {
+    const capable = provider as Partial<ToolCapableProvider>;
+    const toolsRequested =
+      options?.enableTools === true &&
+      isMcpToolsEnabled() &&
+      capable.supportsTools === true &&
+      typeof capable.callWithTools === "function";
+
+    if (toolsRequested) {
+      const { reply, toolCalls, structured } = await runToolLoop({
+        provider: capable as ToolCapableProvider,
+        messages,
+        options,
+        registry: getMcpRegistry(),
+      });
+      return { reply, toolCalls, products: extractProductCards(structured) };
+    }
+
+    return { reply: await provider.generateResponse(messages, options), toolCalls: 0, products: [] };
   }
 }

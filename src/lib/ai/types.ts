@@ -2,10 +2,14 @@
  * واجهة المحول الموحدة للذكاء الاصطناعي (AI Strategy Interface) — المرحلة الأولى.
  *
  * العقود هنا مستقلة عن أي مكتبة خارجية: كل مزود يحقق `AIAgentProvider`
- * ويدخل سلسلة التراجع الصامت في `SmartAgentEngine`. حقول `AgentOptions`
- * المستقبلية (مثل `enableTools` لأدوات الوكيل في المرحلة الثالثة) اختيارية
- * ويتجاهلها المزود الذي لا يدعمها بعد.
+ * ويدخل سلسلة التراجع الصامت في `SmartAgentEngine`. حقل `enableTools` اختياري
+ * ويُتجاهل تمامًا ما لم تُفعَّل طبقة MCP المحكومة ويكن المزود قادرًا على
+ * الأدوات (انظر `src/lib/ai/tools/`)، فلا يتغير أي مسار قائم.
  */
+
+import type { ProductCard } from "./cards";
+
+export type { ProductCard } from "./cards";
 
 export type AgentRole = "user" | "assistant" | "system";
 
@@ -17,7 +21,7 @@ export interface AgentMessage {
 export interface AgentOptions {
   temperature?: number;
   maxTokens?: number;
-  /** محجوز للمرحلة الثالثة (أدوات الوكيل) — يتجاهله المزودون الحاليون. */
+  /** طلب صريح لتفعيل دورة الأدوات — لا يُنفَّذ إلا إن كانت الطبقة مفعّلة. */
   enableTools?: boolean;
 }
 
@@ -32,4 +36,8 @@ export interface AIAgentProvider {
 export interface AgentResult {
   reply: string;
   provider: string;
+  /** عدد محاولات تنفيذ الأدوات في هذا الطلب — يُحذف عندما يكون صفرًا. */
+  toolCalls?: number;
+  /** بطاقات منتجات للواجهة — تُحذف تمامًا عندما لا تنتجها الأدوات. */
+  products?: ProductCard[];
 }
