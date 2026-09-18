@@ -6,6 +6,8 @@ import { rateLimit } from "@/lib/rate-limit";
 import { redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 import { chatRequestContract, firstZodIssue } from "@/lib/validation/contracts";
+import { getSmartAgentEngine } from "@/lib/ai";
+import type { AgentMessage } from "@/lib/ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -140,25 +142,37 @@ export const POST = apiHandler("/api/chat", async (req) => {
   let reply = "";
   let source = "local";
 
-  if (gemini) {
-    try {
-      reply = await callGemini(sys, clean, gemini);
-      source = "gemini";
-    } catch (e) {
-      metrics.recordAiFailure("gemini");
-      console.error("chat gemini failed:", redactSecrets(String((e as Error)?.message ?? e)));
+  if (process.env.ENABLE_AI_AGENT === "true") {
+    // المحرك النمطي الموحّد (المرحلة الأولى) — نفس السلسلة التراجعية
+    // خلف علم الميزة؛ غياب العلم يُبقي المسار القديم المستقر كما هو حرفيًا.
+    const agentMessages: AgentMessage[] = [
+      { role: "system", content: sys },
+      ...clean.map((m) => ({ role: m.role, content: m.content })),
+    ];
+    const result = await getSmartAgentEngine().processRequestDetailed(agentMessages);
+    reply = result.reply;
+    source = result.provider;
+  } else {
+    if (gemini) {
+      try {
+        reply = await callGemini(sys, clean, gemini);
+        source = "gemini";
+      } catch (e) {
+        metrics.recordAiFailure("gemini");
+        console.error("chat gemini failed:", redactSecrets(String((e as Error)?.message ?? e)));
+      }
     }
-  }
-  if (!reply && groq) {
-    try {
-      reply = await callGroq(sys, clean, groq);
-      source = "groq";
-    } catch (e) {
-      metrics.recordAiFailure("groq");
-      console.error("chat groq failed:", redactSecrets(String((e as Error)?.message ?? e)));
+    if (!reply && groq) {
+      try {
+        reply = await callGroq(sys, clean, groq);
+        source = "groq";
+      } catch (e) {
+        metrics.recordAiFailure("groq");
+        console.error("chat groq failed:", redactSecrets(String((e as Error)?.message ?? e)));
+      }
     }
+    if (!reply) reply = await localAnswer(last);
   }
-  if (!reply) reply = await localAnswer(last);
 
   const c = db();
   if (c) {
