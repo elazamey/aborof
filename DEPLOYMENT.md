@@ -23,10 +23,18 @@
 | `ADMIN_SESSION_SECRET` | Secret | سر عشوائي لتوقيع الجلسات فقط، لا يقل عن 32 حرفًا |
 | `GEMINI_API_KEY` أو `GROQ_API_KEY` | Secret اختياري | مفتاح مزود الدردشة |
 | `ENABLE_AI_AGENT` | Variable اختياري | `true` لتوجيه `/api/chat` إلى محرك الوكيل النمطي الموحّد (المرحلة الأولى)؛ غيابه أو أي قيمة أخرى تُبقي السلوك القديم حرفيًا |
+| `NVIDIA_NIM_API_KEY` (أو `NVIDIA_API_KEY`) | Secret اختياري | مفتاح مزود NVIDIA NIM (المرحلة الثانية)؛ غيابه يعني أن المزود غير متاح فيُتخطى صامتًا في السلسلة |
+| `NVIDIA_NIM_BASE_URL` / `NVIDIA_NIM_MODEL` | Variable اختياري | رابط NIM مخصّص (**https فقط**؛ أي مخطط آخر يُخرج المزود من السلسلة) واسم النموذج |
+| `ENABLE_MCP_TOOLS` | Variable اختياري | `true` لتفعيل طبقة MCP المحكومة للأدوات (المرحلة الثانية)؛ غيابه أو أي قيمة أخرى تُبقي السلوك القديم حرفيًا |
+| `MCP_ALLOWED_TOOLS` | Variable اختياري | قائمة أسماء أدوات مفصولة بفواصل؛ غيابها يعني المجموعة الافتراضية للقراءة فقط، وما عداها غير مرئي وغير قابل للتنفيذ |
+| `MCP_ALLOW_WRITE_TOOLS` | Variable اختياري | بوابة مستقلة للأدوات الكاتبة؛ مغلقة افتراضيًا وتُرفض الأداة الكاتبة في التسجيل نفسه |
+| `MCP_MAX_CALLS_PER_REQUEST` / `MCP_TOOL_TIMEOUT_MS` / `MCP_MAX_RESULT_CHARS` | Variable اختياري | حدود مركزية مقيّدة رياضيًا: 0–8 استدعاءً، 300–10000 مللي ثانية، 200–20000 حرفًا |
 | `DIAGNOSTICS_ENABLED` | Variable اختياري | `true` لتفعيل نقطة التشخيص (معطّل في الإنتاج افتراضيًا) |
 | `DIAGNOSTICS_KEY` | Secret اختياري | مفتاح **مستقل** عن `ADMIN_SESSION_SECRET` لنقطة `/api/admin/diagnostics` |
 | `CSP_ENFORCE` | Variable اختياري | `true` لتشديد CSP من وضع المراقبة إلى الحجب |
 | `VERCEL_DEPLOY_ENABLED` | Repository variable (أو Environment variable على `production`) | `true` بعد التأكد من الأسرار |
+
+> تفاصيل المرحلة الثانية (الأعلام، الحدود، مصفوفة صفر كسر، التراجع) في `docs/ai/phase-2-nim-mcp.md`.
 
 > **فصل الأسرار إلزامي:** `ADMIN_SESSION_SECRET` لتوقيع الجلسات فقط، و`DIAGNOSTICS_KEY`
 > للتشخيص فقط. يفحص حاجز النشر الثابت أنهما غير متطابقين وأن سر الجلسات لا يُذكر
@@ -49,6 +57,8 @@
   - `ADMIN_SESSION_SECRET` (32 حرفًا على الأقل، لتوقيع الجلسات فقط)؛
   - اختياري: `DIAGNOSTICS_ENABLED=true` مع `DIAGNOSTICS_KEY` **مستقل تمامًا**، و`CSP_ENFORCE=true`.
 - [ ] `ADMIN_SESSION_SECRET` يختلف عن `DIAGNOSTICS_KEY` (حاجز النشر الثابت يرفض تطابقهما).
+- [ ] (المرحلة الثانية، اختياري) إن فُعّل `ENABLE_MCP_TOOLS` فراجع `MCP_ALLOWED_TOOLS` والحدود الثلاثة قبل النشر، وتذكّر أن الطبقة للقراءة فقط وأن أدوات الكتابة تحتاج بوابة `MCP_ALLOW_WRITE_TOOLS` منفصلة.
+- [ ] (المرحلة الثانية، اختياري) إن أُضيف مفتاح NIM فتحقق أن `NVIDIA_NIM_BASE_URL` (إن وُجد) يبدأ بـ `https://` وإلا فالمزود غير متاح.
 - [ ] المتغير `VERCEL_DEPLOY_ENABLED` مساوٍ `true`.
 
 ### بعد النشر — خطوات تحقق قابلة للتكرار
@@ -62,6 +72,7 @@
 | 3 | `GET /api/admin/session` | `200` مع `{"authenticated":false}` | طبقة API لا تعمل |
 | 4 | `POST /api/admin/login` بكلمة **خاطئة عمدًا** | `401` مع `{"error":"بيانات الدخول غير صحيحة"}` | راجع تفسير الخطوة 4 أدناه |
 | 5 | `GET /cart` | `200` | مشكلة في صفحات العميل |
+| 6 | `GET /api/admin/mcp/tools` | `404` بدون `ENABLE_MCP_TOOLS`، و`401` بدونه مع التفعيل | 404 = الطبقة مغلقة (السلوك الافتراضي)؛ 401 = الطبقة مفتوحة فعليًا وجلسة الإدارة مطلوبة |
 
 مثال على الخطوة 4 (نفّذها **مرة واحدة** — حد المعدل 8 محاولات لكل 10 دقائق):
 

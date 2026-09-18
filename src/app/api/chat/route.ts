@@ -6,7 +6,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 import { chatRequestContract, firstZodIssue } from "@/lib/validation/contracts";
-import { getSmartAgentEngine } from "@/lib/ai";
+import { getSmartAgentEngine, isMcpToolsEnabled } from "@/lib/ai";
 import type { AgentMessage } from "@/lib/ai";
 
 export const runtime = "nodejs";
@@ -149,7 +149,11 @@ export const POST = apiHandler("/api/chat", async (req) => {
       { role: "system", content: sys },
       ...clean.map((m) => ({ role: m.role, content: m.content })),
     ];
-    const result = await getSmartAgentEngine().processRequestDetailed(agentMessages);
+    // بوابة ثانية عند نقطة الاستدعاء لطبقة MCP (المرحلة الثانية)؛ الطبقة
+    // تعيد الفحص داخليًا. تعطيلها يُبقي المسار نصيًا مطابقًا للمرحلة الأولى.
+    const result = await getSmartAgentEngine().processRequestDetailed(agentMessages, {
+      enableTools: isMcpToolsEnabled(),
+    });
     reply = result.reply;
     source = result.provider;
   } else {

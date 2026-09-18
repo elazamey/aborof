@@ -9,7 +9,8 @@ export type MetricKind =
   | "rate_limited"
   | "ai_provider_failure"
   | "db_timing"
-  | "validation_failed";
+  | "validation_failed"
+  | "mcp_tool_call";
 
 interface RequestSample {
   route: string;
@@ -23,11 +24,19 @@ interface TimingSample {
   at: number;
 }
 
+interface McpCallSample {
+  tool: string;
+  status: string;
+  ms: number;
+  at: number;
+}
+
 const MAX_SAMPLES = 500;
 
 const requests: RequestSample[] = [];
 const aiFailures: { provider: string; at: number }[] = [];
 const timings: TimingSample[] = [];
+const mcpCalls: McpCallSample[] = [];
 const counters = new Map<string, number>();
 
 function push<T>(arr: T[], item: T) {
@@ -50,6 +59,10 @@ export const metrics = {
   },
   recordTiming(name: string, ms: number) {
     push(timings, { name, ms: Math.round(ms), at: Date.now() });
+  },
+  /** استدعاء أداة MCP: الاسم والحالة والزمن فقط — لا وسائط ولا مخرجات. */
+  recordMcpToolCall(tool: string, status: string, ms: number) {
+    push(mcpCalls, { tool, status, ms: Math.round(ms), at: Date.now() });
   },
 };
 
@@ -74,6 +87,13 @@ export function snapshot(windowMs = 60 * 60 * 1000) {
     ? Math.round(dbTimings.reduce((n, t) => n + t.ms, 0) / dbTimings.length)
     : 0;
   const slowDb = dbTimings.filter((t) => t.ms > 1000).length;
+  const recentMcp = mcpCalls.filter((c) => c.at >= since);
+  const mcpByTool: Record<string, number> = {};
+  const mcpByStatus: Record<string, number> = {};
+  for (const call of recentMcp) {
+    mcpByTool[call.tool] = (mcpByTool[call.tool] ?? 0) + 1;
+    mcpByStatus[call.status] = (mcpByStatus[call.status] ?? 0) + 1;
+  }
   return {
     window_ms: windowMs,
     generated_at: new Date().toISOString(),
@@ -83,6 +103,15 @@ export function snapshot(windowMs = 60 * 60 * 1000) {
       samples: dbTimings.length,
       avg_ms: avgDb,
       slow_over_1s: slowDb,
+    },
+    mcp: {
+      calls: recentMcp.length,
+      errors: recentMcp.filter((c) => c.status !== "ok").length,
+      avg_ms: recentMcp.length
+        ? Math.round(recentMcp.reduce((n, c) => n + c.ms, 0) / recentMcp.length)
+        : 0,
+      by_tool: mcpByTool,
+      by_status: mcpByStatus,
     },
     counters: Object.fromEntries(counters),
   };
