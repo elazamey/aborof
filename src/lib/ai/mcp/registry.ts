@@ -16,6 +16,7 @@ import type {
   McpTool,
   McpToolDefinition,
   McpToolDescriptor,
+  McpToolOutput,
   McpToolResult,
 } from "./types";
 
@@ -205,6 +206,7 @@ export class McpToolRegistry {
     );
 
     const result: McpToolResult = { content: [{ type: "text", text: outcome.text }] };
+    if (outcome.status === "ok" && outcome.structured) result.structuredContent = outcome.structured;
     if (outcome.status !== "ok") result.isError = true;
     return result;
   }
@@ -213,7 +215,7 @@ export class McpToolRegistry {
     name: string,
     rawArguments: unknown,
     ctx: McpCallContext
-  ): Promise<{ status: McpCallStatus; text: string }> {
+  ): Promise<{ status: McpCallStatus; text: string; structured?: Record<string, unknown> }> {
     if (!isMcpToolsEnabled()) {
       return { status: "disabled", text: "أدوات المتجر غير مفعّلة في هذه البيئة." };
     }
@@ -260,7 +262,12 @@ export class McpToolRegistry {
 
     const text = truncate(String(execution.text ?? "").trim(), maxResultChars);
     if (!text) return { status: "error", text: "الأداة لم تُعد نتيجة." };
-    return { status: "ok", text };
+    // المحتوى المنظّم يمر بفحص النوع فقط: كائن مسطّح بلا دوال، فلا يُنفَّذ شيء منه.
+    const structured =
+      execution.structured && typeof execution.structured === "object"
+        ? execution.structured
+        : undefined;
+    return { status: "ok", text, structured };
   }
 
   /**
@@ -273,7 +280,8 @@ export class McpToolRegistry {
     timeoutMs: number,
     ctx: McpCallContext
   ): Promise<
-    { ok: true; text: string } | { ok: false; status: McpCallStatus; message?: string }
+    | { ok: true; text: string; structured?: Record<string, unknown> }
+    | { ok: false; status: McpCallStatus; message?: string }
   > {
     const controller = new AbortController();
     const parent = ctx.signal;
@@ -285,7 +293,10 @@ export class McpToolRegistry {
 
     try {
       const execution = tool.run(value, { signal: controller.signal }).then(
-        (text) => ({ ok: true as const, text }),
+        (output) =>
+          typeof output === "string"
+            ? { ok: true as const, text: output, structured: undefined }
+            : { ok: true as const, text: output.text, structured: output.structured },
         (error: unknown) => ({ ok: false as const, error })
       );
 
@@ -298,7 +309,7 @@ export class McpToolRegistry {
 
       const outcome = await Promise.race([execution, timeout]);
       if (outcome === timedOut) return { ok: false, status: "timeout" };
-      if (outcome.ok) return { ok: true, text: outcome.text };
+      if (outcome.ok) return { ok: true, text: outcome.text, structured: outcome.structured };
       return {
         ok: false,
         status: "error",
@@ -312,3 +323,4 @@ export class McpToolRegistry {
 }
 
 export { RequestBudget };
+export type { McpToolOutput };

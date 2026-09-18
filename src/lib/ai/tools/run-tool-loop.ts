@@ -16,6 +16,8 @@ export interface ToolLoopResult {
   reply: string;
   /** عدد محاولات تنفيذ الأدوات (المقبولة والمرفوضة) في هذا الطلب. */
   toolCalls: number;
+  /** محتوى منظّم من الأدوات الناجحة — يقود مكونات الواجهة (بطاقات المنتجات). */
+  structured: Record<string, unknown>[];
 }
 
 function contentText(result: McpToolResult): string {
@@ -48,7 +50,7 @@ export async function runToolLoop(opts: {
   const { provider, messages, options, registry } = opts;
 
   const definitions = registry.listTools();
-  if (definitions.length === 0) return { reply: "", toolCalls: 0 };
+  if (definitions.length === 0) return { reply: "", toolCalls: 0, structured: [] };
 
   const tools = definitions.map(toToolDefinition);
   const budget = registry.newBudget();
@@ -61,6 +63,7 @@ export async function runToolLoop(opts: {
 
   let used = 0;
   let lastText = "";
+  const structured: Record<string, unknown>[] = [];
 
   for (let step = 0; step <= maxCalls; step++) {
     const allowTools = step < maxCalls && budget.remaining() > 0;
@@ -68,16 +71,17 @@ export async function runToolLoop(opts: {
     lastText = reply.text;
 
     if (!allowTools || reply.toolCalls.length === 0) {
-      return { reply: reply.text.trim(), toolCalls: used };
+      return { reply: reply.text.trim(), toolCalls: used, structured };
     }
 
     conversation.push(reply.assistantMessage);
     for (const call of reply.toolCalls) {
       const result = await registry.callTool(call.name, call.argumentsJson, { budget });
       used += 1;
+      if (result.structuredContent) structured.push(result.structuredContent);
       conversation.push({ role: "tool", tool_call_id: call.id, content: contentText(result) });
     }
   }
 
-  return { reply: lastText.trim(), toolCalls: used };
+  return { reply: lastText.trim(), toolCalls: used, structured };
 }

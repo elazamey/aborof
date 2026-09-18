@@ -20,9 +20,11 @@ export {
   resolveNimBaseUrl,
 } from "./providers/nvidia-nim";
 export { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
+export { MAX_PRODUCT_CARDS, extractProductCards } from "./cards";
 export { runToolLoop } from "./tools/run-tool-loop";
 export { openAiCompatibleChat } from "./tools/openai-compatible";
-export type { McpToolDefinition, McpToolResult } from "./mcp";
+export type { McpToolDefinition, McpToolOutput, McpToolResult } from "./mcp";
+export type { ProductCard } from "./cards";
 export type {
   OpenAIChatMessage,
   OpenAIToolDefinition,

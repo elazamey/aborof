@@ -148,6 +148,42 @@ describe("MCP tools/call governance", () => {
     assert.ok((snapshot().mcp.by_status.ok ?? 0) >= 1);
   });
 
+  test("successful product search returns sanitized structured content", async () => {
+    process.env.ENABLE_MCP_TOOLS = "true";
+    const result = await freshRegistry().callTool("search_products", {
+      query: "منظف أرضيات",
+      max_results: 2,
+    });
+
+    assert.equal(result.isError, undefined);
+    const structured = result.structuredContent as {
+      kind?: string;
+      products?: Record<string, unknown>[];
+    };
+    assert.equal(structured.kind, "products");
+    assert.ok(Array.isArray(structured.products));
+    assert.ok(structured.products!.length <= 2);
+
+    const allowedFields = ["id", "name", "price", "old_price", "category", "image", "stock"];
+    for (const card of structured.products!) {
+      assert.deepEqual(Object.keys(card).sort(), [...allowedFields].sort());
+      assert.equal(typeof card.price, "number");
+      assert.ok(!("description" in card), "الوصف الكامل لا يُمرَّر للواجهة");
+    }
+  });
+
+  test("failed calls never carry structured content", async () => {
+    process.env.ENABLE_MCP_TOOLS = "true";
+    process.env.MCP_ALLOWED_TOOLS = "lookup_faq";
+    const denied = await freshRegistry().callTool("search_products", { query: "منظف" });
+    assert.equal(denied.isError, true);
+    assert.equal(denied.structuredContent, undefined);
+
+    const invalid = await freshRegistry().callTool("lookup_faq", {});
+    assert.equal(invalid.isError, true);
+    assert.equal(invalid.structuredContent, undefined);
+  });
+
   test("strict validation rejects empty, malformed and unknown-field arguments", async () => {
     process.env.ENABLE_MCP_TOOLS = "true";
     const registry = freshRegistry();

@@ -27,6 +27,7 @@ export type {
   McpTool,
   McpToolDefinition,
   McpToolDescriptor,
+  McpToolOutput,
   McpToolPolicy,
   McpToolResult,
   McpToolValidation,

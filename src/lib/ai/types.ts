@@ -7,6 +7,10 @@
  * الأدوات (انظر `src/lib/ai/tools/`)، فلا يتغير أي مسار قائم.
  */
 
+import type { ProductCard } from "./cards";
+
+export type { ProductCard } from "./cards";
+
 export type AgentRole = "user" | "assistant" | "system";
 
 export interface AgentMessage {
@@ -34,4 +38,6 @@ export interface AgentResult {
   provider: string;
   /** عدد محاولات تنفيذ الأدوات في هذا الطلب — يُحذف عندما يكون صفرًا. */
   toolCalls?: number;
+  /** بطاقات منتجات للواجهة — تُحذف تمامًا عندما لا تنتجها الأدوات. */
+  products?: ProductCard[];
 }

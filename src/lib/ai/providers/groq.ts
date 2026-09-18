@@ -25,10 +25,15 @@ export class GroqProvider implements AIAgentProvider, ToolCapableProvider {
   readonly name = "groq";
   readonly supportsTools = true as const;
 
-  private readonly apiKey: string;
+  private readonly overrideKey?: string;
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey ?? process.env.GROQ_API_KEY ?? "";
+    this.overrideKey = apiKey;
+  }
+
+  /** قراءة المفتاح عند كل نداء — لا نسخة مهيّأة قديمة. */
+  private get apiKey(): string {
+    return this.overrideKey ?? process.env.GROQ_API_KEY ?? "";
   }
 
   isAvailable(): boolean {

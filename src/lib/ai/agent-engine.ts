@@ -1,5 +1,6 @@
 import { redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
+import { extractProductCards, type ProductCard } from "./cards";
 import { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
 import { GeminiRestProvider } from "./providers/gemini-rest";
 import { GroqProvider } from "./providers/groq";
@@ -53,9 +54,11 @@ export class SmartAgentEngine {
       try {
         const outcome = await this.invokeProvider(provider, messages, options);
         if (outcome.reply.trim()) {
-          return outcome.toolCalls > 0
-            ? { reply: outcome.reply, provider: provider.name, toolCalls: outcome.toolCalls }
-            : { reply: outcome.reply, provider: provider.name };
+          const result: AgentResult = { reply: outcome.reply, provider: provider.name };
+          if (outcome.toolCalls > 0) result.toolCalls = outcome.toolCalls;
+          // البطاقات تُضاف فقط إن أنتجتها أداة ناجحة، وتبقى الواجهة تعمل بدونها.
+          if (outcome.products.length > 0) result.products = outcome.products;
+          return result;
         }
       } catch (e) {
         metrics.recordAiFailure(provider.name);
@@ -83,7 +86,7 @@ export class SmartAgentEngine {
     provider: AIAgentProvider,
     messages: AgentMessage[],
     options?: AgentOptions
-  ): Promise<{ reply: string; toolCalls: number }> {
+  ): Promise<{ reply: string; toolCalls: number; products: ProductCard[] }> {
     const capable = provider as Partial<ToolCapableProvider>;
     const toolsRequested =
       options?.enableTools === true &&
@@ -92,15 +95,15 @@ export class SmartAgentEngine {
       typeof capable.callWithTools === "function";
 
     if (toolsRequested) {
-      const { reply, toolCalls } = await runToolLoop({
+      const { reply, toolCalls, structured } = await runToolLoop({
         provider: capable as ToolCapableProvider,
         messages,
         options,
         registry: getMcpRegistry(),
       });
-      return { reply, toolCalls };
+      return { reply, toolCalls, products: extractProductCards(structured) };
     }
 
-    return { reply: await provider.generateResponse(messages, options), toolCalls: 0 };
+    return { reply: await provider.generateResponse(messages, options), toolCalls: 0, products: [] };
   }
 }

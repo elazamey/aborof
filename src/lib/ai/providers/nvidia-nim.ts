@@ -40,14 +40,23 @@ export class NvidiaNimProvider implements AIAgentProvider, ToolCapableProvider {
   readonly name = "nvidia-nim";
   readonly supportsTools = true as const;
 
-  private readonly apiKey: string;
-  private readonly baseUrl: string | null;
-  private readonly model: string;
+  private readonly overrides: { apiKey?: string; baseUrl?: string; model?: string };
 
   constructor(overrides: { apiKey?: string; baseUrl?: string; model?: string } = {}) {
-    this.apiKey = overrides.apiKey ?? nimApiKey();
-    this.baseUrl = resolveNimBaseUrl(overrides.baseUrl ?? process.env.NVIDIA_NIM_BASE_URL);
-    this.model = overrides.model ?? process.env.NVIDIA_NIM_MODEL ?? DEFAULT_NIM_MODEL;
+    this.overrides = overrides;
+  }
+
+  /** كل الإعدادات تُقرأ عند النداء: لا نسخة مهيّأة بمفتاح أو رابط قديم. */
+  private get apiKey(): string {
+    return this.overrides.apiKey ?? nimApiKey();
+  }
+
+  private get baseUrl(): string | null {
+    return resolveNimBaseUrl(this.overrides.baseUrl ?? process.env.NVIDIA_NIM_BASE_URL);
+  }
+
+  private get model(): string {
+    return this.overrides.model ?? process.env.NVIDIA_NIM_MODEL ?? DEFAULT_NIM_MODEL;
   }
 
   isAvailable(): boolean {

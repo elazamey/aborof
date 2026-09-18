@@ -96,7 +96,23 @@ export const searchProductsTool: McpTool = {
       return `• ${clip(p.name, 90)} — ${money(Number(p.price))}${old} — القسم: ${clip(p.category, 40)} — ${availability}\n  ${clip(p.description, 120)}`;
     });
 
-    return `نتائج البحث (${hits.length}):\n${lines.join("\n")}`;
+    return {
+      text: `نتائج البحث (${hits.length}):\n${lines.join("\n")}`,
+      // محتوى منظّم للواجهة: حقول الكتالوج فقط، بلا أي بيانات عميل وبلا وصف كامل،
+      // وبحد أقصى 5 عناصر — فمن يستقبل هذا المحتوى لا يستطيع توسيعه.
+      structured: {
+        kind: "products",
+        products: hits.map(({ p }) => ({
+          id: String(p.id),
+          name: clip(p.name, 90),
+          price: Number(p.price),
+          old_price: p.old_price == null ? null : Number(p.old_price),
+          category: clip(p.category, 40),
+          image: clip(p.image, 8),
+          stock: Number(p.stock),
+        })),
+      },
+    };
   },
 };
 

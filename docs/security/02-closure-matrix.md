@@ -14,6 +14,7 @@
 | P1-D | سلامة البيانات/العزل | هجرات مُرقّمة + FK/CHECK/UNIQUE + معاملات + عزل إداري | `tests/migrations.test.ts`, `tests/headers-isolation.test.ts` | `npm test`؛ إدخال حالة/سعر مخالف يُرفض |
 | P2-A | رؤوس HTTP ومراقبة | `src/middleware.ts` + `src/lib/security/headers.ts` + المقاييس + نقطة تشخيص | `tests/headers-isolation.test.ts` | `curl -I` يُظهر الرؤوس؛ `/api/admin/diagnostics` محمي |
 | P2-B | تنفيذ أدوات الموديل بلا حدود | `src/lib/ai/mcp/`: علم مستقل + قائمة سماح + تحقق صارم + مهلة + سقف استدعاءات + اقتصاص + قراءة فقط افتراضيًا + لا مسار HTTP للتنفيذ | `tests/mcp-tools.test.ts`, `tests/agent-tools.test.ts`, `tests/mcp-route.test.ts` | `npm test`؛ `GET /api/admin/mcp/tools` ⇒ 404 دون تفعيل |
+| P2-D | حقن محتوى في الواجهة عبر مخرجات الأدوات | `src/lib/ai/cards.ts`: عقد صارم `.strict()` + حقول الكتالوج فقط + سقف 3 بطاقات + إزالة التكرار | `tests/cards.test.ts`, `tests/chat-route.test.ts`, `tests/mcp-tools.test.ts` | `npm test`؛ حقول زائدة أو قيمة سالبة تُسقط البطاقة |
 | P2-C | تسريب مفتاح مزود ثانٍ في السجلات | نمط `nvapi-…` في `redactSecrets` + مزود NIM عبر العميل الموحّد + https إلزامي للرابط | `tests/nvidia-nim.test.ts` | `npm test`؛ خطأ مزود بمفتاح وهمي لا يظهر في الرسالة |
 
 ## مؤشرات النجاح مقابل الأهداف
@@ -30,6 +31,7 @@
 | 5xx مجهول السبب | <1% مع request_id | ✅ كل استجابة خطأ تحمل `request_id` |
 | تنفيذ أدوات خارج البوابة المحكومة | صفر | ✅ لا يوجد أي مسار تنفيذ عبر HTTP، وكل الأدوات المدرجة قراءة فقط |
 | ظهور مفتاح مزود (Gemini/Groq/NVIDIA) في السجلات أو الاستجابات | صفر | ✅ أنماط المفاتيح محجوبة واختبارات تثبته |
+| حقول زائدة تصل للواجهة من مخرجات الأدوات | صفر | ✅ تنقية بعقد صارم + سقف بطاقات |
 
 ## أوامر التحقق الشامل
 

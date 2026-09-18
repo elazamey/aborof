@@ -141,6 +141,8 @@ export const POST = apiHandler("/api/chat", async (req) => {
   const groq = process.env.GROQ_API_KEY;
   let reply = "";
   let source = "local";
+  // بطاقات المنتجات اختيارية تمامًا: تُضاف للاستجابة فقط إن أنتجتها أداة محكومة.
+  let products: unknown[] | undefined;
 
   if (process.env.ENABLE_AI_AGENT === "true") {
     // المحرك النمطي الموحّد (المرحلة الأولى) — نفس السلسلة التراجعية
@@ -156,6 +158,7 @@ export const POST = apiHandler("/api/chat", async (req) => {
     });
     reply = result.reply;
     source = result.provider;
+    if (result.products && result.products.length > 0) products = result.products;
   } else {
     if (gemini) {
       try {
@@ -189,5 +192,6 @@ export const POST = apiHandler("/api/chat", async (req) => {
   }
 
   // النجاح فقط هو ما يعيد 200؛ أي فشل غير متوقع يمر عبر الغلاف المركزي.
-  return NextResponse.json({ reply, source });
+  // شكل الاستجابة القديم `{ reply, source }` كما هو؛ `products` حقل إضافي فقط.
+  return NextResponse.json(products ? { reply, source, products } : { reply, source });
 });

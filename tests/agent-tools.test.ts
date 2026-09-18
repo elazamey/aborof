@@ -152,6 +152,40 @@ describe("bounded tool loop", () => {
     assert.match(String(toolMessages[0].content), /روفيده/);
   });
 
+  test("product cards flow from the governed tool into the agent result", async () => {
+    process.env.ENABLE_AI_AGENT = "true";
+    process.env.ENABLE_MCP_TOOLS = "true";
+    process.env.MCP_ALLOWED_TOOLS = "search_products";
+
+    const provider = new ScriptedProvider([
+      replyWithTools([
+        toolCall("call_p", "search_products", JSON.stringify({ query: "منظف أرضيات", max_results: 2 })),
+      ]),
+      finalReply("دي أحسن حاجة عندنا 👇"),
+    ]);
+    const engine = new SmartAgentEngine([provider]);
+
+    const result = await engine.processRequestDetailed(messages, { enableTools: true });
+
+    assert.equal(result.reply, "دي أحسن حاجة عندنا 👇");
+    assert.equal(result.toolCalls, 1);
+    assert.ok(result.products && result.products.length > 0);
+    for (const card of result.products!) {
+      assert.equal(typeof card.id, "string");
+      assert.equal(typeof card.price, "number");
+      assert.ok(card.name.length > 0);
+    }
+    // الأدوات التي لا تنتج محتوى منظّمًا لا تضيف بطاقات.
+    assert.ok(result.products!.length <= 2);
+  });
+
+  test("plain text path never carries product cards", async () => {
+    process.env.ENABLE_AI_AGENT = "true";
+    const engine = new SmartAgentEngine([new ScriptedProvider([finalReply("نص فقط")])]);
+    const result = await engine.processRequestDetailed(messages);
+    assert.equal(result.products, undefined);
+  });
+
   test("a denied tool is returned as a result, never executed and never thrown", async () => {
     process.env.ENABLE_AI_AGENT = "true";
     process.env.ENABLE_MCP_TOOLS = "true";

@@ -16,9 +16,21 @@ export interface McpTextContent {
   text: string;
 }
 
+/**
+ * مخرجات أداة: نص دائمًا، ومعها — عند الحاجة — محتوى منظّم اختياري.
+ * النص هو ما يقرأه الموديل، والمنظّم يقود المكونات المرئية في الواجهة
+ * (بطاقات المنتجات) بنفس مبدأ MCP: `content` + `structuredContent`.
+ */
+export interface McpToolOutput {
+  text: string;
+  structured?: Record<string, unknown>;
+}
+
 /** نتيجة `tools/call` — الأخطاء تُعاد كنتيجة لا كاستثناء (سلوك MCP القياسي). */
 export interface McpToolResult {
   content: McpTextContent[];
+  /** محتوى منظّم اختياري للواجهة — يُقتص ويُنقّى ولا يُبنى عليه أي تنفيذ. */
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 
@@ -52,7 +64,7 @@ export interface McpTool {
   definition: McpToolDefinition;
   policy: McpToolPolicy;
   validate(raw: unknown): McpToolValidation;
-  run(value: unknown, ctx: McpToolExecutionContext): Promise<string>;
+  run(value: unknown, ctx: McpToolExecutionContext): Promise<string | McpToolOutput>;
 }
 
 /** سقف استدعاءات لكل طلب — يُنشأ مرة واحدة لكل رسالة مستخدم. */
