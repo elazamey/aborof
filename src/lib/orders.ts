@@ -3,7 +3,7 @@ import { db, ensureSchema } from "@/lib/db";
 import { Errors } from "@/lib/errors";
 import { calculateShipping } from "@/lib/shipping";
 import { STORE, type Product } from "@/lib/seed";
-import type { CreateOrderInput, OrderStatusInput } from "@/lib/validation/contracts";
+import type { CreateOrderInput, OrderStatusInput, TrackOrderInput } from "@/lib/validation/contracts";
 
 export interface VerifiedItem {
   id: string;
@@ -128,4 +128,56 @@ export async function updateOrderStatus(input: OrderStatusInput): Promise<void> 
     }
     throw error;
   }
+}
+
+/**
+ * تتبع طلب للعميل — بشدّ أمني مقصود (docs/ai/phase-3-ux-roadmap.md):
+ *  - يعمل فقط بعاملين معًا: رقم الطلب + آخر 4 أرقام من الهاتف.
+ *  - الإخراج مبهم: الحالة + ملخص أصناف بلا هاتف كامل ولا عنوان ولا أسعار مفصلة.
+ *  - رسالة الفشل واحدة لا تكشف وجود الطلب من عدمه (يمنع تعداد الطلبات).
+ *
+ * يرمي `Errors.notFound` في كل حالات عدم التطابق برسالة موحّدة.
+ */
+export async function trackOrder(
+  input: TrackOrderInput & { phoneLast4: string },
+  isEnabled: boolean
+): Promise<{ id: string; status: string; items: { name: string; qty: number }[]; created_at: string }> {
+  if (!isEnabled) throw Errors.notFound("تعذر العثور على الطلب");
+
+  const c = db();
+  if (!c) throw Errors.notFound("تعذر العثور على الطلب");
+  await ensureSchema();
+
+  const r = await c.execute({
+    sql: "SELECT id, phone, items, status, created_at FROM orders WHERE id=?",
+    args: [input.id.trim()],
+  });
+  const row = r.rows[0] as
+    | { id?: unknown; phone?: unknown; items?: unknown; status?: unknown; created_at?: unknown }
+    | undefined;
+
+  // مقارنة زمنية ثابتة لآخر 4 أرقام — القيمة المتوقعة تُبنى بلا تمييز للوجود.
+  const actual = String(row?.phone ?? "");
+  const ok = row != null && actual.replace(/\D/g, "").slice(-4) === input.phoneLast4;
+  if (!ok) throw Errors.notFound("تعذر العثور على الطلب");
+
+  let items: { name: string; qty: number }[] = [];
+  try {
+    const parsed = JSON.parse(String(row?.items ?? "[]")) as unknown;
+    if (Array.isArray(parsed)) {
+      items = parsed
+        .filter((it): it is { name?: unknown; qty?: unknown } => Boolean(it) && typeof it === "object")
+        .map((it) => ({ name: String(it.name ?? "—"), qty: Number(it.qty ?? 1) }))
+        .slice(0, 10);
+    }
+  } catch {
+    items = [];
+  }
+
+  return {
+    id: String(row?.id ?? input.id.trim()),
+    status: String(row?.status ?? "جديد"),
+    items,
+    created_at: String(row?.created_at ?? ""),
+  };
 }

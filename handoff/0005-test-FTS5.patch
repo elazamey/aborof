@@ -1,0 +1,268 @@
+From d61a6613ced28c5e27b27c72bb8e63d9edbcb3fc Mon Sep 17 00:00:00 2001
+From: elazamey <206169629+elazamey@users.noreply.github.com>
+Date: Fri, 18 Sep 2026 06:15:13 +0000
+Subject: [PATCH 5/6] =?UTF-8?q?test:=20=D8=AD=D8=B1=D8=A7=D8=B3=D8=A9=20FT?=
+ =?UTF-8?q?S5=20=D9=88=D8=AA=D8=AA=D8=A8=D8=B9=20=D8=A7=D9=84=D8=B7=D9=84?=
+ =?UTF-8?q?=D8=A8=D8=A7=D8=AA=20=D9=88=D8=AA=D8=B1=D8=AA=D9=8A=D8=A8=20?=
+ =?UTF-8?q?=D8=A7=D9=84=D8=B3=D9=84=D8=B3=D9=84=D8=A9?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+اختبارات تكامل على فهرس 0002 (بناء استعلام آمن + تطابق عربي)، وحراسة بوابة
+التتبع (عاملان معًا + رسالة موحّدة + لا PII)، وحراسة ترتيب السلسلة
+(fail-closed + local دائمًا في النهاية).
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ tests/chain-order.test.ts    |  52 ++++++++++++++++
+ tests/order-tracking.test.ts | 113 +++++++++++++++++++++++++++++++++++
+ tests/search-fts5.test.ts    |  57 ++++++++++++++++++
+ 3 files changed, 222 insertions(+)
+ create mode 100644 tests/chain-order.test.ts
+ create mode 100644 tests/order-tracking.test.ts
+ create mode 100644 tests/search-fts5.test.ts
+
+diff --git a/tests/chain-order.test.ts b/tests/chain-order.test.ts
+new file mode 100644
+index 0000000..84f8c2f
+--- /dev/null
++++ b/tests/chain-order.test.ts
+@@ -0,0 +1,52 @@
++import { test, describe, beforeEach, afterEach } from "node:test";
++import assert from "node:assert/strict";
++import {
++  DEFAULT_PROVIDER_ORDER,
++  resolveProviderOrder,
++  PROVIDER_ORDER_ENV,
++} from "../src/lib/ai/chain-order";
++
++/**
++ * ترتيب سلسلة التراجع — حراسة صارمة fail-closed:
++ *  - غياب `AI_PROVIDER_ORDER` ⇒ الترتيب التاريخي الافتراضي كما هو.
++ *  - الأسماء غير المعروفة تُتجاهل، ولا تُمنح أي ترقية ضمنية.
++ *  - `local` مضمون دائمًا في النهاية مهما كانت القائمة (لا مسار يصل فيه خطأ
++ *    500 إلى المستخدم).
++ *  - قائمة فارغة أو فاسدة بالكامل ⇒ العودة للترتيب الافتراضي حرفيًا.
++ */
++
++beforeEach(() => {
++  delete process.env[PROVIDER_ORDER_ENV];
++});
++afterEach(() => {
++  delete process.env[PROVIDER_ORDER_ENV];
++});
++
++describe("provider chain order resolution", () => {
++  test("absent env → historical default order", () => {
++    assert.deepEqual(resolveProviderOrder(undefined), [...DEFAULT_PROVIDER_ORDER]);
++    assert.ok(DEFAULT_PROVIDER_ORDER[0] === "gemini");
++    assert.ok(DEFAULT_PROVIDER_ORDER[DEFAULT_PROVIDER_ORDER.length - 1] === "local");
++  });
++
++  test("known names reorder; local always stays last", () => {
++    const order = resolveProviderOrder("groq,gemini");
++    assert.deepEqual(order, ["groq", "gemini", "local"]);
++  });
++
++  test("unknown names are ignored (fail-closed)", () => {
++    process.env[PROVIDER_ORDER_ENV] = "vendor-locked,gemini,xyz";
++    assert.deepEqual(resolveProviderOrder(), ["gemini", "local"]);
++  });
++
++  test("all-invalid list falls back to the default order", () => {
++    process.env[PROVIDER_ORDER_ENV] = "bad-one,another-bad";
++    assert.deepEqual(resolveProviderOrder(), [...DEFAULT_PROVIDER_ORDER]);
++  });
++
++  test("local can never be dropped from the tail", () => {
++    process.env[PROVIDER_ORDER_ENV] = "gemini,groq,nvidia-nim";
++    const order = resolveProviderOrder();
++    assert.equal(order[order.length - 1], "local");
++  });
++});
+diff --git a/tests/order-tracking.test.ts b/tests/order-tracking.test.ts
+new file mode 100644
+index 0000000..1d2344e
+--- /dev/null
++++ b/tests/order-tracking.test.ts
+@@ -0,0 +1,113 @@
++import { test, describe, beforeEach, afterEach } from "node:test";
++import assert from "node:assert/strict";
++import { createClient, type Client } from "@libsql/client";
++import { tmpdir } from "node:os";
++import path from "node:path";
++import { setDbClientForTest } from "../src/lib/db";
++import { runMigrations } from "../src/lib/db/migrate";
++import { trackOrder } from "../src/lib/orders";
++
++/**
++ * تتبع الطلبات للعملاء — بشدّ أمني مقصود (docs/ai/phase-3-ux-roadmap.md):
++ *  - النجاح يعمل فقط بعاملين معًا: رقم الطلب + آخر 4 أرقام من الهاتف.
++ *  - الإخراج مبهم: الحالة + أسماء الأصناف بلا عنوان ولا هاتف كامل ولا أسعار.
++ *  - رسالة الفشل واحدة موحّدة لا تكشف وجود الطلب من عدمه (يمنع تعداد الطلبات).
++ */
++
++const KEYS = ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "ENABLE_ORDER_TRACKING"] as const;
++
++function fileClient(): Client {
++  const file = path.join(tmpdir(), `aborof-track-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
++  return createClient({ url: `file:${file}` });
++}
++
++beforeEach(() => {
++  for (const k of KEYS) delete process.env[k];
++});
++afterEach(() => {
++  for (const k of KEYS) delete process.env[k];
++});
++
++async function seedOrder(client: Client, id: string, phone: string) {
++  await runMigrations(client);
++  await client.execute("PRAGMA foreign_keys = ON");
++  await client.execute({
++    sql: `INSERT INTO orders (id,customer,phone,address,governorate,items,total,status)
++          VALUES (?,?,?,?,?,?,?,?)`,
++    args: [
++      id,
++      "عميل",
++      phone,
++      "عنوان تجريبي تفصيلي",
++      "القاهرة",
++      JSON.stringify([
++        { id: "p1", name: "منتج تجريبي", price: 50, qty: 2 },
++      ]),
++      100,
++      "جديد",
++    ],
++  });
++}
++
++describe("order tracking safe gate", () => {
++  let client: Client;
++
++  beforeEach(() => {
++    client = fileClient();
++  });
++
++  test("disabled feature → uniform not-found message", async () => {
++    setDbClientForTest(client);
++    await seedOrder(client, "ORD-12345678-abcd1234", "01095032221");
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-12345678-abcd1234", phoneLast4: "2221" }, false),
++      (err: Error) => err.message.includes("تعذر العثور على الطلب")
++    );
++  });
++
++  test("matching id + last 4 digits → obfuscated status, no PII, no prices", async () => {
++    setDbClientForTest(client);
++    await seedOrder(client, "ORD-99999999-abcd1234", "01095032221");
++
++    const result = await trackOrder({ id: "ORD-99999999-abcd1234", phoneLast4: "2221" }, true);
++
++    assert.equal(result.id, "ORD-99999999-abcd1234");
++    assert.equal(result.status, "جديد");
++    assert.equal(result.items.length, 1);
++    assert.equal(result.items[0].name, "منتج تجريبي");
++    assert.equal(result.items[0].qty, 2);
++    // لا هاتف كامل ولا عنوان ولا أسعار مفصلة في المخرجات.
++    const serialized = JSON.stringify(result);
++    assert.ok(!serialized.includes("01095032221"));
++    assert.ok(!serialized.includes("عنوان"));
++    assert.ok(!serialized.includes("price"));
++  });
++
++  test("wrong last 4 digits → same uniform message, no existence leak", async () => {
++    setDbClientForTest(client);
++    await seedOrder(client, "ORD-88888888-eeee8888", "01095032221");
++
++    // رسالة موحّدة لا تفرّق بين "غير موجود" و"غير مطابق" ولا تكشف أي بيانات.
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-88888888-eeee8888", phoneLast4: "1111" }, true),
++      (err: Error) => err.message === "تعذر العثور على الطلب"
++    );
++
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-does-not-exist", phoneLast4: "1111" }, true),
++      (err: Error) => err.message === "تعذر العثور على الطلب"
++    );
++  });
++});
++
++describe("trackOrder contract hygiene", () => {
++  test("unknown order id returns the exact uniform message", async () => {
++    const client = fileClient();
++    setDbClientForTest(client);
++    await runMigrations(client);
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-00000000-00000000", phoneLast4: "0000" }, true),
++      (err: Error) => err.message === "تعذر العثور على الطلب"
++    );
++  });
++});
+diff --git a/tests/search-fts5.test.ts b/tests/search-fts5.test.ts
+new file mode 100644
+index 0000000..519d313
+--- /dev/null
++++ b/tests/search-fts5.test.ts
+@@ -0,0 +1,57 @@
++import { test, describe, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { createClient, type Client } from "@libsql/client";
++import { tmpdir } from "node:os";
++import path from "node:path";
++import { buildFtsMatch, ftsProductIds, ensureProductSearchInSync } from "../src/lib/search";
++import { runMigrations } from "../src/lib/db/migrate";
++
++/**
++ * فهرس البحث FTS5 (هجرة 0002) — الحراسة:
++ *  - الهجرة تُنشئ الجدول الافتراضي وتعبئه من المنتجات القائمة.
++ *  - بناء الاستعلام آمن (كلمات مقتبسة) ولا يُمرَّر نص العميل خامًا إلى MATCH.
++ *  - المزامنة تُبنى مرة واحدة ولا تُفشل التطبيق عند غياب دعم FTS5.
++ */
++
++function fileClient(): Client {
++  const file = path.join(tmpdir(), `aborof-fts-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
++  return createClient({ url: `file:${file}` });
++}
++
++describe("migration 0002_search_fts5", () => {
++  let client: Client;
++
++  beforeEach(() => {
++    client = fileClient();
++  });
++
++  test("creates the virtual table and backfills from products", async () => {
++    await runMigrations(client);
++    await client.execute({
++      sql: "INSERT INTO products (id,name,description,category,price,stock) VALUES (?,?,?,?,?,?)",
++      args: ["p1", "منظف أرضيات برائحة اللافندر", "يزيل الدهون والأتربة", "منظفات أرضيات", 180, 10],
++    });
++    await client.execute({
++      sql: "INSERT INTO products (id,name,description,category,price,stock) VALUES (?,?,?,?,?,?)",
++      args: ["p2", "سائل غسيل أطباق ليمون", "رغوة كثيفة", "منظفات مطابخ", 70, 10],
++    });
++
++    await ensureProductSearchInSync(client);
++    const ids = await ftsProductIds(client, "منظف أرضيات", 5);
++    assert.ok(ids.includes("p1"));
++  });
++
++  test("match query is built safely (quoted words, no raw syntax)", () => {
++    const match = buildFtsMatch('منظف "خطر" *drop');
++    // كلمات مقتبسة ولا رموز FTS خاصة خام.
++    assert.ok(match.includes('"منظف"'));
++    assert.ok(!match.includes("*"));
++    assert.ok(!match.includes("drop;"));
++  });
++
++  test("no-match query returns no ids", async () => {
++    await runMigrations(client);
++    const ids = await ftsProductIds(client, "غيرموجودإطلاقا", 5);
++    assert.deepEqual(ids, []);
++  });
++});
+-- 
+2.39.5
+

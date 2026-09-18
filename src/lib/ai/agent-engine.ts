@@ -1,6 +1,7 @@
 import { redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 import { extractProductCards, type ProductCard } from "./cards";
+import { resolveProviderOrder, type ProviderName } from "./chain-order";
 import { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
 import { GeminiRestProvider } from "./providers/gemini-rest";
 import { GroqProvider } from "./providers/groq";
@@ -24,16 +25,31 @@ import type { AgentMessage, AgentOptions, AgentResult, AIAgentProvider } from ".
  *
  * يقبل المحرك قائمة مزودين اختيارية لحقن التبعيات في الاختبارات.
  */
+
+/**
+ * يبني قائمة المزودين الافتراضية وفق الترتيب المطلوب (بيئة أو افتراضي).
+ * الرد المحلي مضمون دائمًا في النهاية عبر `resolveProviderOrder`.
+ */
+function buildDefaultProviders(): AIAgentProvider[] {
+  const pools: Record<ProviderName, AIAgentProvider> = {
+    gemini: new GeminiRestProvider(),
+    groq: new GroqProvider(),
+    "nvidia-nim": new NvidiaNimProvider(),
+    local: new LocalFallbackProvider(),
+  };
+  return resolveProviderOrder().map((name) => pools[name]);
+}
+
 export class SmartAgentEngine {
   private readonly providers: AIAgentProvider[];
 
   constructor(providers?: AIAgentProvider[]) {
-    this.providers = providers ?? [
-      new GeminiRestProvider(),
-      new GroqProvider(),
-      new NvidiaNimProvider(),
-      new LocalFallbackProvider(),
-    ];
+    // عند حقن مزودين في الاختبارات يُحترَم ترتيبهم كما هو.
+    if (providers) {
+      this.providers = providers;
+      return;
+    }
+    this.providers = buildDefaultProviders();
   }
 
   /** يعالج الطلب ويعيد الرد مع اسم المزود الذي قدّمه (للمراقبة والشفافية). */

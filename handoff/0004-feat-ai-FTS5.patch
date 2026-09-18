@@ -1,0 +1,249 @@
+From 72e12096ee201922f87c223383b0ff57689cf0fd Mon Sep 17 00:00:00 2001
+From: elazamey <206169629+elazamey@users.noreply.github.com>
+Date: Fri, 18 Sep 2026 06:15:09 +0000
+Subject: [PATCH 4/6] =?UTF-8?q?feat(ai):=20=D8=B1=D8=A8=D8=B7=20FTS5=20?=
+ =?UTF-8?q?=D8=A8=D8=A3=D8=AF=D8=A7=D8=A9=20=D8=A7=D9=84=D8=A8=D8=AD=D8=AB?=
+ =?UTF-8?q?=20=D9=88=D8=A7=D9=84=D8=B1=D8=AF=20=D8=A7=D9=84=D9=85=D8=AD?=
+ =?UTF-8?q?=D9=84=D9=8A=20+=20=D8=AA=D8=B1=D8=AA=D9=8A=D8=A8=20=D8=B3?=
+ =?UTF-8?q?=D9=84=D8=B3=D9=84=D8=A9=20=D9=82=D8=A7=D8=A8=D9=84=20=D9=84?=
+ =?UTF-8?q?=D9=84=D8=B6=D8=A8=D8=B7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+البحث في أداة search_products والرد الاحتياطي يمر الآن عبر searchProductsFts
+مع السقوط الآمن للكلمات المفتاحية. ترتيب سلسلة التراجع يُقرأ من
+AI_PROVIDER_ORDER (حلقة chain-order جديدة fail-closed): الأسماء المجهولة
+تُتجاهل وlocal مثبّت دائمًا في النهاية، والغياب يُبقي الترتيب التاريخي
+Gemini ← Groq ← NIM ← محلي حرفيًا.
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ src/app/api/products/route.ts          | 25 +++++++++++++++
+ src/lib/ai/agent-engine.ts             | 28 +++++++++++++----
+ src/lib/ai/chain-order.ts              | 42 ++++++++++++++++++++++++++
+ src/lib/ai/mcp/tools/store.ts          | 10 +++---
+ src/lib/ai/providers/local-fallback.ts | 17 +++++------
+ 5 files changed, 100 insertions(+), 22 deletions(-)
+ create mode 100644 src/lib/ai/chain-order.ts
+
+diff --git a/src/app/api/products/route.ts b/src/app/api/products/route.ts
+index 941654a..92ec485 100644
+--- a/src/app/api/products/route.ts
++++ b/src/app/api/products/route.ts
+@@ -3,6 +3,8 @@ import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
+ import { getProducts, db, ensureSchema } from "@/lib/db";
+ import { isAdminRequest } from "@/lib/auth";
+ import { productUpsertContract, firstZodIssue } from "@/lib/validation/contracts";
++import { upsertProductSearch, removeProductSearch } from "@/lib/search";
++import type { Product } from "@/lib/seed";
+ 
+ export const runtime = "nodejs";
+ export const dynamic = "force-dynamic";
+@@ -52,6 +54,23 @@ export const POST = apiHandler("/api/products/admin-post", async (request) => {
+       JSON.stringify({ name: p.name.trim(), price: p.price, stock: p.stock }),
+     ],
+   });
++  // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الكتابة الأساسية (سقوط آمن).
++  try {
++    const product: Product = {
++      id,
++      name: p.name.trim(),
++      description: (p.description ?? "").trim(),
++      price: p.price,
++      old_price: p.old_price,
++      category: (p.category ?? "").trim(),
++      image: p.image || "🧴",
++      stock: p.stock,
++      featured,
++    };
++    await upsertProductSearch(c, product);
++  } catch (e) {
++    console.error("search: fts5 upsert failed (fallback to keyword matching):", String((e as Error)?.message ?? e));
++  }
+   return NextResponse.json({ ok: true, id });
+ });
+ 
+@@ -69,5 +88,11 @@ export const DELETE = apiHandler("/api/products/admin-delete", async (request) =
+     sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
+     args: ["product_delete", "product", id, "{}"],
+   });
++  // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الحذف الأساسي (سقوط آمن).
++  try {
++    await removeProductSearch(c, id);
++  } catch (e) {
++    console.error("search: fts5 remove failed (fallback to keyword matching):", String((e as Error)?.message ?? e));
++  }
+   return NextResponse.json({ ok: true });
+ });
+diff --git a/src/lib/ai/agent-engine.ts b/src/lib/ai/agent-engine.ts
+index 5c2a39d..2be5a6d 100644
+--- a/src/lib/ai/agent-engine.ts
++++ b/src/lib/ai/agent-engine.ts
+@@ -1,6 +1,7 @@
+ import { redactSecrets } from "@/lib/errors";
+ import { metrics } from "@/lib/observability/metrics";
+ import { extractProductCards, type ProductCard } from "./cards";
++import { resolveProviderOrder, type ProviderName } from "./chain-order";
+ import { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
+ import { GeminiRestProvider } from "./providers/gemini-rest";
+ import { GroqProvider } from "./providers/groq";
+@@ -24,16 +25,31 @@ import type { AgentMessage, AgentOptions, AgentResult, AIAgentProvider } from ".
+  *
+  * يقبل المحرك قائمة مزودين اختيارية لحقن التبعيات في الاختبارات.
+  */
++
++/**
++ * يبني قائمة المزودين الافتراضية وفق الترتيب المطلوب (بيئة أو افتراضي).
++ * الرد المحلي مضمون دائمًا في النهاية عبر `resolveProviderOrder`.
++ */
++function buildDefaultProviders(): AIAgentProvider[] {
++  const pools: Record<ProviderName, AIAgentProvider> = {
++    gemini: new GeminiRestProvider(),
++    groq: new GroqProvider(),
++    "nvidia-nim": new NvidiaNimProvider(),
++    local: new LocalFallbackProvider(),
++  };
++  return resolveProviderOrder().map((name) => pools[name]);
++}
++
+ export class SmartAgentEngine {
+   private readonly providers: AIAgentProvider[];
+ 
+   constructor(providers?: AIAgentProvider[]) {
+-    this.providers = providers ?? [
+-      new GeminiRestProvider(),
+-      new GroqProvider(),
+-      new NvidiaNimProvider(),
+-      new LocalFallbackProvider(),
+-    ];
++    // عند حقن مزودين في الاختبارات يُحترَم ترتيبهم كما هو.
++    if (providers) {
++      this.providers = providers;
++      return;
++    }
++    this.providers = buildDefaultProviders();
+   }
+ 
+   /** يعالج الطلب ويعيد الرد مع اسم المزود الذي قدّمه (للمراقبة والشفافية). */
+diff --git a/src/lib/ai/chain-order.ts b/src/lib/ai/chain-order.ts
+new file mode 100644
+index 0000000..eebce8f
+--- /dev/null
++++ b/src/lib/ai/chain-order.ts
+@@ -0,0 +1,42 @@
++/**
++ * ترتيب سلسلة التراجع في المحرك الذكي.
++ *
++ * الترتيب الافتراضي ثابت تاريخيًا:
++ *   Gemini ← Groq ← NVIDIA NIM ← الرد المحلي.
++ *
++ * يمكن ضبطه اختياريًا دون كسر أي سلوك عبر `AI_PROVIDER_ORDER` (قائمة أسماء
++ * مفصولة بفواصل). القواعد صارمة وfail-closed:
++ *  - الأسماء غير المعروفة أو الفارغة تُتجاهل (لا منح ضمني).
++ *  - `local` مضمون دائمًا في نهاية السلسلة مهما كانت القائمة، لأنه الحلقة
++ *    الأخيرة التي تضمن ألا يصل خطأ 500 إلى المستخدم أبدًا.
++ *  - إن كانت القائمة الناتجة فارغة يُستخدم الترتيب الافتراضي حرفيًا.
++ */
++
++export const PROVIDER_NAMES = ["gemini", "groq", "nvidia-nim", "local"] as const;
++export type ProviderName = (typeof PROVIDER_NAMES)[number];
++
++const KNOWN = new Set<string>(PROVIDER_NAMES);
++
++export const DEFAULT_PROVIDER_ORDER: ProviderName[] = ["gemini", "groq", "nvidia-nim", "local"];
++
++/** يقرأ `AI_PROVIDER_ORDER` ويعيد ترتيبًا صالحًا مضمون النهاية المحلية. */
++export function resolveProviderOrder(
++  raw: string | undefined | null = process.env.AI_PROVIDER_ORDER
++): ProviderName[] {
++  const text = String(raw ?? "").trim();
++  if (text === "") return [...DEFAULT_PROVIDER_ORDER];
++
++  const requested = text
++    .split(",")
++    .map((part) => part.trim().toLowerCase())
++    .filter((part): part is ProviderName => KNOWN.has(part));
++
++  const ordered = requested.filter((name) => name !== "local");
++  if (ordered.length === 0) return [...DEFAULT_PROVIDER_ORDER];
++
++  // الرد المحلي دائمًا في النهاية مهما حدث.
++  return [...ordered, "local"];
++}
++
++/** اسم المتغير لأدوات التشخيص/التوثيق. */
++export const PROVIDER_ORDER_ENV = "AI_PROVIDER_ORDER";
+diff --git a/src/lib/ai/mcp/tools/store.ts b/src/lib/ai/mcp/tools/store.ts
+index 18b3c02..3f37a5d 100644
+--- a/src/lib/ai/mcp/tools/store.ts
++++ b/src/lib/ai/mcp/tools/store.ts
+@@ -1,5 +1,6 @@
+ import { z } from "zod";
+ import { getFaq, getProducts } from "@/lib/db";
++import { searchProductsFts } from "@/lib/search";
+ import { STORE } from "@/lib/seed";
+ import { GOVERNORATES, SHIPPING_RATES, calculateShipping } from "@/lib/shipping";
+ import type { McpTool, McpToolPolicy } from "../types";
+@@ -79,12 +80,9 @@ export const searchProductsTool: McpTool = {
+   async run(value) {
+     const { query, max_results } = value as { query: string; max_results?: number };
+     const limit = max_results ?? 3;
+-    const products = await getProducts();
+-    const hits = products
+-      .map((p) => ({ p, s: score(query, `${p.name} ${p.category} ${p.description}`) }))
+-      .filter((x) => x.s > 0)
+-      .sort((a, b) => b.s - a.s || a.p.name.localeCompare(b.p.name))
+-      .slice(0, limit);
++    // محرك FTS5 (Turso) أولًا، مع سقوط آمن داخلي إلى مطابقة الكلمات.
++    const products = await searchProductsFts(query, limit);
++    const hits = products.map((p) => ({ p, s: score(query, `${p.name} ${p.category} ${p.description}`) }));
+ 
+     if (hits.length === 0) {
+       return "لا يوجد منتج مطابق في المتجر. اقترح على العميل التواصل على واتساب أو وصف حاجة أخرى.";
+diff --git a/src/lib/ai/providers/local-fallback.ts b/src/lib/ai/providers/local-fallback.ts
+index a508c33..6f39eb0 100644
+--- a/src/lib/ai/providers/local-fallback.ts
++++ b/src/lib/ai/providers/local-fallback.ts
+@@ -1,4 +1,5 @@
+-import { getProducts, getFaq } from "@/lib/db";
++import { getFaq } from "@/lib/db";
++import { searchProductsFts } from "@/lib/search";
+ import { STORE } from "@/lib/seed";
+ import type { AgentMessage, AgentOptions, AIAgentProvider } from "../types";
+ 
+@@ -20,9 +21,9 @@ export class LocalFallbackProvider implements AIAgentProvider {
+   }
+ }
+ 
+-/** إجابة محلية بالكلمات المفتاحية من بيانات المتجر — نفس الخوارزمية التاريخية. */
++/** إجابة محلية من بيانات المتجر — البحث عبر FTS5 مع سقوط آمن للمطابقة الحرفية. */
+ export async function buildLocalAnswer(question: string): Promise<string> {
+-  const [products, faq] = await Promise.all([getProducts(), getFaq()]);
++  const faq = await getFaq();
+   const t = question.toLowerCase();
+   const words = t.split(/\s+/).filter((w) => w.length > 2);
+   const score = (s: string) => words.reduce((n, w) => n + (s.toLowerCase().includes(w) ? 1 : 0), 0);
+@@ -30,16 +31,12 @@ export async function buildLocalAnswer(question: string): Promise<string> {
+   const bestFaq = faq.map((f) => ({ f, s: score(f.question) })).sort((a, b) => b.s - a.s)[0];
+   if (bestFaq && bestFaq.s >= 1) return bestFaq.f.answer;
+ 
+-  const hits = products
+-    .map((p) => ({ p, s: score(`${p.name} ${p.category} ${p.description}`) }))
+-    .filter((x) => x.s > 0)
+-    .sort((a, b) => b.s - a.s)
+-    .slice(0, 3);
++  const hits = (await searchProductsFts(question, 3)) as { name: string; price: number }[];
+   if (hits.length)
+     return (
+       "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n" +
+-      hits.map((h) => `• ${h.p.name} — ${h.p.price} جنيه`).join("\n") +
+-      `\n\nتقدر تضيفها للسلة وتكمل الطلب، والدفع فودافون كاش على ${STORE.vodafoneCash} أو عند الاستلام.`
++      hits.map((h) => `• ${h.name} — ${h.price} جنيه`).join("\n") +
++      `\n\nتقدر تضيفهم للسلة وتكمل الطلب، والدفع فودافون كاش على ${STORE.vodafoneCash} أو عند الاستلام.`
+     );
+ 
+   return `أهلاً بحضرتك في ${STORE.name} 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على ${STORE.phone}.`;
+-- 
+2.39.5
+

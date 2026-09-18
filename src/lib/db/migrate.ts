@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Client } from "@libsql/client";
+import { ensureProductSearchInSync } from "@/lib/search";
 
 /**
  * مشغّل هجرات مُرقّمة (versioned migrations).
@@ -15,13 +16,15 @@ export interface Migration {
 
 /**
  * الهجرات مضمّنة كوحدات TS حتى تعمل مع تجميع Next.js وتحت الاختبارات.
- * الملف المرجعي المُوثَّق هو `migrations/0001_initial.sql`؛ وملك الـ .ts
+ * الملف المرجعي المُوثَّق هو `migrations/0001_initial.sql`؛ وملف الـ .ts
  * يُولَّد منه (انظر scripts) ويحمل نفس النص للتنفيذ.
  */
 import { migrationSql as migration0001Sql } from "./migrations/0001_initial";
+import { migrationSql as migration0002Sql } from "./migrations/0002_search_fts5";
 
 export const MIGRATIONS: Migration[] = [
   { version: "0001", name: "initial", sql: migration0001Sql },
+  { version: "0002", name: "search_fts5", sql: migration0002Sql },
 ];
 
 function checksum(sql: string): string {
@@ -50,7 +53,14 @@ async function ensureColumns(client: Client, sql: string) {
   }
 }
 
+/**
+ * يُشغّل الهجرات المتبقية. بعد النجاح يضمن بناء فهرس FTS5 (هجرة 0002) وحال
+ * عدم توفره على المحرك يسقط بصمت دون إفشال التجهيز. الأعمدة الناقصة للجداول
+ * القائمة تُعالَج بعد الهجرة (idempotent).
+ */
 export async function runMigrations(client?: Client): Promise<{ applied: string[] }> {
+  // استيراد كسول: يكسر دورة الاستيراد مع وحدة قاعدة البيانات ويسمح بحقن
+  // عميل في الاختبارات دون تهيئة مدخل البيئة.
   const { db } = await import("./index");
   const c = client ?? db();
   if (!c) return { applied: [] };
@@ -102,6 +112,9 @@ export async function runMigrations(client?: Client): Promise<{ applied: string[
 
   // الأعمدة الناقصة للجداول القديمة تُعالَج بعد الهجرة (idempotent).
   await ensureColumns(c, MIGRATIONS.map((m) => m.sql).join("\n"));
+
+  // ضمان مزامنة فهرس البحث (هجرة 0002) مع الكتالوج بعد أي تجهيز.
+  await ensureProductSearchInSync(c);
 
   return { applied: newlyApplied };
 }

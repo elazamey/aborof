@@ -3,6 +3,8 @@ import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { getProducts, db, ensureSchema } from "@/lib/db";
 import { isAdminRequest } from "@/lib/auth";
 import { productUpsertContract, firstZodIssue } from "@/lib/validation/contracts";
+import { upsertProductSearch, removeProductSearch } from "@/lib/search";
+import type { Product } from "@/lib/seed";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +54,23 @@ export const POST = apiHandler("/api/products/admin-post", async (request) => {
       JSON.stringify({ name: p.name.trim(), price: p.price, stock: p.stock }),
     ],
   });
+  // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الكتابة الأساسية (سقوط آمن).
+  try {
+    const product: Product = {
+      id,
+      name: p.name.trim(),
+      description: (p.description ?? "").trim(),
+      price: p.price,
+      old_price: p.old_price,
+      category: (p.category ?? "").trim(),
+      image: p.image || "🧴",
+      stock: p.stock,
+      featured,
+    };
+    await upsertProductSearch(c, product);
+  } catch (e) {
+    console.error("search: fts5 upsert failed (fallback to keyword matching):", String((e as Error)?.message ?? e));
+  }
   return NextResponse.json({ ok: true, id });
 });
 
@@ -69,5 +88,11 @@ export const DELETE = apiHandler("/api/products/admin-delete", async (request) =
     sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
     args: ["product_delete", "product", id, "{}"],
   });
+  // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الحذف الأساسي (سقوط آمن).
+  try {
+    await removeProductSearch(c, id);
+  } catch (e) {
+    console.error("search: fts5 remove failed (fallback to keyword matching):", String((e as Error)?.message ?? e));
+  }
   return NextResponse.json({ ok: true });
 });

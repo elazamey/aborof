@@ -1,0 +1,115 @@
+From 84ef4ed13f15da5deda8b6002b87deaaec6fce9d Mon Sep 17 00:00:00 2001
+From: elazamey <206169629+elazamey@users.noreply.github.com>
+Date: Fri, 18 Sep 2026 06:15:16 +0000
+Subject: [PATCH 6/6] =?UTF-8?q?docs:=20=D8=A3=D8=B9=D9=84=D8=A7=D9=85=20?=
+ =?UTF-8?q?=D8=A7=D9=84=D8=AA=D8=AA=D8=A8=D8=B9=20=D9=88=D8=AA=D8=B1=D8=AA?=
+ =?UTF-8?q?=D9=8A=D8=A8=20=D8=A7=D9=84=D8=B3=D9=84=D8=B3=D9=84=D8=A9=20+?=
+ =?UTF-8?q?=20=D9=81=D8=AD=D9=88=D8=B5=20=D8=A7=D9=84=D9=86=D8=B4=D8=B1=20?=
+ =?UTF-8?q?7-14=20+=20=D9=82=D8=B3=D9=85=20=D8=A5=D8=B5=D9=84=D8=A7=D8=AD?=
+ =?UTF-8?q?=20P0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ .env.example      | 10 ++++++++++
+ DEPLOYMENT.md     | 18 ++++++++++++++++++
+ README.md         |  3 +++
+ src/lib/orders.ts |  2 +-
+ 4 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/.env.example b/.env.example
+index 91c2b13..aa40469 100644
+--- a/.env.example
++++ b/.env.example
+@@ -28,6 +28,16 @@ ENABLE_MCP_TOOLS=false
+ # MCP_TOOL_TIMEOUT_MS=4000
+ # MCP_MAX_RESULT_CHARS=4000
+ 
++# ===== ترتيب سلسلة التراجع (اختياري) =====
++# قائمة أسماء المزودين مفصولة بفواصل؛ الأسماء غير المعروفة تُتجاهل و`local` مثبّت
++# دائمًا في النهاية. غيابه يُبقي الترتيب التاريخي: gemini,groq,nvidia-nim,local.
++# AI_PROVIDER_ORDER=groq,gemini,nvidia-nim
++
++# ===== تتبع الطلبات للعملاء (اختياري) — مغلق افتراضيًا =====
++# لا تفتحه إلا بعد فحوص الصفين 13 و14 في DEPLOYMENT.md. يعمل برقم الطلب +
++# آخر 4 أرقام من الهاتف معًا، والرسالة موحّدة لا تكشف وجود الطلب من عدمه.
++ENABLE_ORDER_TRACKING=false
++
+ # ===== لوحة التحكم =====
+ # كلمة مرور الإدارة — سياسة موحدة: 12 حرفًا على الأقل.
+ ADMIN_PASSWORD=replace-with-a-long-random-password-at-least-12-chars
+diff --git a/DEPLOYMENT.md b/DEPLOYMENT.md
+index c48148e..947e9c8 100644
+--- a/DEPLOYMENT.md
++++ b/DEPLOYMENT.md
+@@ -32,6 +32,8 @@
+ | `DIAGNOSTICS_ENABLED` | Variable اختياري | `true` لتفعيل نقطة التشخيص (معطّل في الإنتاج افتراضيًا) |
+ | `DIAGNOSTICS_KEY` | Secret اختياري | مفتاح **مستقل** عن `ADMIN_SESSION_SECRET` لنقطة `/api/admin/diagnostics` |
+ | `CSP_ENFORCE` | Variable اختياري | `true` لتشديد CSP من وضع المراقبة إلى الحجب |
++| `ENABLE_ORDER_TRACKING` | Variable اختياري | `true` لفتح نقطة تتبع العملاء للطلبات `/api/orders/track`؛ **مغلق افتراضيًا** (لا يفتح إلا بعد فحوص الصفين 13 و14 في قائمة التحقق) |
++| `AI_PROVIDER_ORDER` | Variable اختياري | قائمة أسماء مزودين مفصولة بفواصل لضبط ترتيب السلسلة (مثلًا `groq,gemini,nvidia-nim`)؛ الأسماء غير المعروفة تُتجاهل و`local` يُثبَّت دائمًا في النهاية. غيابه يُبقي الترتيب التاريخي Gemini ← Groq ← NIM ← محلي |
+ | `VERCEL_DEPLOY_ENABLED` | Repository variable (أو Environment variable على `production`) | `true` بعد التأكد من الأسرار |
+ 
+ > تفاصيل المرحلة الثانية (الأعلام، الحدود، مصفوفة صفر كسر، التراجع) في `docs/ai/phase-2-nim-mcp.md`.
+@@ -73,6 +75,14 @@
+ | 4 | `POST /api/admin/login` بكلمة **خاطئة عمدًا** | `401` مع `{"error":"بيانات الدخول غير صحيحة"}` | راجع تفسير الخطوة 4 أدناه |
+ | 5 | `GET /cart` | `200` | مشكلة في صفحات العميل |
+ | 6 | `GET /api/admin/mcp/tools` | `404` بدون `ENABLE_MCP_TOOLS`، و`401` بدونه مع التفعيل | 404 = الطبقة مغلقة (السلوك الافتراضي)؛ 401 = الطبقة مفتوحة فعليًا وجلسة الإدارة مطلوبة |
++| 7 | على قاعدة Turso: `SELECT COUNT(*) FROM order_items;` | استعلام ناجح بلا خطأ «no such table» | إصلاح P0 لم يُفعَّل (راجع «إصلاح قاعدة البيانات P0» في نهاية الملف) |
++| 8 | على قاعدة Turso: `SELECT name FROM sqlite_master WHERE type='table' AND name='product_search';` | يظهر الصف `product_search` | هجرة `0002` (FTS5) لم تُطبَّق على البيئة الحيّة |
++| 9 | على قاعدة Turso: `SELECT COUNT(*) FROM product_search;` | يساوي `SELECT COUNT(*) FROM products;` | الفهرس غير متزامن مع الكتالوج؛ أعد نشرًا لتشغيل مزامنة التجهيز |
++| 10 | `POST /api/orders` بطلي مستخدِم تجريبي | `200 {ok:true,...}` وخفض المخزون وظهور `order_items` | فشل كتابة الطلب: راجع الربط `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` |
++| 11 | `POST /api/orders` ثانية بعد الخطوة 10 | `200` بلا أخطاء تكرار معرف أو فقدان أصناف | مشكلة في المعاملة المركّبة (خصم + طلب + أصناف) |
++| 12 | `POST /api/chat` بسؤال «منظف أرضيات» مع تفعيل `ENABLE_AI_AGENT` و`ENABLE_MCP_TOOLS` | رد يحمل بطاقات منتجات مطابقة | FTS5 أو طبقة الأدوات عاطلة؛ راجع سجل النشر |
++| 13 | `POST /api/orders/track` برقم الطلب من الخطوة 10 وآخر 4 أرقام من هاتفه **مع** `ENABLE_ORDER_TRACKING=true` | `200` مع `{ok:true,status:"جديد",items:[…]}` بلا هاتف كامل ولا عنوان | قناة التتبع عاطلة أو المعرّفات غير صحيحة |
++| 14 | `POST /api/orders/track` بنفس رقم الطلب وآخر 4 أرقام **خاطئة** | `404` بنفس رسالة الخطوة 13 («تعذر العثور على الطلب») حرفيًا | تسريب وجود/عدم وجود الطلب (غير مقبول — لا تكشِف الفرق للعميل) |
+ 
+ مثال على الخطوة 4 (نفّذها **مرة واحدة** — حد المعدل 8 محاولات لكل 10 دقائق):
+ 
+@@ -91,6 +101,14 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
+ > **لا تختبر بكلمة المرور الحقيقية عبر سطر أوامر أو شبكة غير موثوقة.**
+ > الاختبار بكلمة خاطئة كافٍ لإثبات الجاهزية، والدخول الفعلي يكون من صفحة `/admin` مباشرة.
+ 
++> **تفعيل تتبع الطلبات (الصفان 13–14):** لا يفتح `ENABLE_ORDER_TRACKING` إلا بعد اجتياز الصفين 13 و14 معًا — الأول يثبت أن التتبع يعمل للعميل الصحيح، والثاني يثبت أن الرسالة موحّدة ولا تكشف وجود الطلب من عدمه. أي فرق بين الرسالتين يعني تسريب تعداد، فأبقِ العلم مغلقًا.
++
++## إصلاح قاعدة البيانات P0 — بسط مسار `@/lib/db`
++
++كان هناك ملفان متنافسان: `src/lib/db.ts` (قديم، ينشئ الجداول وقت التشغيل **دون تشغيل الهجرات**) و`src/lib/db/index.ts` (حديث، يشغّل الهجرات المرقّمة). وبما أن محرّر TypeScript يحسم `@/lib/db` لملف `.ts` قبل المجلد `db/index.ts`، كانت مسارات الإنتاج تمر بالملف القديم فلا تُنشأ `order_items` أبدًا ← فشل إنشاء الطلبات في البيئة الحيّة (`no such table: order_items`).
++
++**الحسم:** حُذف `src/lib/db.ts` وأصبح `@/lib/db` يحل حصريًا إلى `db/index.ts` الذي يشغّل الهجرات (بما فيها `order_items` وقيودها). بعد الدمج تحقق عبر الصف 7 ثم الصفين 10–11 من الجدول أعلاه.
++
+ يمكن أيضًا تشغيل وظيفة **Production probe** من تبويب **Actions** للحصول على نتيجة الخطوة 4 من داخل GitHub (بدون أسرار، ومحاولة واحدة لكل تشغيل).
+ 
+ ## تشغيل محلي
+diff --git a/README.md b/README.md
+index 3e28375..dec0aa5 100644
+--- a/README.md
++++ b/README.md
+@@ -9,6 +9,9 @@
+ - 💬 **زر واتساب عائم** يرسل تفاصيل الطلب كاملة إلى `01095032221`
+ - 👩‍💼 **شات بوت سيليا** — يرد بالعامية المصرية اعتماداً على منتجات قاعدة البيانات (Gemini المجاني أو Groq المجاني، مع رد احتياطي ذكي بدون مفتاح)
+ - 🧠 **مزود ثالث اختياري (NVIDIA NIM)** و**طبقة أدوات محكومة** تعمل فقط عند تفعيلها صراحةً (`ENABLE_MCP_TOOLS`)، للقراءة فقط وبحدود مركزية معلنة — التفاصيل في [`docs/ai/phase-2-nim-mcp.md`](docs/ai/phase-2-nim-mcp.md)
++- 🔎 **بحث المنتجات عبر Turso FTS5** (فهرس `product_search` بهجرة `0002`) داخل أداة `search_products` والرد الاحتياطي، مع سقوط آمن لمطابقة الكلمات عند غياب دعم المحرك
++- 📦 **تتبع الطلبات للعملاء** (`/api/orders/track`) خلف علم `ENABLE_ORDER_TRACKING` المغلق افتراضيًا: رقم الطلب + آخر 4 أرقام من الهاتف معًا، وإخراج مبهم ورسالة موحّدة تمنع تعداد الطلبات
++- 🔧 **ترتيب سلسلة قابل للضبط** عبر `AI_PROVIDER_ORDER` (الترتيب الافتراضي Gemini ← Groq ← NIM ← محلي يبقى كما هو)
+ - 💬 **تجربة محادثة محسّنة:** اقتراحات سريعة، مؤشر «تكتب الآن…»، رسائل خطأ عربية مع زر إعادة محاولة، بطاقات منتجات داخل المحادثة بزر «أضف للسلة»، مشاركة الموقع للتوصيل، وإملاء صوتي في المتصفحات الداعمة
+ - 🗄️ **Turso** لتخزين المنتجات والطلبات والأسئلة الشائعة وسجل المحادثات
+ - 🔐 **لوحة تحكم** `/admin` لإضافة/تعديل/حذف المنتجات ومتابعة الطلبات
+diff --git a/src/lib/orders.ts b/src/lib/orders.ts
+index 4d3fab9..cdf251d 100644
+--- a/src/lib/orders.ts
++++ b/src/lib/orders.ts
+@@ -135,7 +135,7 @@ export async function updateOrderStatus(input: OrderStatusInput): Promise<void>
+  *  - يعمل فقط بعاملين معًا: رقم الطلب + آخر 4 أرقام من الهاتف.
+  *  - الإخراج مبهم: الحالة + ملخص أصناف بلا هاتف كامل ولا عنوان ولا أسعار مفصلة.
+  *  - رسالة الفشل واحدة لا تكشف وجود الطلب من عدمه (يمنع تعداد الطلبات).
+- * 
++ *
+  * يرمي `Errors.notFound` في كل حالات عدم التطابق برسالة موحّدة.
+  */
+ export async function trackOrder(
+-- 
+2.39.5
+
