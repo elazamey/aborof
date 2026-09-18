@@ -1,0 +1,280 @@
+From 4f15256e93715bbdd9d35dc31b6a19e5d89a10de Mon Sep 17 00:00:00 2001
+From: elazamey <206169629+elazamey@users.noreply.github.com>
+Date: Fri, 18 Sep 2026 06:14:42 +0000
+Subject: [PATCH 2/6] =?UTF-8?q?feat(db):=20=D9=87=D8=AC=D8=B1=D8=A9=200002?=
+ =?UTF-8?q?=20=E2=80=94=20=D9=81=D9=87=D8=B1=D8=B3=20=D8=A8=D8=AD=D8=AB=20?=
+ =?UTF-8?q?FTS5=20=D9=84=D9=84=D9=85=D9=86=D8=AA=D8=AC=D8=A7=D8=AA=20?=
+ =?UTF-8?q?=D9=85=D8=B9=20=D8=B3=D9=82=D9=88=D8=B7=20=D8=A2=D9=85=D9=86?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+جدول افتراضي product_search (tokenize unicode61) يُعبّأ من products عند
+الترقية، ومزامنة مركّزة في src/lib/search.ts تُبنى عند التجهيز وعند كل
+كتابة/حذف منتج. الاستعلام يُبنى بكلمات مقتبسة آمنة، وأي فشل في المحرك
+يرجع لمطابقة الكلمات المفتاحية فلا يصل خطأ للمستخدم.
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ src/lib/db/migrate.ts                      |  15 ++-
+ src/lib/db/migrations/0002_search_fts5.sql |  21 ++++
+ src/lib/db/migrations/0002_search_fts5.ts  |  25 ++++
+ src/lib/search.ts                          | 134 +++++++++++++++++++++
+ 4 files changed, 194 insertions(+), 1 deletion(-)
+ create mode 100644 src/lib/db/migrations/0002_search_fts5.sql
+ create mode 100644 src/lib/db/migrations/0002_search_fts5.ts
+ create mode 100644 src/lib/search.ts
+
+diff --git a/src/lib/db/migrate.ts b/src/lib/db/migrate.ts
+index a08fffd..07c4234 100644
+--- a/src/lib/db/migrate.ts
++++ b/src/lib/db/migrate.ts
+@@ -1,5 +1,6 @@
+ import { createHash } from "node:crypto";
+ import type { Client } from "@libsql/client";
++import { ensureProductSearchInSync } from "@/lib/search";
+ 
+ /**
+  * مشغّل هجرات مُرقّمة (versioned migrations).
+@@ -15,13 +16,15 @@ export interface Migration {
+ 
+ /**
+  * الهجرات مضمّنة كوحدات TS حتى تعمل مع تجميع Next.js وتحت الاختبارات.
+- * الملف المرجعي المُوثَّق هو `migrations/0001_initial.sql`؛ وملك الـ .ts
++ * الملف المرجعي المُوثَّق هو `migrations/0001_initial.sql`؛ وملف الـ .ts
+  * يُولَّد منه (انظر scripts) ويحمل نفس النص للتنفيذ.
+  */
+ import { migrationSql as migration0001Sql } from "./migrations/0001_initial";
++import { migrationSql as migration0002Sql } from "./migrations/0002_search_fts5";
+ 
+ export const MIGRATIONS: Migration[] = [
+   { version: "0001", name: "initial", sql: migration0001Sql },
++  { version: "0002", name: "search_fts5", sql: migration0002Sql },
+ ];
+ 
+ function checksum(sql: string): string {
+@@ -50,7 +53,14 @@ async function ensureColumns(client: Client, sql: string) {
+   }
+ }
+ 
++/**
++ * يُشغّل الهجرات المتبقية. بعد النجاح يضمن بناء فهرس FTS5 (هجرة 0002) وحال
++ * عدم توفره على المحرك يسقط بصمت دون إفشال التجهيز. الأعمدة الناقصة للجداول
++ * القائمة تُعالَج بعد الهجرة (idempotent).
++ */
+ export async function runMigrations(client?: Client): Promise<{ applied: string[] }> {
++  // استيراد كسول: يكسر دورة الاستيراد مع وحدة قاعدة البيانات ويسمح بحقن
++  // عميل في الاختبارات دون تهيئة مدخل البيئة.
+   const { db } = await import("./index");
+   const c = client ?? db();
+   if (!c) return { applied: [] };
+@@ -103,5 +113,8 @@ export async function runMigrations(client?: Client): Promise<{ applied: string[
+   // الأعمدة الناقصة للجداول القديمة تُعالَج بعد الهجرة (idempotent).
+   await ensureColumns(c, MIGRATIONS.map((m) => m.sql).join("\n"));
+ 
++  // ضمان مزامنة فهرس البحث (هجرة 0002) مع الكتالوج بعد أي تجهيز.
++  await ensureProductSearchInSync(c);
++
+   return { applied: newlyApplied };
+ }
+diff --git a/src/lib/db/migrations/0002_search_fts5.sql b/src/lib/db/migrations/0002_search_fts5.sql
+new file mode 100644
+index 0000000..0a63afc
+--- /dev/null
++++ b/src/lib/db/migrations/0002_search_fts5.sql
+@@ -0,0 +1,21 @@
++-- 0002_search_fts5: فهرس نصي كامل لمنتجات المتجر عبر محرك FTS5.
++--
++-- ينشئ الجدول الافتراضي product_search ويعبئه من جدول products إن كانت
++-- قاعدة البيانات قائمة بالفعل (ترقية بلا فقدان). مزامنة الفهرس بعد هذه
++-- الهجرة تتم في طبقة التطبيق (src/lib/search.ts) عند كل كتابة منتج، مع
++-- سقوط آمن إلى مطابقة الكلمات المفتاحية عند غياب دعم FTS5 على المحرك.
++--
++-- ملاحظات:
++--  - العمود id مُعلَّم UNINDEXED حتى نستعيد معرّف المنتج الأصلي للربط بالكتالوج.
++--  - tokenize = 'unicode61' يمنح مطابقة عربية بكلمات مستقلة مفصولة بالمسافات.
++CREATE VIRTUAL TABLE IF NOT EXISTS product_search USING fts5(
++  id UNINDEXED,
++  name,
++  description,
++  category,
++  tokenize = 'unicode61'
++);
++
++INSERT INTO product_search(id, name, description, category)
++SELECT id, name, description, category FROM products
++WHERE NOT EXISTS (SELECT 1 FROM product_search WHERE product_search.rowid = products.rowid);
+diff --git a/src/lib/db/migrations/0002_search_fts5.ts b/src/lib/db/migrations/0002_search_fts5.ts
+new file mode 100644
+index 0000000..c95e80c
+--- /dev/null
++++ b/src/lib/db/migrations/0002_search_fts5.ts
+@@ -0,0 +1,25 @@
++// مُولَّد آليًا من ملف الهجرة المرجعي — لا تعدّله يدويًا.
++export const migrationSql = `
++-- 0002_search_fts5: فهرس نصي كامل لمنتجات المتجر عبر محرك FTS5.
++--
++-- ينشئ الجدول الافتراضي product_search ويعبئه من جدول products إن كانت
++-- قاعدة البيانات قائمة بالفعل (ترقية بلا فقدان). مزامنة الفهرس بعد هذه
++-- الهجرة تتم في طبقة التطبيق (src/lib/search.ts) عند كل كتابة منتج، مع
++-- سقوط آمن إلى مطابقة الكلمات المفتاحية عند غياب دعم FTS5 على المحرك.
++--
++-- ملاحظات:
++--  - العمود id مُعلَّم UNINDEXED حتى نستعيد معرّف المنتج الأصلي للربط بالكتالوج.
++--  - tokenize = 'unicode61' يمنح مطابقة عربية بكلمات مستقلة مفصولة بالمسافات.
++CREATE VIRTUAL TABLE IF NOT EXISTS product_search USING fts5(
++  id UNINDEXED,
++  name,
++  description,
++  category,
++  tokenize = 'unicode61'
++);
++
++INSERT INTO product_search(id, name, description, category)
++SELECT id, name, description, category FROM products
++WHERE NOT EXISTS (SELECT 1 FROM product_search WHERE product_search.rowid = products.rowid);
++
++` as string;
+diff --git a/src/lib/search.ts b/src/lib/search.ts
+new file mode 100644
+index 0000000..c7adf13
+--- /dev/null
++++ b/src/lib/search.ts
+@@ -0,0 +1,134 @@
++import type { Client } from "@libsql/client";
++import { db, getProducts } from "@/lib/db";
++import type { Product } from "@/lib/seed";
++
++/**
++ * بحث منتجات المتجر بمحرك FTS5 (ضمن Turso/libSQL) مع سقوط آمن:
++ *
++ *  - المطابقة تتم عبر الجدول الافتراضي `product_search` (هجرة 0002).
++ *  - عند أي خطأ في FTS5 (محرك لا يدعمه، فهرس غير متزامن، استعلام غير صالح)
++ *    نرجع لمطابقة الكلمات المفتاحية المحلية — لا يصل أي خطأ للمستخدم.
++ *  - الاستعلام يُبنى من كلمات آمنة داخل علامات اقتباس، ولا يُمرَّر نص العميل
++ *    خامًا إلى تعبير MATCH (يمنع أخطاء الصياغة والحقن داخل استعلام FTS).
++ */
++
++const FTS_TABLE = "product_search";
++
++/** يحوّل نص استعلام إلى تعبير FTS5 آمن: كلمات مستقلة مقتبسة ومفصولة بـ OR. */
++export function buildFtsMatch(query: string): string {
++  const tokens = query
++    .split(/\s+/)
++    .map((t) => t.replace(/["*():^\-]/g, "").trim())
++    .filter((t) => t.length >= 1);
++  if (tokens.length === 0) return "";
++  const phrase = tokens
++    .map((t) => `"${t.replace(/"/g, '""')}"`)
++    .join(" OR ");
++  return phrase.slice(0, 200);
++}
++
++function toPlain(rows: unknown[]) {
++  return rows.map((r) => ({ ...(r as object) }));
++}
++
++/** معرّفات المنتجات المطابقة مرتبة حسب صلة FTS5 (تستخدم عميلًا محقونًا في الاختبارات). */
++export async function ftsProductIds(client: Client, query: string, limit: number): Promise<string[]> {
++  const match = buildFtsMatch(query);
++  if (!match) return [];
++  const r = await client.execute({
++    sql: `SELECT id FROM ${FTS_TABLE} WHERE ${FTS_TABLE} MATCH ? ORDER BY rank LIMIT ?`,
++    args: [match, limit],
++  });
++  return toPlain(r.rows).map((row) => String((row as { id?: unknown }).id));
++}
++
++/** هل الفهرس متزامن مع جدول المنتجات؟ (عدد الصفوف كإشارة كافية لمتجر صغير). */
++async function isInSync(client: Client): Promise<boolean> {
++  const products = await client.execute("SELECT COUNT(*) AS n FROM products");
++  const idx = await client.execute(`SELECT COUNT(*) AS n FROM ${FTS_TABLE}`);
++  return Number(products.rows[0].n) === Number(idx.rows[0].n);
++}
++
++/** يعيد بناء الفهرس بالكامل — يُستدعى مرة عند التجهيز وعند إضافة/حذف منتج. */
++export async function reindexProductSearch(client: Client, products?: Product[]): Promise<void> {
++  await client.execute(`DELETE FROM ${FTS_TABLE}`);
++  const list = products ?? toPlain((await client.execute("SELECT * FROM products")).rows) as Product[];
++  if (list.length === 0) return;
++  const stmts = list.map((p) => ({
++    sql: `INSERT INTO ${FTS_TABLE} (id, name, description, category) VALUES (?,?,?,?)`,
++    args: [String(p.id), p.name, p.description, p.category],
++  }));
++  await client.batch(stmts, "write");
++}
++
++/** يضمن بقاء الفهرس متزامنًا بعد التجهيز (يُبنى مرة واحدة عند الحاجة). */
++export async function ensureProductSearchInSync(client: Client): Promise<void> {
++  try {
++    if (!(await isInSync(client))) await reindexProductSearch(client);
++  } catch (e) {
++    // غياب دعم FTS5 يجب ألا يوقف التطبيق — البحث يرجع لمطابقة الكلمات.
++    console.error("search: fts5 sync skipped:", String((e as Error)?.message ?? e));
++  }
++}
++
++/** يضيف/يحدّث منتجًا في الفهرس (أمر 'delete' الخاص في FTS5 ثم الإدراج). */
++export async function upsertProductSearch(client: Client, product: Product): Promise<void> {
++  await client.batch(
++    [
++      {
++        sql: `INSERT INTO ${FTS_TABLE} (${FTS_TABLE}, id, name, description, category) VALUES ('delete', ?, ?, ?, ?)`,
++        args: [String(product.id), product.name, product.description, product.category],
++      },
++      {
++        sql: `INSERT INTO ${FTS_TABLE} (id, name, description, category) VALUES (?,?,?,?)`,
++        args: [String(product.id), product.name, product.description, product.category],
++      },
++    ],
++    "write"
++  );
++}
++
++/** يزيل منتجًا من الفهرس (أمر 'delete' الخاص في FTS5). */
++export async function removeProductSearch(client: Client, id: string): Promise<void> {
++  await client.execute({
++    sql: `INSERT INTO ${FTS_TABLE} (${FTS_TABLE}, id, name, description, category) VALUES ('delete', ?, ?, ?, ?)`,
++    args: [id, "", "", ""],
++  });
++}
++
++/**
++ * الواجهة العليا: بحث مرتّب بالصلة. يعيد منتجات الكتالوج الكاملة المطابقة
++ * للاستعلام، مع سقوط آمن إلى مطابقة الكلمات المفتاحية عند تعذر FTS5.
++ */
++export async function searchProductsFts(query: string, limit = 3): Promise<Product[]> {
++  const products = await getProducts();
++  if (products.length === 0) return [];
++
++  const c = db();
++  const byId = new Map(products.map((p) => [String(p.id), p]));
++  const order: string[] = [];
++
++  if (c) {
++    try {
++      order.push(...(await ftsProductIds(c, query, limit)));
++    } catch (e) {
++      // فهرس ناقص أو محرك بلا FTS5 — نُكمل بالمطابقة المحلية بهدوء.
++      console.error("search: fts5 query failed, using keyword fallback:", String((e as Error)?.message ?? e));
++    }
++  }
++
++  const ordered = order.filter((id) => byId.has(id)).map((id) => byId.get(id) as Product);
++
++  // إن لم يُجد الفهرس نتائج كافية نكمّل بالمطابقة المحلية حسب الكلمات.
++  const t = query.toLowerCase();
++  const words = t.split(/\s+/).filter((w) => w.length > 2);
++  const score = (s: string) => words.reduce((n, w) => n + (s.toLowerCase().includes(w) ? 1 : 0), 0);
++  const rest = products
++    .filter((p) => !order.includes(String(p.id)))
++    .map((p) => ({ p, s: words.length === 0 ? 0 : score(`${p.name} ${p.category} ${p.description}`) }))
++    .filter((x) => x.s > 0)
++    .sort((a, b) => b.s - a.s || a.p.name.localeCompare(b.p.name))
++    .map((x) => x.p);
++
++  return [...ordered, ...rest].slice(0, limit);
++}
+-- 
+2.39.5
+

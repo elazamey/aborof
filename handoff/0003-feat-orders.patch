@@ -1,0 +1,189 @@
+From 5a7ba6953985d1b45f6f6f74d7944c47e78166de Mon Sep 17 00:00:00 2001
+From: elazamey <206169629+elazamey@users.noreply.github.com>
+Date: Fri, 18 Sep 2026 06:15:00 +0000
+Subject: [PATCH 3/6] =?UTF-8?q?feat(orders):=20=D8=AA=D8=AA=D8=A8=D8=B9=20?=
+ =?UTF-8?q?=D8=A7=D9=84=D8=B7=D9=84=D8=A8=D8=A7=D8=AA=20=D8=A7=D9=84=D8=A2?=
+ =?UTF-8?q?=D9=85=D9=86=20=D9=84=D9=84=D8=B9=D9=85=D9=84=D8=A7=D8=A1=20?=
+ =?UTF-8?q?=D8=AE=D9=84=D9=81=20=D8=B9=D9=84=D9=85=20=D9=85=D8=BA=D9=84?=
+ =?UTF-8?q?=D9=82=20=D8=A7=D9=81=D8=AA=D8=B1=D8=A7=D8=B6=D9=8A=D9=8B=D8=A7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+نقطة /api/orders/track يعمل برقم الطلب + آخر 4 أرقام من الهاتف معًا، ويرد
+بملخص مبهم (الحالة + أسماء الأصناف) بلا عنوان ولا هاتف كامل ولا أسعار، مع
+رسالة فشل موحّدة تمنع تعداد الطلبات. حد معدل مستقل (5/10د) وتسجيل محاولات
+فاشلة في admin_audit_log. العلم ENABLE_ORDER_TRACKING مغلق افتراضيًا.
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ src/app/api/orders/track/route.ts | 51 +++++++++++++++++++++++++++++
+ src/lib/orders.ts                 | 54 ++++++++++++++++++++++++++++++-
+ src/lib/validation/contracts.ts   | 17 ++++++++++
+ 3 files changed, 121 insertions(+), 1 deletion(-)
+ create mode 100644 src/app/api/orders/track/route.ts
+
+diff --git a/src/app/api/orders/track/route.ts b/src/app/api/orders/track/route.ts
+new file mode 100644
+index 0000000..d61b84d
+--- /dev/null
++++ b/src/app/api/orders/track/route.ts
+@@ -0,0 +1,51 @@
++import { NextResponse } from "next/server";
++import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
++import { db } from "@/lib/db";
++import { trackOrder } from "@/lib/orders";
++import { rateLimit } from "@/lib/rate-limit";
++import { trackOrderContract, firstZodIssue } from "@/lib/validation/contracts";
++import { redactSecrets } from "@/lib/errors";
++
++export const runtime = "nodejs";
++export const dynamic = "force-dynamic";
++
++const MAX_BODY_BYTES = 8_000;
++
++/** تتبع الطلبات للعملاء خلف علم ميزة مغلق افتراضيًا (ENABLE_ORDER_TRACKING). */
++export function isOrderTrackingEnabled(): boolean {
++  return process.env.ENABLE_ORDER_TRACKING === "true";
++}
++
++async function recordFailedAttempt(orderId: string): Promise<void> {
++  const c = db();
++  if (!c) return;
++  try {
++    await c.execute({
++      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
++      args: ["track_failed", "order", orderId, JSON.stringify({ reason: "mismatch" })],
++    });
++  } catch (e) {
++    console.error("track audit failed:", redactSecrets(String((e as Error)?.message ?? e)));
++  }
++}
++
++export const POST = apiHandler("/api/orders/track", async (request) => {
++  // حد معدل صارم مستقل لمنع تخمين أرقام الطلبات (5 محاولات / 10 دقائق).
++  const limit = await rateLimit(request, "order-tracking", 5, 10 * 60 * 1000);
++  if (!limit.ok) throw Errors.rateLimited(limit.retryAfter);
++
++  if (!isOrderTrackingEnabled()) throw Errors.notFound("تعذر العثور على الطلب");
++
++  const raw = await readJson(request, MAX_BODY_BYTES);
++  const parsed = trackOrderContract.safeParse(raw);
++  if (!parsed.success) throw Errors.validationFailed(firstZodIssue(parsed.error));
++
++  try {
++    const result = await trackOrder(parsed.data, true);
++    return NextResponse.json({ ok: true, ...result });
++  } catch (error) {
++    // رسالة الفشل واحدة دائمًا — لا يُكشف وجود الطلب من عدمه.
++    await recordFailedAttempt(parsed.data.id.trim());
++    throw Errors.notFound("تعذر العثور على الطلب");
++  }
++});
+diff --git a/src/lib/orders.ts b/src/lib/orders.ts
+index 1508f25..4d3fab9 100644
+--- a/src/lib/orders.ts
++++ b/src/lib/orders.ts
+@@ -3,7 +3,7 @@ import { db, ensureSchema } from "@/lib/db";
+ import { Errors } from "@/lib/errors";
+ import { calculateShipping } from "@/lib/shipping";
+ import { STORE, type Product } from "@/lib/seed";
+-import type { CreateOrderInput, OrderStatusInput } from "@/lib/validation/contracts";
++import type { CreateOrderInput, OrderStatusInput, TrackOrderInput } from "@/lib/validation/contracts";
+ 
+ export interface VerifiedItem {
+   id: string;
+@@ -129,3 +129,55 @@ export async function updateOrderStatus(input: OrderStatusInput): Promise<void>
+     throw error;
+   }
+ }
++
++/**
++ * تتبع طلب للعميل — بشدّ أمني مقصود (docs/ai/phase-3-ux-roadmap.md):
++ *  - يعمل فقط بعاملين معًا: رقم الطلب + آخر 4 أرقام من الهاتف.
++ *  - الإخراج مبهم: الحالة + ملخص أصناف بلا هاتف كامل ولا عنوان ولا أسعار مفصلة.
++ *  - رسالة الفشل واحدة لا تكشف وجود الطلب من عدمه (يمنع تعداد الطلبات).
++ * 
++ * يرمي `Errors.notFound` في كل حالات عدم التطابق برسالة موحّدة.
++ */
++export async function trackOrder(
++  input: TrackOrderInput & { phoneLast4: string },
++  isEnabled: boolean
++): Promise<{ id: string; status: string; items: { name: string; qty: number }[]; created_at: string }> {
++  if (!isEnabled) throw Errors.notFound("تعذر العثور على الطلب");
++
++  const c = db();
++  if (!c) throw Errors.notFound("تعذر العثور على الطلب");
++  await ensureSchema();
++
++  const r = await c.execute({
++    sql: "SELECT id, phone, items, status, created_at FROM orders WHERE id=?",
++    args: [input.id.trim()],
++  });
++  const row = r.rows[0] as
++    | { id?: unknown; phone?: unknown; items?: unknown; status?: unknown; created_at?: unknown }
++    | undefined;
++
++  // مقارنة زمنية ثابتة لآخر 4 أرقام — القيمة المتوقعة تُبنى بلا تمييز للوجود.
++  const actual = String(row?.phone ?? "");
++  const ok = row != null && actual.replace(/\D/g, "").slice(-4) === input.phoneLast4;
++  if (!ok) throw Errors.notFound("تعذر العثور على الطلب");
++
++  let items: { name: string; qty: number }[] = [];
++  try {
++    const parsed = JSON.parse(String(row?.items ?? "[]")) as unknown;
++    if (Array.isArray(parsed)) {
++      items = parsed
++        .filter((it): it is { name?: unknown; qty?: unknown } => Boolean(it) && typeof it === "object")
++        .map((it) => ({ name: String(it.name ?? "—"), qty: Number(it.qty ?? 1) }))
++        .slice(0, 10);
++    }
++  } catch {
++    items = [];
++  }
++
++  return {
++    id: String(row?.id ?? input.id.trim()),
++    status: String(row?.status ?? "جديد"),
++    items,
++    created_at: String(row?.created_at ?? ""),
++  };
++}
+diff --git a/src/lib/validation/contracts.ts b/src/lib/validation/contracts.ts
+index 93e5bc0..23d8a6b 100644
+--- a/src/lib/validation/contracts.ts
++++ b/src/lib/validation/contracts.ts
+@@ -105,6 +105,22 @@ export const orderStatusContract = z
+   })
+   .strict();
+ 
++/**
++ * عقد تتبع الطلب للعميل — بشدّ أمني مقصود: يأخذ رقم الطلب وآخر 4 أرقام من
++ * الهاتف معًا (لا يسمح بتعداد الطلبات برقم وحده). أي حالة عدم تطابق تُرجع
++ * رسالة موحّدة واحدة لا تكشف وجود الطلب من عدمه.
++ */
++export const trackOrderContract = z
++  .object({
++    id: trimmed(5, 100),
++    phoneLast4: z
++      .string()
++      .regex(/^\d{4}$/, "المطلوب آخر 4 أرقام من رقم الهاتف")
++      .transform((v) => v.replace(/\D/g, ""))
++      .refine((v) => v.length === 4, "المطلوب آخر 4 أرقام من رقم الهاتف"),
++  })
++  .strict();
++
+ export const chatMessageContract = z
+   .object({
+     role: z.enum(["user", "assistant"]),
+@@ -121,6 +137,7 @@ export const chatRequestContract = z
+ export type ProductUpsertInput = z.infer<typeof productUpsertContract>;
+ export type CreateOrderInput = z.infer<typeof createOrderContract>;
+ export type OrderStatusInput = z.infer<typeof orderStatusContract>;
++export type TrackOrderInput = z.infer<typeof trackOrderContract>;
+ export type ChatRequestInput = z.infer<typeof chatRequestContract>;
+ 
+ /** أول رسالة خطأ من zod بشكل مقروء عربيًا. */
+-- 
+2.39.5
+

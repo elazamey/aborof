@@ -1,0 +1,1159 @@
+diff --git a/.env.example b/.env.example
+index 91c2b13..aa40469 100644
+--- a/.env.example
++++ b/.env.example
+@@ -28,6 +28,16 @@ ENABLE_MCP_TOOLS=false
+ # MCP_TOOL_TIMEOUT_MS=4000
+ # MCP_MAX_RESULT_CHARS=4000
+ 
++# ===== ترتيب سلسلة التراجع (اختياري) =====
++# قائمة أسماء المزودين مفصولة بفواصل؛ الأسماء غير المعروفة تُتجاهل و`local` مثبّت
++# دائمًا في النهاية. غيابه يُبقي الترتيب التاريخي: gemini,groq,nvidia-nim,local.
++# AI_PROVIDER_ORDER=groq,gemini,nvidia-nim
++
++# ===== تتبع الطلبات للعملاء (اختياري) — مغلق افتراضيًا =====
++# لا تفتحه إلا بعد فحوص الصفين 13 و14 في DEPLOYMENT.md. يعمل برقم الطلب +
++# آخر 4 أرقام من الهاتف معًا، والرسالة موحّدة لا تكشف وجود الطلب من عدمه.
++ENABLE_ORDER_TRACKING=false
++
+ # ===== لوحة التحكم =====
+ # كلمة مرور الإدارة — سياسة موحدة: 12 حرفًا على الأقل.
+ ADMIN_PASSWORD=replace-with-a-long-random-password-at-least-12-chars
+diff --git a/DEPLOYMENT.md b/DEPLOYMENT.md
+index c48148e..947e9c8 100644
+--- a/DEPLOYMENT.md
++++ b/DEPLOYMENT.md
+@@ -32,6 +32,8 @@
+ | `DIAGNOSTICS_ENABLED` | Variable اختياري | `true` لتفعيل نقطة التشخيص (معطّل في الإنتاج افتراضيًا) |
+ | `DIAGNOSTICS_KEY` | Secret اختياري | مفتاح **مستقل** عن `ADMIN_SESSION_SECRET` لنقطة `/api/admin/diagnostics` |
+ | `CSP_ENFORCE` | Variable اختياري | `true` لتشديد CSP من وضع المراقبة إلى الحجب |
++| `ENABLE_ORDER_TRACKING` | Variable اختياري | `true` لفتح نقطة تتبع العملاء للطلبات `/api/orders/track`؛ **مغلق افتراضيًا** (لا يفتح إلا بعد فحوص الصفين 13 و14 في قائمة التحقق) |
++| `AI_PROVIDER_ORDER` | Variable اختياري | قائمة أسماء مزودين مفصولة بفواصل لضبط ترتيب السلسلة (مثلًا `groq,gemini,nvidia-nim`)؛ الأسماء غير المعروفة تُتجاهل و`local` يُثبَّت دائمًا في النهاية. غيابه يُبقي الترتيب التاريخي Gemini ← Groq ← NIM ← محلي |
+ | `VERCEL_DEPLOY_ENABLED` | Repository variable (أو Environment variable على `production`) | `true` بعد التأكد من الأسرار |
+ 
+ > تفاصيل المرحلة الثانية (الأعلام، الحدود، مصفوفة صفر كسر، التراجع) في `docs/ai/phase-2-nim-mcp.md`.
+@@ -73,6 +75,14 @@
+ | 4 | `POST /api/admin/login` بكلمة **خاطئة عمدًا** | `401` مع `{"error":"بيانات الدخول غير صحيحة"}` | راجع تفسير الخطوة 4 أدناه |
+ | 5 | `GET /cart` | `200` | مشكلة في صفحات العميل |
+ | 6 | `GET /api/admin/mcp/tools` | `404` بدون `ENABLE_MCP_TOOLS`، و`401` بدونه مع التفعيل | 404 = الطبقة مغلقة (السلوك الافتراضي)؛ 401 = الطبقة مفتوحة فعليًا وجلسة الإدارة مطلوبة |
++| 7 | على قاعدة Turso: `SELECT COUNT(*) FROM order_items;` | استعلام ناجح بلا خطأ «no such table» | إصلاح P0 لم يُفعَّل (راجع «إصلاح قاعدة البيانات P0» في نهاية الملف) |
++| 8 | على قاعدة Turso: `SELECT name FROM sqlite_master WHERE type='table' AND name='product_search';` | يظهر الصف `product_search` | هجرة `0002` (FTS5) لم تُطبَّق على البيئة الحيّة |
++| 9 | على قاعدة Turso: `SELECT COUNT(*) FROM product_search;` | يساوي `SELECT COUNT(*) FROM products;` | الفهرس غير متزامن مع الكتالوج؛ أعد نشرًا لتشغيل مزامنة التجهيز |
++| 10 | `POST /api/orders` بطلي مستخدِم تجريبي | `200 {ok:true,...}` وخفض المخزون وظهور `order_items` | فشل كتابة الطلب: راجع الربط `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` |
++| 11 | `POST /api/orders` ثانية بعد الخطوة 10 | `200` بلا أخطاء تكرار معرف أو فقدان أصناف | مشكلة في المعاملة المركّبة (خصم + طلب + أصناف) |
++| 12 | `POST /api/chat` بسؤال «منظف أرضيات» مع تفعيل `ENABLE_AI_AGENT` و`ENABLE_MCP_TOOLS` | رد يحمل بطاقات منتجات مطابقة | FTS5 أو طبقة الأدوات عاطلة؛ راجع سجل النشر |
++| 13 | `POST /api/orders/track` برقم الطلب من الخطوة 10 وآخر 4 أرقام من هاتفه **مع** `ENABLE_ORDER_TRACKING=true` | `200` مع `{ok:true,status:"جديد",items:[…]}` بلا هاتف كامل ولا عنوان | قناة التتبع عاطلة أو المعرّفات غير صحيحة |
++| 14 | `POST /api/orders/track` بنفس رقم الطلب وآخر 4 أرقام **خاطئة** | `404` بنفس رسالة الخطوة 13 («تعذر العثور على الطلب») حرفيًا | تسريب وجود/عدم وجود الطلب (غير مقبول — لا تكشِف الفرق للعميل) |
+ 
+ مثال على الخطوة 4 (نفّذها **مرة واحدة** — حد المعدل 8 محاولات لكل 10 دقائق):
+ 
+@@ -91,6 +101,14 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
+ > **لا تختبر بكلمة المرور الحقيقية عبر سطر أوامر أو شبكة غير موثوقة.**
+ > الاختبار بكلمة خاطئة كافٍ لإثبات الجاهزية، والدخول الفعلي يكون من صفحة `/admin` مباشرة.
+ 
++> **تفعيل تتبع الطلبات (الصفان 13–14):** لا يفتح `ENABLE_ORDER_TRACKING` إلا بعد اجتياز الصفين 13 و14 معًا — الأول يثبت أن التتبع يعمل للعميل الصحيح، والثاني يثبت أن الرسالة موحّدة ولا تكشف وجود الطلب من عدمه. أي فرق بين الرسالتين يعني تسريب تعداد، فأبقِ العلم مغلقًا.
++
++## إصلاح قاعدة البيانات P0 — بسط مسار `@/lib/db`
++
++كان هناك ملفان متنافسان: `src/lib/db.ts` (قديم، ينشئ الجداول وقت التشغيل **دون تشغيل الهجرات**) و`src/lib/db/index.ts` (حديث، يشغّل الهجرات المرقّمة). وبما أن محرّر TypeScript يحسم `@/lib/db` لملف `.ts` قبل المجلد `db/index.ts`، كانت مسارات الإنتاج تمر بالملف القديم فلا تُنشأ `order_items` أبدًا ← فشل إنشاء الطلبات في البيئة الحيّة (`no such table: order_items`).
++
++**الحسم:** حُذف `src/lib/db.ts` وأصبح `@/lib/db` يحل حصريًا إلى `db/index.ts` الذي يشغّل الهجرات (بما فيها `order_items` وقيودها). بعد الدمج تحقق عبر الصف 7 ثم الصفين 10–11 من الجدول أعلاه.
++
+ يمكن أيضًا تشغيل وظيفة **Production probe** من تبويب **Actions** للحصول على نتيجة الخطوة 4 من داخل GitHub (بدون أسرار، ومحاولة واحدة لكل تشغيل).
+ 
+ ## تشغيل محلي
+diff --git a/README.md b/README.md
+index 3e28375..dec0aa5 100644
+--- a/README.md
++++ b/README.md
+@@ -9,6 +9,9 @@
+ - 💬 **زر واتساب عائم** يرسل تفاصيل الطلب كاملة إلى `01095032221`
+ - 👩‍💼 **شات بوت سيليا** — يرد بالعامية المصرية اعتماداً على منتجات قاعدة البيانات (Gemini المجاني أو Groq المجاني، مع رد احتياطي ذكي بدون مفتاح)
+ - 🧠 **مزود ثالث اختياري (NVIDIA NIM)** و**طبقة أدوات محكومة** تعمل فقط عند تفعيلها صراحةً (`ENABLE_MCP_TOOLS`)، للقراءة فقط وبحدود مركزية معلنة — التفاصيل في [`docs/ai/phase-2-nim-mcp.md`](docs/ai/phase-2-nim-mcp.md)
++- 🔎 **بحث المنتجات عبر Turso FTS5** (فهرس `product_search` بهجرة `0002`) داخل أداة `search_products` والرد الاحتياطي، مع سقوط آمن لمطابقة الكلمات عند غياب دعم المحرك
++- 📦 **تتبع الطلبات للعملاء** (`/api/orders/track`) خلف علم `ENABLE_ORDER_TRACKING` المغلق افتراضيًا: رقم الطلب + آخر 4 أرقام من الهاتف معًا، وإخراج مبهم ورسالة موحّدة تمنع تعداد الطلبات
++- 🔧 **ترتيب سلسلة قابل للضبط** عبر `AI_PROVIDER_ORDER` (الترتيب الافتراضي Gemini ← Groq ← NIM ← محلي يبقى كما هو)
+ - 💬 **تجربة محادثة محسّنة:** اقتراحات سريعة، مؤشر «تكتب الآن…»، رسائل خطأ عربية مع زر إعادة محاولة، بطاقات منتجات داخل المحادثة بزر «أضف للسلة»، مشاركة الموقع للتوصيل، وإملاء صوتي في المتصفحات الداعمة
+ - 🗄️ **Turso** لتخزين المنتجات والطلبات والأسئلة الشائعة وسجل المحادثات
+ - 🔐 **لوحة تحكم** `/admin` لإضافة/تعديل/حذف المنتجات ومتابعة الطلبات
+diff --git a/src/app/api/orders/track/route.ts b/src/app/api/orders/track/route.ts
+new file mode 100644
+index 0000000..d61b84d
+--- /dev/null
++++ b/src/app/api/orders/track/route.ts
+@@ -0,0 +1,51 @@
++import { NextResponse } from "next/server";
++import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
++import { db } from "@/lib/db";
++import { trackOrder } from "@/lib/orders";
++import { rateLimit } from "@/lib/rate-limit";
++import { trackOrderContract, firstZodIssue } from "@/lib/validation/contracts";
++import { redactSecrets } from "@/lib/errors";
++
++export const runtime = "nodejs";
++export const dynamic = "force-dynamic";
++
++const MAX_BODY_BYTES = 8_000;
++
++/** تتبع الطلبات للعملاء خلف علم ميزة مغلق افتراضيًا (ENABLE_ORDER_TRACKING). */
++export function isOrderTrackingEnabled(): boolean {
++  return process.env.ENABLE_ORDER_TRACKING === "true";
++}
++
++async function recordFailedAttempt(orderId: string): Promise<void> {
++  const c = db();
++  if (!c) return;
++  try {
++    await c.execute({
++      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
++      args: ["track_failed", "order", orderId, JSON.stringify({ reason: "mismatch" })],
++    });
++  } catch (e) {
++    console.error("track audit failed:", redactSecrets(String((e as Error)?.message ?? e)));
++  }
++}
++
++export const POST = apiHandler("/api/orders/track", async (request) => {
++  // حد معدل صارم مستقل لمنع تخمين أرقام الطلبات (5 محاولات / 10 دقائق).
++  const limit = await rateLimit(request, "order-tracking", 5, 10 * 60 * 1000);
++  if (!limit.ok) throw Errors.rateLimited(limit.retryAfter);
++
++  if (!isOrderTrackingEnabled()) throw Errors.notFound("تعذر العثور على الطلب");
++
++  const raw = await readJson(request, MAX_BODY_BYTES);
++  const parsed = trackOrderContract.safeParse(raw);
++  if (!parsed.success) throw Errors.validationFailed(firstZodIssue(parsed.error));
++
++  try {
++    const result = await trackOrder(parsed.data, true);
++    return NextResponse.json({ ok: true, ...result });
++  } catch (error) {
++    // رسالة الفشل واحدة دائمًا — لا يُكشف وجود الطلب من عدمه.
++    await recordFailedAttempt(parsed.data.id.trim());
++    throw Errors.notFound("تعذر العثور على الطلب");
++  }
++});
+diff --git a/src/app/api/products/route.ts b/src/app/api/products/route.ts
+index 941654a..92ec485 100644
+--- a/src/app/api/products/route.ts
++++ b/src/app/api/products/route.ts
+@@ -3,6 +3,8 @@ import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
+ import { getProducts, db, ensureSchema } from "@/lib/db";
+ import { isAdminRequest } from "@/lib/auth";
+ import { productUpsertContract, firstZodIssue } from "@/lib/validation/contracts";
++import { upsertProductSearch, removeProductSearch } from "@/lib/search";
++import type { Product } from "@/lib/seed";
+ 
+ export const runtime = "nodejs";
+ export const dynamic = "force-dynamic";
+@@ -52,6 +54,23 @@ export const POST = apiHandler("/api/products/admin-post", async (request) => {
+       JSON.stringify({ name: p.name.trim(), price: p.price, stock: p.stock }),
+     ],
+   });
++  // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الكتابة الأساسية (سقوط آمن).
++  try {
++    const product: Product = {
++      id,
++      name: p.name.trim(),
++      description: (p.description ?? "").trim(),
++      price: p.price,
++      old_price: p.old_price,
++      category: (p.category ?? "").trim(),
++      image: p.image || "🧴",
++      stock: p.stock,
++      featured,
++    };
++    await upsertProductSearch(c, product);
++  } catch (e) {
++    console.error("search: fts5 upsert failed (fallback to keyword matching):", String((e as Error)?.message ?? e));
++  }
+   return NextResponse.json({ ok: true, id });
+ });
+ 
+@@ -69,5 +88,11 @@ export const DELETE = apiHandler("/api/products/admin-delete", async (request) =
+     sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
+     args: ["product_delete", "product", id, "{}"],
+   });
++  // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الحذف الأساسي (سقوط آمن).
++  try {
++    await removeProductSearch(c, id);
++  } catch (e) {
++    console.error("search: fts5 remove failed (fallback to keyword matching):", String((e as Error)?.message ?? e));
++  }
+   return NextResponse.json({ ok: true });
+ });
+diff --git a/src/lib/ai/agent-engine.ts b/src/lib/ai/agent-engine.ts
+index 5c2a39d..2be5a6d 100644
+--- a/src/lib/ai/agent-engine.ts
++++ b/src/lib/ai/agent-engine.ts
+@@ -1,6 +1,7 @@
+ import { redactSecrets } from "@/lib/errors";
+ import { metrics } from "@/lib/observability/metrics";
+ import { extractProductCards, type ProductCard } from "./cards";
++import { resolveProviderOrder, type ProviderName } from "./chain-order";
+ import { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
+ import { GeminiRestProvider } from "./providers/gemini-rest";
+ import { GroqProvider } from "./providers/groq";
+@@ -24,16 +25,31 @@ import type { AgentMessage, AgentOptions, AgentResult, AIAgentProvider } from ".
+  *
+  * يقبل المحرك قائمة مزودين اختيارية لحقن التبعيات في الاختبارات.
+  */
++
++/**
++ * يبني قائمة المزودين الافتراضية وفق الترتيب المطلوب (بيئة أو افتراضي).
++ * الرد المحلي مضمون دائمًا في النهاية عبر `resolveProviderOrder`.
++ */
++function buildDefaultProviders(): AIAgentProvider[] {
++  const pools: Record<ProviderName, AIAgentProvider> = {
++    gemini: new GeminiRestProvider(),
++    groq: new GroqProvider(),
++    "nvidia-nim": new NvidiaNimProvider(),
++    local: new LocalFallbackProvider(),
++  };
++  return resolveProviderOrder().map((name) => pools[name]);
++}
++
+ export class SmartAgentEngine {
+   private readonly providers: AIAgentProvider[];
+ 
+   constructor(providers?: AIAgentProvider[]) {
+-    this.providers = providers ?? [
+-      new GeminiRestProvider(),
+-      new GroqProvider(),
+-      new NvidiaNimProvider(),
+-      new LocalFallbackProvider(),
+-    ];
++    // عند حقن مزودين في الاختبارات يُحترَم ترتيبهم كما هو.
++    if (providers) {
++      this.providers = providers;
++      return;
++    }
++    this.providers = buildDefaultProviders();
+   }
+ 
+   /** يعالج الطلب ويعيد الرد مع اسم المزود الذي قدّمه (للمراقبة والشفافية). */
+diff --git a/src/lib/ai/chain-order.ts b/src/lib/ai/chain-order.ts
+new file mode 100644
+index 0000000..eebce8f
+--- /dev/null
++++ b/src/lib/ai/chain-order.ts
+@@ -0,0 +1,42 @@
++/**
++ * ترتيب سلسلة التراجع في المحرك الذكي.
++ *
++ * الترتيب الافتراضي ثابت تاريخيًا:
++ *   Gemini ← Groq ← NVIDIA NIM ← الرد المحلي.
++ *
++ * يمكن ضبطه اختياريًا دون كسر أي سلوك عبر `AI_PROVIDER_ORDER` (قائمة أسماء
++ * مفصولة بفواصل). القواعد صارمة وfail-closed:
++ *  - الأسماء غير المعروفة أو الفارغة تُتجاهل (لا منح ضمني).
++ *  - `local` مضمون دائمًا في نهاية السلسلة مهما كانت القائمة، لأنه الحلقة
++ *    الأخيرة التي تضمن ألا يصل خطأ 500 إلى المستخدم أبدًا.
++ *  - إن كانت القائمة الناتجة فارغة يُستخدم الترتيب الافتراضي حرفيًا.
++ */
++
++export const PROVIDER_NAMES = ["gemini", "groq", "nvidia-nim", "local"] as const;
++export type ProviderName = (typeof PROVIDER_NAMES)[number];
++
++const KNOWN = new Set<string>(PROVIDER_NAMES);
++
++export const DEFAULT_PROVIDER_ORDER: ProviderName[] = ["gemini", "groq", "nvidia-nim", "local"];
++
++/** يقرأ `AI_PROVIDER_ORDER` ويعيد ترتيبًا صالحًا مضمون النهاية المحلية. */
++export function resolveProviderOrder(
++  raw: string | undefined | null = process.env.AI_PROVIDER_ORDER
++): ProviderName[] {
++  const text = String(raw ?? "").trim();
++  if (text === "") return [...DEFAULT_PROVIDER_ORDER];
++
++  const requested = text
++    .split(",")
++    .map((part) => part.trim().toLowerCase())
++    .filter((part): part is ProviderName => KNOWN.has(part));
++
++  const ordered = requested.filter((name) => name !== "local");
++  if (ordered.length === 0) return [...DEFAULT_PROVIDER_ORDER];
++
++  // الرد المحلي دائمًا في النهاية مهما حدث.
++  return [...ordered, "local"];
++}
++
++/** اسم المتغير لأدوات التشخيص/التوثيق. */
++export const PROVIDER_ORDER_ENV = "AI_PROVIDER_ORDER";
+diff --git a/src/lib/ai/mcp/tools/store.ts b/src/lib/ai/mcp/tools/store.ts
+index 18b3c02..3f37a5d 100644
+--- a/src/lib/ai/mcp/tools/store.ts
++++ b/src/lib/ai/mcp/tools/store.ts
+@@ -1,5 +1,6 @@
+ import { z } from "zod";
+ import { getFaq, getProducts } from "@/lib/db";
++import { searchProductsFts } from "@/lib/search";
+ import { STORE } from "@/lib/seed";
+ import { GOVERNORATES, SHIPPING_RATES, calculateShipping } from "@/lib/shipping";
+ import type { McpTool, McpToolPolicy } from "../types";
+@@ -79,12 +80,9 @@ export const searchProductsTool: McpTool = {
+   async run(value) {
+     const { query, max_results } = value as { query: string; max_results?: number };
+     const limit = max_results ?? 3;
+-    const products = await getProducts();
+-    const hits = products
+-      .map((p) => ({ p, s: score(query, `${p.name} ${p.category} ${p.description}`) }))
+-      .filter((x) => x.s > 0)
+-      .sort((a, b) => b.s - a.s || a.p.name.localeCompare(b.p.name))
+-      .slice(0, limit);
++    // محرك FTS5 (Turso) أولًا، مع سقوط آمن داخلي إلى مطابقة الكلمات.
++    const products = await searchProductsFts(query, limit);
++    const hits = products.map((p) => ({ p, s: score(query, `${p.name} ${p.category} ${p.description}`) }));
+ 
+     if (hits.length === 0) {
+       return "لا يوجد منتج مطابق في المتجر. اقترح على العميل التواصل على واتساب أو وصف حاجة أخرى.";
+diff --git a/src/lib/ai/providers/local-fallback.ts b/src/lib/ai/providers/local-fallback.ts
+index a508c33..6f39eb0 100644
+--- a/src/lib/ai/providers/local-fallback.ts
++++ b/src/lib/ai/providers/local-fallback.ts
+@@ -1,4 +1,5 @@
+-import { getProducts, getFaq } from "@/lib/db";
++import { getFaq } from "@/lib/db";
++import { searchProductsFts } from "@/lib/search";
+ import { STORE } from "@/lib/seed";
+ import type { AgentMessage, AgentOptions, AIAgentProvider } from "../types";
+ 
+@@ -20,9 +21,9 @@ export class LocalFallbackProvider implements AIAgentProvider {
+   }
+ }
+ 
+-/** إجابة محلية بالكلمات المفتاحية من بيانات المتجر — نفس الخوارزمية التاريخية. */
++/** إجابة محلية من بيانات المتجر — البحث عبر FTS5 مع سقوط آمن للمطابقة الحرفية. */
+ export async function buildLocalAnswer(question: string): Promise<string> {
+-  const [products, faq] = await Promise.all([getProducts(), getFaq()]);
++  const faq = await getFaq();
+   const t = question.toLowerCase();
+   const words = t.split(/\s+/).filter((w) => w.length > 2);
+   const score = (s: string) => words.reduce((n, w) => n + (s.toLowerCase().includes(w) ? 1 : 0), 0);
+@@ -30,16 +31,12 @@ export async function buildLocalAnswer(question: string): Promise<string> {
+   const bestFaq = faq.map((f) => ({ f, s: score(f.question) })).sort((a, b) => b.s - a.s)[0];
+   if (bestFaq && bestFaq.s >= 1) return bestFaq.f.answer;
+ 
+-  const hits = products
+-    .map((p) => ({ p, s: score(`${p.name} ${p.category} ${p.description}`) }))
+-    .filter((x) => x.s > 0)
+-    .sort((a, b) => b.s - a.s)
+-    .slice(0, 3);
++  const hits = (await searchProductsFts(question, 3)) as { name: string; price: number }[];
+   if (hits.length)
+     return (
+       "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n" +
+-      hits.map((h) => `• ${h.p.name} — ${h.p.price} جنيه`).join("\n") +
+-      `\n\nتقدر تضيفها للسلة وتكمل الطلب، والدفع فودافون كاش على ${STORE.vodafoneCash} أو عند الاستلام.`
++      hits.map((h) => `• ${h.name} — ${h.price} جنيه`).join("\n") +
++      `\n\nتقدر تضيفهم للسلة وتكمل الطلب، والدفع فودافون كاش على ${STORE.vodafoneCash} أو عند الاستلام.`
+     );
+ 
+   return `أهلاً بحضرتك في ${STORE.name} 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على ${STORE.phone}.`;
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+deleted file mode 100644
+index 47e8aae..0000000
+--- a/src/lib/db.ts
++++ /dev/null
+@@ -1,163 +0,0 @@
+-import { createClient, type Client } from "@libsql/client";
+-import { SEED_PRODUCTS, type Product } from "./seed";
+-
+-let _client: Client | null = null;
+-let _ready: Promise<void> | null = null;
+-
+-export function hasDB() {
+-  return Boolean(process.env.TURSO_DATABASE_URL);
+-}
+-
+-export function db(): Client | null {
+-  if (!hasDB()) return null;
+-  if (!_client) {
+-    _client = createClient({
+-      url: process.env.TURSO_DATABASE_URL as string,
+-      authToken: process.env.TURSO_AUTH_TOKEN,
+-    });
+-  }
+-  return _client;
+-}
+-
+-/** إنشاء الجداول وتعبئتها أول مرة (يعمل تلقائياً) */
+-export async function ensureSchema() {
+-  const c = db();
+-  if (!c) return;
+-  if (_ready) return _ready;
+-  _ready = (async () => {
+-    await c.batch(
+-      [
+-        `CREATE TABLE IF NOT EXISTS products (
+-          id TEXT PRIMARY KEY,
+-          name TEXT NOT NULL,
+-          description TEXT DEFAULT '',
+-          price REAL NOT NULL,
+-          old_price REAL,
+-          category TEXT DEFAULT '',
+-          image TEXT DEFAULT '🧴',
+-          stock INTEGER DEFAULT 0,
+-          featured INTEGER DEFAULT 0,
+-          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+-        )`,
+-        `CREATE TABLE IF NOT EXISTS orders (
+-          id TEXT PRIMARY KEY,
+-          customer TEXT NOT NULL,
+-          phone TEXT NOT NULL,
+-          address TEXT DEFAULT '',
+-          governorate TEXT DEFAULT '',
+-          items TEXT NOT NULL,
+-          total REAL NOT NULL,
+-          shipping_fee REAL DEFAULT 0,
+-          payment TEXT DEFAULT 'vodafone_cash',
+-          transfer_ref TEXT DEFAULT '',
+-          receipt_url TEXT DEFAULT '',
+-          status TEXT DEFAULT 'جديد',
+-          note TEXT DEFAULT '',
+-          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+-        )`,
+-        `CREATE TABLE IF NOT EXISTS faq (
+-          id INTEGER PRIMARY KEY AUTOINCREMENT,
+-          question TEXT NOT NULL,
+-          answer TEXT NOT NULL
+-        )`,
+-        `CREATE TABLE IF NOT EXISTS chat_logs (
+-          id INTEGER PRIMARY KEY AUTOINCREMENT,
+-          question TEXT, answer TEXT,
+-          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+-        )`,
+-        `CREATE TABLE IF NOT EXISTS admin_audit_log (
+-          id INTEGER PRIMARY KEY AUTOINCREMENT,
+-          action TEXT NOT NULL,
+-          entity TEXT NOT NULL,
+-          entity_id TEXT DEFAULT '',
+-          details TEXT DEFAULT '',
+-          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+-        )`,
+-      ],
+-      "write"
+-    );
+-
+-    const orderColumns = await c.execute("PRAGMA table_info(orders)");
+-    const existingOrderColumns = new Set(orderColumns.rows.map((row) => String((row as { name?: string }).name)));
+-    for (const [name, definition] of Object.entries({ governorate: "TEXT DEFAULT ''", shipping_fee: "REAL DEFAULT 0", transfer_ref: "TEXT DEFAULT ''", receipt_url: "TEXT DEFAULT ''" })) {
+-      if (!existingOrderColumns.has(name)) await c.execute(`ALTER TABLE orders ADD COLUMN ${name} ${definition}`);
+-    }
+-
+-    const cnt = await c.execute("SELECT COUNT(*) AS n FROM products");
+-    if (Number(cnt.rows[0].n) === 0) {
+-      await c.batch(
+-        SEED_PRODUCTS.map((p) => ({
+-          sql: `INSERT INTO products (id,name,description,price,old_price,category,image,stock,featured)
+-                VALUES (?,?,?,?,?,?,?,?,?)`,
+-          args: [
+-            p.id, p.name, p.description, p.price, p.old_price ?? null,
+-            p.category, p.image, p.stock, p.featured ?? 0,
+-          ],
+-        })),
+-        "write"
+-      );
+-    }
+-
+-    const f = await c.execute("SELECT COUNT(*) AS n FROM faq");
+-    if (Number(f.rows[0].n) === 0) {
+-      const faqs: [string, string][] = [
+-        ["ما هي طرق الدفع المتاحة؟", "الدفع عن طريق فودافون كاش على رقم 01095032221، أو الدفع عند الاستلام داخل القاهرة والجيزة."],
+-        ["كم مدة التوصيل؟", "من 1 إلى 3 أيام عمل داخل القاهرة والجيزة، ومن 2 إلى 5 أيام لباقي المحافظات."],
+-        ["كم تكلفة الشحن؟", "الشحن 50 جنيه، ومجاني للطلبات فوق 1000 جنيه."],
+-        ["هل يوجد بيع بالجملة؟", "نعم، لدينا أسعار خاصة للجملة وللشركات وشركات النظافة، تواصل معنا واتساب على 01095032221."],
+-        ["هل يمكن استبدال المنتج؟", "نعم، الاستبدال أو الاسترجاع خلال 14 يوم بشرط أن يكون المنتج بحالته وبعبوته الأصلية."],
+-        ["ما هي مواعيد العمل؟", "من السبت إلى الخميس من 10 صباحاً حتى 10 مساءً، والجمعة من 2 ظهراً حتى 10 مساءً."],
+-      ];
+-      await c.batch(
+-        faqs.map(([q, a]) => ({ sql: "INSERT INTO faq (question,answer) VALUES (?,?)", args: [q, a] })),
+-        "write"
+-      );
+-    }
+-  })();
+-  return _ready;
+-}
+-
+-/** تحويل صفوف libsql إلى كائنات JS عادية حتى تُمرَّر بأمان لمكونات العميل */
+-function toPlain<T>(rows: unknown[]): T[] {
+-  return rows.map((r) => ({ ...(r as object) })) as T[];
+-}
+-
+-export async function getProducts(): Promise<Product[]> {
+-  const c = db();
+-  if (!c) return SEED_PRODUCTS;
+-  try {
+-    await ensureSchema();
+-    const r = await c.execute("SELECT * FROM products ORDER BY featured DESC, rowid ASC");
+-    return toPlain<Product>(r.rows).map((p) => ({
+-      ...p,
+-      price: Number(p.price),
+-      old_price: p.old_price == null ? null : Number(p.old_price),
+-      stock: Number(p.stock),
+-    }));
+-  } catch (e) {
+-    console.error("DB error, using seed:", e);
+-    return SEED_PRODUCTS;
+-  }
+-}
+-
+-export async function getProduct(id: string): Promise<Product | null> {
+-  const all = await getProducts();
+-  return all.find((p) => String(p.id) === String(id)) ?? null;
+-}
+-
+-export async function getFaq(): Promise<{ question: string; answer: string }[]> {
+-  const c = db();
+-  const fallback = [
+-    { question: "طرق الدفع", answer: "فودافون كاش على 01095032221 أو الدفع عند الاستلام." },
+-    { question: "الشحن", answer: "50 جنيه، ومجاني فوق 1000 جنيه. التوصيل خلال 1-3 أيام." },
+-    { question: "الجملة", answer: "أسعار خاصة للجملة — تواصل واتساب 01095032221." },
+-  ];
+-  if (!c) return fallback;
+-  try {
+-    await ensureSchema();
+-    const r = await c.execute("SELECT question, answer FROM faq");
+-    return toPlain<{ question: string; answer: string }>(r.rows);
+-  } catch {
+-    return fallback;
+-  }
+-}
+diff --git a/src/lib/db/index.ts b/src/lib/db/index.ts
+index 6a57fda..7f67110 100644
+--- a/src/lib/db/index.ts
++++ b/src/lib/db/index.ts
+@@ -6,12 +6,14 @@ import { metrics } from "@/lib/observability/metrics";
+ 
+ let _client: Client | null = null;
+ let _ready: Promise<void> | null = null;
++let _clientOverride: Client | null = null;
+ 
+ export function hasDB() {
+-  return Boolean(process.env.TURSO_DATABASE_URL);
++  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL);
+ }
+ 
+ export function db(): Client | null {
++  if (_clientOverride) return _clientOverride;
+   if (!hasDB()) return null;
+   if (!_client) {
+     _client = createClient({
+@@ -22,6 +24,23 @@ export function db(): Client | null {
+   return _client;
+ }
+ 
++/**
++ * حقن عميل مخصص للاختبارات (يُقرأ قبل مدخل البيئة). يُستخدم مع عميل
++ * ملف مؤقت كي تكون كل خطوات الاختبار على نفس حالة قاعدة البيانات.
++ */
++export function setDbClientForTest(client: Client): void {
++  _clientOverride = client;
++  _ready = null;
++}
++
++/**
++ * تجهيز قاعدة البيانات عبر العميل المحقون (إن وُجد) — يُستخدم في اختبارات
++ * التكامل لتشغيل الهجرات على عميل ملف مؤقت بالضبط كما يعمل في الإنتاج.
++ */
++export async function migrateDbSchemaForTest(client: Client): Promise<void> {
++  await runMigrations(client);
++}
++
+ /**
+  * تجهيز قاعدة البيانات: هجرات مُرقّمة بدل إنشاء الجداول وقت التشغيل،
+  * ثم تعبئة البيانات الأولية عند الفراغ فقط.
+diff --git a/src/lib/db/migrate.ts b/src/lib/db/migrate.ts
+index a08fffd..07c4234 100644
+--- a/src/lib/db/migrate.ts
++++ b/src/lib/db/migrate.ts
+@@ -1,5 +1,6 @@
+ import { createHash } from "node:crypto";
+ import type { Client } from "@libsql/client";
++import { ensureProductSearchInSync } from "@/lib/search";
+ 
+ /**
+  * مشغّل هجرات مُرقّمة (versioned migrations).
+@@ -15,13 +16,15 @@ export interface Migration {
+ 
+ /**
+  * الهجرات مضمّنة كوحدات TS حتى تعمل مع تجميع Next.js وتحت الاختبارات.
+- * الملف المرجعي المُوثَّق هو `migrations/0001_initial.sql`؛ وملك الـ .ts
++ * الملف المرجعي المُوثَّق هو `migrations/0001_initial.sql`؛ وملف الـ .ts
+  * يُولَّد منه (انظر scripts) ويحمل نفس النص للتنفيذ.
+  */
+ import { migrationSql as migration0001Sql } from "./migrations/0001_initial";
++import { migrationSql as migration0002Sql } from "./migrations/0002_search_fts5";
+ 
+ export const MIGRATIONS: Migration[] = [
+   { version: "0001", name: "initial", sql: migration0001Sql },
++  { version: "0002", name: "search_fts5", sql: migration0002Sql },
+ ];
+ 
+ function checksum(sql: string): string {
+@@ -50,7 +53,14 @@ async function ensureColumns(client: Client, sql: string) {
+   }
+ }
+ 
++/**
++ * يُشغّل الهجرات المتبقية. بعد النجاح يضمن بناء فهرس FTS5 (هجرة 0002) وحال
++ * عدم توفره على المحرك يسقط بصمت دون إفشال التجهيز. الأعمدة الناقصة للجداول
++ * القائمة تُعالَج بعد الهجرة (idempotent).
++ */
+ export async function runMigrations(client?: Client): Promise<{ applied: string[] }> {
++  // استيراد كسول: يكسر دورة الاستيراد مع وحدة قاعدة البيانات ويسمح بحقن
++  // عميل في الاختبارات دون تهيئة مدخل البيئة.
+   const { db } = await import("./index");
+   const c = client ?? db();
+   if (!c) return { applied: [] };
+@@ -103,5 +113,8 @@ export async function runMigrations(client?: Client): Promise<{ applied: string[
+   // الأعمدة الناقصة للجداول القديمة تُعالَج بعد الهجرة (idempotent).
+   await ensureColumns(c, MIGRATIONS.map((m) => m.sql).join("\n"));
+ 
++  // ضمان مزامنة فهرس البحث (هجرة 0002) مع الكتالوج بعد أي تجهيز.
++  await ensureProductSearchInSync(c);
++
+   return { applied: newlyApplied };
+ }
+diff --git a/src/lib/db/migrations/0002_search_fts5.sql b/src/lib/db/migrations/0002_search_fts5.sql
+new file mode 100644
+index 0000000..0a63afc
+--- /dev/null
++++ b/src/lib/db/migrations/0002_search_fts5.sql
+@@ -0,0 +1,21 @@
++-- 0002_search_fts5: فهرس نصي كامل لمنتجات المتجر عبر محرك FTS5.
++--
++-- ينشئ الجدول الافتراضي product_search ويعبئه من جدول products إن كانت
++-- قاعدة البيانات قائمة بالفعل (ترقية بلا فقدان). مزامنة الفهرس بعد هذه
++-- الهجرة تتم في طبقة التطبيق (src/lib/search.ts) عند كل كتابة منتج، مع
++-- سقوط آمن إلى مطابقة الكلمات المفتاحية عند غياب دعم FTS5 على المحرك.
++--
++-- ملاحظات:
++--  - العمود id مُعلَّم UNINDEXED حتى نستعيد معرّف المنتج الأصلي للربط بالكتالوج.
++--  - tokenize = 'unicode61' يمنح مطابقة عربية بكلمات مستقلة مفصولة بالمسافات.
++CREATE VIRTUAL TABLE IF NOT EXISTS product_search USING fts5(
++  id UNINDEXED,
++  name,
++  description,
++  category,
++  tokenize = 'unicode61'
++);
++
++INSERT INTO product_search(id, name, description, category)
++SELECT id, name, description, category FROM products
++WHERE NOT EXISTS (SELECT 1 FROM product_search WHERE product_search.rowid = products.rowid);
+diff --git a/src/lib/db/migrations/0002_search_fts5.ts b/src/lib/db/migrations/0002_search_fts5.ts
+new file mode 100644
+index 0000000..c95e80c
+--- /dev/null
++++ b/src/lib/db/migrations/0002_search_fts5.ts
+@@ -0,0 +1,25 @@
++// مُولَّد آليًا من ملف الهجرة المرجعي — لا تعدّله يدويًا.
++export const migrationSql = `
++-- 0002_search_fts5: فهرس نصي كامل لمنتجات المتجر عبر محرك FTS5.
++--
++-- ينشئ الجدول الافتراضي product_search ويعبئه من جدول products إن كانت
++-- قاعدة البيانات قائمة بالفعل (ترقية بلا فقدان). مزامنة الفهرس بعد هذه
++-- الهجرة تتم في طبقة التطبيق (src/lib/search.ts) عند كل كتابة منتج، مع
++-- سقوط آمن إلى مطابقة الكلمات المفتاحية عند غياب دعم FTS5 على المحرك.
++--
++-- ملاحظات:
++--  - العمود id مُعلَّم UNINDEXED حتى نستعيد معرّف المنتج الأصلي للربط بالكتالوج.
++--  - tokenize = 'unicode61' يمنح مطابقة عربية بكلمات مستقلة مفصولة بالمسافات.
++CREATE VIRTUAL TABLE IF NOT EXISTS product_search USING fts5(
++  id UNINDEXED,
++  name,
++  description,
++  category,
++  tokenize = 'unicode61'
++);
++
++INSERT INTO product_search(id, name, description, category)
++SELECT id, name, description, category FROM products
++WHERE NOT EXISTS (SELECT 1 FROM product_search WHERE product_search.rowid = products.rowid);
++
++` as string;
+diff --git a/src/lib/orders.ts b/src/lib/orders.ts
+index 1508f25..cdf251d 100644
+--- a/src/lib/orders.ts
++++ b/src/lib/orders.ts
+@@ -3,7 +3,7 @@ import { db, ensureSchema } from "@/lib/db";
+ import { Errors } from "@/lib/errors";
+ import { calculateShipping } from "@/lib/shipping";
+ import { STORE, type Product } from "@/lib/seed";
+-import type { CreateOrderInput, OrderStatusInput } from "@/lib/validation/contracts";
++import type { CreateOrderInput, OrderStatusInput, TrackOrderInput } from "@/lib/validation/contracts";
+ 
+ export interface VerifiedItem {
+   id: string;
+@@ -129,3 +129,55 @@ export async function updateOrderStatus(input: OrderStatusInput): Promise<void>
+     throw error;
+   }
+ }
++
++/**
++ * تتبع طلب للعميل — بشدّ أمني مقصود (docs/ai/phase-3-ux-roadmap.md):
++ *  - يعمل فقط بعاملين معًا: رقم الطلب + آخر 4 أرقام من الهاتف.
++ *  - الإخراج مبهم: الحالة + ملخص أصناف بلا هاتف كامل ولا عنوان ولا أسعار مفصلة.
++ *  - رسالة الفشل واحدة لا تكشف وجود الطلب من عدمه (يمنع تعداد الطلبات).
++ *
++ * يرمي `Errors.notFound` في كل حالات عدم التطابق برسالة موحّدة.
++ */
++export async function trackOrder(
++  input: TrackOrderInput & { phoneLast4: string },
++  isEnabled: boolean
++): Promise<{ id: string; status: string; items: { name: string; qty: number }[]; created_at: string }> {
++  if (!isEnabled) throw Errors.notFound("تعذر العثور على الطلب");
++
++  const c = db();
++  if (!c) throw Errors.notFound("تعذر العثور على الطلب");
++  await ensureSchema();
++
++  const r = await c.execute({
++    sql: "SELECT id, phone, items, status, created_at FROM orders WHERE id=?",
++    args: [input.id.trim()],
++  });
++  const row = r.rows[0] as
++    | { id?: unknown; phone?: unknown; items?: unknown; status?: unknown; created_at?: unknown }
++    | undefined;
++
++  // مقارنة زمنية ثابتة لآخر 4 أرقام — القيمة المتوقعة تُبنى بلا تمييز للوجود.
++  const actual = String(row?.phone ?? "");
++  const ok = row != null && actual.replace(/\D/g, "").slice(-4) === input.phoneLast4;
++  if (!ok) throw Errors.notFound("تعذر العثور على الطلب");
++
++  let items: { name: string; qty: number }[] = [];
++  try {
++    const parsed = JSON.parse(String(row?.items ?? "[]")) as unknown;
++    if (Array.isArray(parsed)) {
++      items = parsed
++        .filter((it): it is { name?: unknown; qty?: unknown } => Boolean(it) && typeof it === "object")
++        .map((it) => ({ name: String(it.name ?? "—"), qty: Number(it.qty ?? 1) }))
++        .slice(0, 10);
++    }
++  } catch {
++    items = [];
++  }
++
++  return {
++    id: String(row?.id ?? input.id.trim()),
++    status: String(row?.status ?? "جديد"),
++    items,
++    created_at: String(row?.created_at ?? ""),
++  };
++}
+diff --git a/src/lib/search.ts b/src/lib/search.ts
+new file mode 100644
+index 0000000..c7adf13
+--- /dev/null
++++ b/src/lib/search.ts
+@@ -0,0 +1,134 @@
++import type { Client } from "@libsql/client";
++import { db, getProducts } from "@/lib/db";
++import type { Product } from "@/lib/seed";
++
++/**
++ * بحث منتجات المتجر بمحرك FTS5 (ضمن Turso/libSQL) مع سقوط آمن:
++ *
++ *  - المطابقة تتم عبر الجدول الافتراضي `product_search` (هجرة 0002).
++ *  - عند أي خطأ في FTS5 (محرك لا يدعمه، فهرس غير متزامن، استعلام غير صالح)
++ *    نرجع لمطابقة الكلمات المفتاحية المحلية — لا يصل أي خطأ للمستخدم.
++ *  - الاستعلام يُبنى من كلمات آمنة داخل علامات اقتباس، ولا يُمرَّر نص العميل
++ *    خامًا إلى تعبير MATCH (يمنع أخطاء الصياغة والحقن داخل استعلام FTS).
++ */
++
++const FTS_TABLE = "product_search";
++
++/** يحوّل نص استعلام إلى تعبير FTS5 آمن: كلمات مستقلة مقتبسة ومفصولة بـ OR. */
++export function buildFtsMatch(query: string): string {
++  const tokens = query
++    .split(/\s+/)
++    .map((t) => t.replace(/["*():^\-]/g, "").trim())
++    .filter((t) => t.length >= 1);
++  if (tokens.length === 0) return "";
++  const phrase = tokens
++    .map((t) => `"${t.replace(/"/g, '""')}"`)
++    .join(" OR ");
++  return phrase.slice(0, 200);
++}
++
++function toPlain(rows: unknown[]) {
++  return rows.map((r) => ({ ...(r as object) }));
++}
++
++/** معرّفات المنتجات المطابقة مرتبة حسب صلة FTS5 (تستخدم عميلًا محقونًا في الاختبارات). */
++export async function ftsProductIds(client: Client, query: string, limit: number): Promise<string[]> {
++  const match = buildFtsMatch(query);
++  if (!match) return [];
++  const r = await client.execute({
++    sql: `SELECT id FROM ${FTS_TABLE} WHERE ${FTS_TABLE} MATCH ? ORDER BY rank LIMIT ?`,
++    args: [match, limit],
++  });
++  return toPlain(r.rows).map((row) => String((row as { id?: unknown }).id));
++}
++
++/** هل الفهرس متزامن مع جدول المنتجات؟ (عدد الصفوف كإشارة كافية لمتجر صغير). */
++async function isInSync(client: Client): Promise<boolean> {
++  const products = await client.execute("SELECT COUNT(*) AS n FROM products");
++  const idx = await client.execute(`SELECT COUNT(*) AS n FROM ${FTS_TABLE}`);
++  return Number(products.rows[0].n) === Number(idx.rows[0].n);
++}
++
++/** يعيد بناء الفهرس بالكامل — يُستدعى مرة عند التجهيز وعند إضافة/حذف منتج. */
++export async function reindexProductSearch(client: Client, products?: Product[]): Promise<void> {
++  await client.execute(`DELETE FROM ${FTS_TABLE}`);
++  const list = products ?? toPlain((await client.execute("SELECT * FROM products")).rows) as Product[];
++  if (list.length === 0) return;
++  const stmts = list.map((p) => ({
++    sql: `INSERT INTO ${FTS_TABLE} (id, name, description, category) VALUES (?,?,?,?)`,
++    args: [String(p.id), p.name, p.description, p.category],
++  }));
++  await client.batch(stmts, "write");
++}
++
++/** يضمن بقاء الفهرس متزامنًا بعد التجهيز (يُبنى مرة واحدة عند الحاجة). */
++export async function ensureProductSearchInSync(client: Client): Promise<void> {
++  try {
++    if (!(await isInSync(client))) await reindexProductSearch(client);
++  } catch (e) {
++    // غياب دعم FTS5 يجب ألا يوقف التطبيق — البحث يرجع لمطابقة الكلمات.
++    console.error("search: fts5 sync skipped:", String((e as Error)?.message ?? e));
++  }
++}
++
++/** يضيف/يحدّث منتجًا في الفهرس (أمر 'delete' الخاص في FTS5 ثم الإدراج). */
++export async function upsertProductSearch(client: Client, product: Product): Promise<void> {
++  await client.batch(
++    [
++      {
++        sql: `INSERT INTO ${FTS_TABLE} (${FTS_TABLE}, id, name, description, category) VALUES ('delete', ?, ?, ?, ?)`,
++        args: [String(product.id), product.name, product.description, product.category],
++      },
++      {
++        sql: `INSERT INTO ${FTS_TABLE} (id, name, description, category) VALUES (?,?,?,?)`,
++        args: [String(product.id), product.name, product.description, product.category],
++      },
++    ],
++    "write"
++  );
++}
++
++/** يزيل منتجًا من الفهرس (أمر 'delete' الخاص في FTS5). */
++export async function removeProductSearch(client: Client, id: string): Promise<void> {
++  await client.execute({
++    sql: `INSERT INTO ${FTS_TABLE} (${FTS_TABLE}, id, name, description, category) VALUES ('delete', ?, ?, ?, ?)`,
++    args: [id, "", "", ""],
++  });
++}
++
++/**
++ * الواجهة العليا: بحث مرتّب بالصلة. يعيد منتجات الكتالوج الكاملة المطابقة
++ * للاستعلام، مع سقوط آمن إلى مطابقة الكلمات المفتاحية عند تعذر FTS5.
++ */
++export async function searchProductsFts(query: string, limit = 3): Promise<Product[]> {
++  const products = await getProducts();
++  if (products.length === 0) return [];
++
++  const c = db();
++  const byId = new Map(products.map((p) => [String(p.id), p]));
++  const order: string[] = [];
++
++  if (c) {
++    try {
++      order.push(...(await ftsProductIds(c, query, limit)));
++    } catch (e) {
++      // فهرس ناقص أو محرك بلا FTS5 — نُكمل بالمطابقة المحلية بهدوء.
++      console.error("search: fts5 query failed, using keyword fallback:", String((e as Error)?.message ?? e));
++    }
++  }
++
++  const ordered = order.filter((id) => byId.has(id)).map((id) => byId.get(id) as Product);
++
++  // إن لم يُجد الفهرس نتائج كافية نكمّل بالمطابقة المحلية حسب الكلمات.
++  const t = query.toLowerCase();
++  const words = t.split(/\s+/).filter((w) => w.length > 2);
++  const score = (s: string) => words.reduce((n, w) => n + (s.toLowerCase().includes(w) ? 1 : 0), 0);
++  const rest = products
++    .filter((p) => !order.includes(String(p.id)))
++    .map((p) => ({ p, s: words.length === 0 ? 0 : score(`${p.name} ${p.category} ${p.description}`) }))
++    .filter((x) => x.s > 0)
++    .sort((a, b) => b.s - a.s || a.p.name.localeCompare(b.p.name))
++    .map((x) => x.p);
++
++  return [...ordered, ...rest].slice(0, limit);
++}
+diff --git a/src/lib/validation/contracts.ts b/src/lib/validation/contracts.ts
+index 93e5bc0..23d8a6b 100644
+--- a/src/lib/validation/contracts.ts
++++ b/src/lib/validation/contracts.ts
+@@ -105,6 +105,22 @@ export const orderStatusContract = z
+   })
+   .strict();
+ 
++/**
++ * عقد تتبع الطلب للعميل — بشدّ أمني مقصود: يأخذ رقم الطلب وآخر 4 أرقام من
++ * الهاتف معًا (لا يسمح بتعداد الطلبات برقم وحده). أي حالة عدم تطابق تُرجع
++ * رسالة موحّدة واحدة لا تكشف وجود الطلب من عدمه.
++ */
++export const trackOrderContract = z
++  .object({
++    id: trimmed(5, 100),
++    phoneLast4: z
++      .string()
++      .regex(/^\d{4}$/, "المطلوب آخر 4 أرقام من رقم الهاتف")
++      .transform((v) => v.replace(/\D/g, ""))
++      .refine((v) => v.length === 4, "المطلوب آخر 4 أرقام من رقم الهاتف"),
++  })
++  .strict();
++
+ export const chatMessageContract = z
+   .object({
+     role: z.enum(["user", "assistant"]),
+@@ -121,6 +137,7 @@ export const chatRequestContract = z
+ export type ProductUpsertInput = z.infer<typeof productUpsertContract>;
+ export type CreateOrderInput = z.infer<typeof createOrderContract>;
+ export type OrderStatusInput = z.infer<typeof orderStatusContract>;
++export type TrackOrderInput = z.infer<typeof trackOrderContract>;
+ export type ChatRequestInput = z.infer<typeof chatRequestContract>;
+ 
+ /** أول رسالة خطأ من zod بشكل مقروء عربيًا. */
+diff --git a/tests/chain-order.test.ts b/tests/chain-order.test.ts
+new file mode 100644
+index 0000000..84f8c2f
+--- /dev/null
++++ b/tests/chain-order.test.ts
+@@ -0,0 +1,52 @@
++import { test, describe, beforeEach, afterEach } from "node:test";
++import assert from "node:assert/strict";
++import {
++  DEFAULT_PROVIDER_ORDER,
++  resolveProviderOrder,
++  PROVIDER_ORDER_ENV,
++} from "../src/lib/ai/chain-order";
++
++/**
++ * ترتيب سلسلة التراجع — حراسة صارمة fail-closed:
++ *  - غياب `AI_PROVIDER_ORDER` ⇒ الترتيب التاريخي الافتراضي كما هو.
++ *  - الأسماء غير المعروفة تُتجاهل، ولا تُمنح أي ترقية ضمنية.
++ *  - `local` مضمون دائمًا في النهاية مهما كانت القائمة (لا مسار يصل فيه خطأ
++ *    500 إلى المستخدم).
++ *  - قائمة فارغة أو فاسدة بالكامل ⇒ العودة للترتيب الافتراضي حرفيًا.
++ */
++
++beforeEach(() => {
++  delete process.env[PROVIDER_ORDER_ENV];
++});
++afterEach(() => {
++  delete process.env[PROVIDER_ORDER_ENV];
++});
++
++describe("provider chain order resolution", () => {
++  test("absent env → historical default order", () => {
++    assert.deepEqual(resolveProviderOrder(undefined), [...DEFAULT_PROVIDER_ORDER]);
++    assert.ok(DEFAULT_PROVIDER_ORDER[0] === "gemini");
++    assert.ok(DEFAULT_PROVIDER_ORDER[DEFAULT_PROVIDER_ORDER.length - 1] === "local");
++  });
++
++  test("known names reorder; local always stays last", () => {
++    const order = resolveProviderOrder("groq,gemini");
++    assert.deepEqual(order, ["groq", "gemini", "local"]);
++  });
++
++  test("unknown names are ignored (fail-closed)", () => {
++    process.env[PROVIDER_ORDER_ENV] = "vendor-locked,gemini,xyz";
++    assert.deepEqual(resolveProviderOrder(), ["gemini", "local"]);
++  });
++
++  test("all-invalid list falls back to the default order", () => {
++    process.env[PROVIDER_ORDER_ENV] = "bad-one,another-bad";
++    assert.deepEqual(resolveProviderOrder(), [...DEFAULT_PROVIDER_ORDER]);
++  });
++
++  test("local can never be dropped from the tail", () => {
++    process.env[PROVIDER_ORDER_ENV] = "gemini,groq,nvidia-nim";
++    const order = resolveProviderOrder();
++    assert.equal(order[order.length - 1], "local");
++  });
++});
+diff --git a/tests/order-tracking.test.ts b/tests/order-tracking.test.ts
+new file mode 100644
+index 0000000..1d2344e
+--- /dev/null
++++ b/tests/order-tracking.test.ts
+@@ -0,0 +1,113 @@
++import { test, describe, beforeEach, afterEach } from "node:test";
++import assert from "node:assert/strict";
++import { createClient, type Client } from "@libsql/client";
++import { tmpdir } from "node:os";
++import path from "node:path";
++import { setDbClientForTest } from "../src/lib/db";
++import { runMigrations } from "../src/lib/db/migrate";
++import { trackOrder } from "../src/lib/orders";
++
++/**
++ * تتبع الطلبات للعملاء — بشدّ أمني مقصود (docs/ai/phase-3-ux-roadmap.md):
++ *  - النجاح يعمل فقط بعاملين معًا: رقم الطلب + آخر 4 أرقام من الهاتف.
++ *  - الإخراج مبهم: الحالة + أسماء الأصناف بلا عنوان ولا هاتف كامل ولا أسعار.
++ *  - رسالة الفشل واحدة موحّدة لا تكشف وجود الطلب من عدمه (يمنع تعداد الطلبات).
++ */
++
++const KEYS = ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "ENABLE_ORDER_TRACKING"] as const;
++
++function fileClient(): Client {
++  const file = path.join(tmpdir(), `aborof-track-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
++  return createClient({ url: `file:${file}` });
++}
++
++beforeEach(() => {
++  for (const k of KEYS) delete process.env[k];
++});
++afterEach(() => {
++  for (const k of KEYS) delete process.env[k];
++});
++
++async function seedOrder(client: Client, id: string, phone: string) {
++  await runMigrations(client);
++  await client.execute("PRAGMA foreign_keys = ON");
++  await client.execute({
++    sql: `INSERT INTO orders (id,customer,phone,address,governorate,items,total,status)
++          VALUES (?,?,?,?,?,?,?,?)`,
++    args: [
++      id,
++      "عميل",
++      phone,
++      "عنوان تجريبي تفصيلي",
++      "القاهرة",
++      JSON.stringify([
++        { id: "p1", name: "منتج تجريبي", price: 50, qty: 2 },
++      ]),
++      100,
++      "جديد",
++    ],
++  });
++}
++
++describe("order tracking safe gate", () => {
++  let client: Client;
++
++  beforeEach(() => {
++    client = fileClient();
++  });
++
++  test("disabled feature → uniform not-found message", async () => {
++    setDbClientForTest(client);
++    await seedOrder(client, "ORD-12345678-abcd1234", "01095032221");
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-12345678-abcd1234", phoneLast4: "2221" }, false),
++      (err: Error) => err.message.includes("تعذر العثور على الطلب")
++    );
++  });
++
++  test("matching id + last 4 digits → obfuscated status, no PII, no prices", async () => {
++    setDbClientForTest(client);
++    await seedOrder(client, "ORD-99999999-abcd1234", "01095032221");
++
++    const result = await trackOrder({ id: "ORD-99999999-abcd1234", phoneLast4: "2221" }, true);
++
++    assert.equal(result.id, "ORD-99999999-abcd1234");
++    assert.equal(result.status, "جديد");
++    assert.equal(result.items.length, 1);
++    assert.equal(result.items[0].name, "منتج تجريبي");
++    assert.equal(result.items[0].qty, 2);
++    // لا هاتف كامل ولا عنوان ولا أسعار مفصلة في المخرجات.
++    const serialized = JSON.stringify(result);
++    assert.ok(!serialized.includes("01095032221"));
++    assert.ok(!serialized.includes("عنوان"));
++    assert.ok(!serialized.includes("price"));
++  });
++
++  test("wrong last 4 digits → same uniform message, no existence leak", async () => {
++    setDbClientForTest(client);
++    await seedOrder(client, "ORD-88888888-eeee8888", "01095032221");
++
++    // رسالة موحّدة لا تفرّق بين "غير موجود" و"غير مطابق" ولا تكشف أي بيانات.
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-88888888-eeee8888", phoneLast4: "1111" }, true),
++      (err: Error) => err.message === "تعذر العثور على الطلب"
++    );
++
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-does-not-exist", phoneLast4: "1111" }, true),
++      (err: Error) => err.message === "تعذر العثور على الطلب"
++    );
++  });
++});
++
++describe("trackOrder contract hygiene", () => {
++  test("unknown order id returns the exact uniform message", async () => {
++    const client = fileClient();
++    setDbClientForTest(client);
++    await runMigrations(client);
++    await assert.rejects(
++      () => trackOrder({ id: "ORD-00000000-00000000", phoneLast4: "0000" }, true),
++      (err: Error) => err.message === "تعذر العثور على الطلب"
++    );
++  });
++});
+diff --git a/tests/search-fts5.test.ts b/tests/search-fts5.test.ts
+new file mode 100644
+index 0000000..519d313
+--- /dev/null
++++ b/tests/search-fts5.test.ts
+@@ -0,0 +1,57 @@
++import { test, describe, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { createClient, type Client } from "@libsql/client";
++import { tmpdir } from "node:os";
++import path from "node:path";
++import { buildFtsMatch, ftsProductIds, ensureProductSearchInSync } from "../src/lib/search";
++import { runMigrations } from "../src/lib/db/migrate";
++
++/**
++ * فهرس البحث FTS5 (هجرة 0002) — الحراسة:
++ *  - الهجرة تُنشئ الجدول الافتراضي وتعبئه من المنتجات القائمة.
++ *  - بناء الاستعلام آمن (كلمات مقتبسة) ولا يُمرَّر نص العميل خامًا إلى MATCH.
++ *  - المزامنة تُبنى مرة واحدة ولا تُفشل التطبيق عند غياب دعم FTS5.
++ */
++
++function fileClient(): Client {
++  const file = path.join(tmpdir(), `aborof-fts-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
++  return createClient({ url: `file:${file}` });
++}
++
++describe("migration 0002_search_fts5", () => {
++  let client: Client;
++
++  beforeEach(() => {
++    client = fileClient();
++  });
++
++  test("creates the virtual table and backfills from products", async () => {
++    await runMigrations(client);
++    await client.execute({
++      sql: "INSERT INTO products (id,name,description,category,price,stock) VALUES (?,?,?,?,?,?)",
++      args: ["p1", "منظف أرضيات برائحة اللافندر", "يزيل الدهون والأتربة", "منظفات أرضيات", 180, 10],
++    });
++    await client.execute({
++      sql: "INSERT INTO products (id,name,description,category,price,stock) VALUES (?,?,?,?,?,?)",
++      args: ["p2", "سائل غسيل أطباق ليمون", "رغوة كثيفة", "منظفات مطابخ", 70, 10],
++    });
++
++    await ensureProductSearchInSync(client);
++    const ids = await ftsProductIds(client, "منظف أرضيات", 5);
++    assert.ok(ids.includes("p1"));
++  });
++
++  test("match query is built safely (quoted words, no raw syntax)", () => {
++    const match = buildFtsMatch('منظف "خطر" *drop');
++    // كلمات مقتبسة ولا رموز FTS خاصة خام.
++    assert.ok(match.includes('"منظف"'));
++    assert.ok(!match.includes("*"));
++    assert.ok(!match.includes("drop;"));
++  });
++
++  test("no-match query returns no ids", async () => {
++    await runMigrations(client);
++    const ids = await ftsProductIds(client, "غيرموجودإطلاقا", 5);
++    assert.deepEqual(ids, []);
++  });
++});
