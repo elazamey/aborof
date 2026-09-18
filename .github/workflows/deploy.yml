@@ -140,16 +140,75 @@ jobs:
           [ "$missing" -eq 0 ] || exit 1
           echo "All required deployment secrets are present."
 
+      # طيران تمهيدي قبل أي أمر vercel: يثبت هوية الرمز والمشروع عبر REST API
+      # ويطبع الأسماء فقط (لا قيم سرية — والمعرّفات نفسها محجوبة تلقائيًا كأسرار).
+      # السبب: تنزيل سجلات الوظائف محجوب عن بعض الشبكات، فالتعليقات (annotations)
+      # هي القناة الوحيدة المقروءة آليًا لتشخيص فشل vercel pull/build/deploy.
+      - name: Vercel preflight (token & project identity — names only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          user_body=/tmp/vercel-user.json
+          user_code=$(curl -sS -m 20 -o "$user_body" -w '%{http_code}' \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" https://api.vercel.com/v2/user || echo 000)
+          if [ "$user_code" = 200 ]; then
+            echo "::notice::Vercel token صالح — الحساب: $(jq -r '.user.username // .user.uid // "?"' "$user_body")"
+          else
+            echo "::error::فحص رمز Vercel فشل — HTTP $user_code: $(jq -r '.error.message // .error.code // "لا يوجد جسم استجابة"' "$user_body" 2>/dev/null | head -c 300)"
+            echo "::error::الإجراء: أنشئ رمزًا جديدًا في Vercel → Account Settings → Tokens وصلاحياته Full access على الفريق، ثم حدّث سر VERCEL_TOKEN."
+            exit 1
+          fi
+          proj_body=/tmp/vercel-project.json
+          proj_code=$(curl -sS -m 20 -o "$proj_body" -w '%{http_code}' \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_ORG_ID}" || echo 000)
+          if [ "$proj_code" = 200 ]; then
+            echo "::notice::مشروع Vercel متاح — الاسم: $(jq -r '.name // "?"' "$proj_body") (إطار: $(jq -r '.framework // "?"' "$proj_body")) — تأكد أنه المشروع الذي يخدم aborof.vercel.app"
+          else
+            echo "::error::فحص مشروع Vercel فشل — HTTP $proj_code: $(jq -r '.error.message // .error.code // "لا يوجد جسم استجابة"' "$proj_body" 2>/dev/null | head -c 300)"
+            echo "::error::الإجراء: تحقق أن VERCEL_PROJECT_ID وVERCEL_ORG_ID من نفس الفريق (Vercel → Project → Settings → General، و Account Settings → Team). 404 = معرف خاطئ أو خارج نطاق الرمز."
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Rebuild production artifact (gates already enforced)
         run: npm run build
+      # كل خطوة vercel تلتقط مخرجاتها وتبثّ ذيل الخطأ كتعليق ::error:: عند الفشل —
+      # السجل الكامل يبقى في اللوج (المحجوب عن بعض الشبكات) والتعليق يكفي للتشخيص.
       - name: Pull Vercel production settings
-        run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+        shell: bash
+        run: |
+          set -uo pipefail
+          rc=0
+          out=$(npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" 2>&1) || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::vercel pull فشل (exit $rc): $(printf '%s' "$out" | tr '\n\r' '  ' | tail -c 900)"
+          fi
+          exit "$rc"
       - name: Build Vercel artifact
-        run: npx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+        shell: bash
+        run: |
+          set -uo pipefail
+          rc=0
+          out=$(npx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" 2>&1) || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::vercel build فشل (exit $rc): $(printf '%s' "$out" | tr '\n\r' '  ' | tail -c 900)"
+          fi
+          exit "$rc"
       - name: Deploy prebuilt artifact
-        run: npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+        shell: bash
+        run: |
+          set -uo pipefail
+          rc=0
+          out=$(npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" 2>&1) || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::vercel deploy فشل (exit $rc): $(printf '%s' "$out" | tr '\n\r' '  ' | tail -c 900)"
+          fi
+          exit "$rc"
 
   # ملخص نشر مرتبط بالـ SHA ورابط الأثر للرجوع إليه عند الحوادث.
   report:
