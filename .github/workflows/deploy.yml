@@ -68,6 +68,9 @@ jobs:
 
   deploy:
     name: Deploy to Vercel Production
+    # ربط النشر ببيئة production على GitHub: يتيح قواعد الحماية (مراجعين/مدة انتظار)
+    # ويجعل أسرار النشر مقصورة على هذه البيئة فقط.
+    environment: production
     needs: quality-gates
     if: ${{ github.ref == 'refs/heads/main' && vars.VERCEL_DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
