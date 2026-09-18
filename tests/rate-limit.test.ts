@@ -22,13 +22,24 @@ describe("in-memory rate limit store", () => {
   });
 
   test("window resets after expiry", async () => {
+    // وقت وهمي قابل للتحكم بدل الاعتماد على ساعة النظام: نافذة 1 مللي ثانية
+    // الحقيقية تتقلب بين تنفيذين (اختلاف التوقيت بين استدعاءين متتاليين)،
+    // فجعلنا الزمن صريحًا حتى يكون الاختبار حتميًا على أي جهاز أو في CI.
     const store = new InMemoryRateLimitStore();
-    await store.hit("k2", 1, 1);
-    const blocked = await store.hit("k2", 1, 1);
-    assert.equal(blocked.ok, false);
-    await new Promise((r) => setTimeout(r, 5));
-    const allowed = await store.hit("k2", 1, 1);
-    assert.equal(allowed.ok, true);
+    const realNow = Date.now;
+    let fakeTime = 1_000_000;
+    Date.now = () => fakeTime;
+    try {
+      await store.hit("k2", 1, 1_000);
+      const blocked = await store.hit("k2", 1, 1_000);
+      assert.equal(blocked.ok, false, "ثاني طلب داخل النافذة نفسها يجب أن يُحجب");
+      fakeTime += 1_001; // نتجاوز نهاية النافذة (resetAt) صراحة
+      const allowed = await store.hit("k2", 1, 1_000);
+      assert.equal(allowed.ok, true, "انتهاء النافذة يجب أن يبدأ عدّادًا جديدًا");
+      assert.equal(allowed.count, 1);
+    } finally {
+      Date.now = realNow;
+    }
   });
 });
 

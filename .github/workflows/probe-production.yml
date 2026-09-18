@@ -1,0 +1,98 @@
+name: Production probe
+
+# مجسّ فحص يدوي لنقاط النهاية في بيئة الإنتاج (بدون أي أسرار).
+# يُستخدم للتحقق من حالة لوحة الإدارة بعد النشر، مثل:
+#   POST /api/admin/login بجسم كلمة مرور خاطئة عمدًا.
+# النتيجة المتوقعة لنظام مهيأ وصحي هي 401 (بيانات الدخول غير صحيحة)؛
+# بينما 503 تعني أن متغيرات البيئة غير مكتملة على Vercel.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "رابط بيئة الإنتاج"
+        required: true
+        default: "https://aborof.vercel.app"
+      path:
+        description: "مسار نقطة النهاية"
+        required: true
+        default: "/api/admin/login"
+      method:
+        description: "HTTP method (GET/POST/...)"
+        required: true
+        default: "POST"
+      body:
+        description: "تحذير: يُكتب نص الجسم في سجل التشغيل — لا تضع كلمة مرور حقيقية"
+        required: false
+        default: '{"password":"probe-not-a-real-password"}'
+
+# أقل صلاحيات ممكنة: المجس لا يحتاج أي صلاحية على المستودع.
+permissions: {}
+
+jobs:
+  probe:
+    name: HTTP probe (no secrets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # تمرير المدخلات عبر متغيرات بيئة بدل التضمين المباشر يمنع حقن الأوامر.
+      - name: Send request
+        id: probe
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          PROBE_PATH: ${{ inputs.path }}
+          METHOD: ${{ inputs.method }}
+          BODY: ${{ inputs.body }}
+        run: |
+          set -euo pipefail
+
+          # يسمح فقط بروابط https، ويحجب النطاقات الداخلية منعًا لـ SSRF.
+          case "$BASE_URL" in
+            https://*) ;;
+            *) echo "::error::base_url يجب أن يبدأ بـ https://" >&2; exit 1 ;;
+          esac
+          HOST=$(printf '%s' "$BASE_URL" | sed -E 's#^https://([^/:]+).*#\1#' | tr '[:upper:]' '[:lower:]')
+          case "$HOST" in
+            localhost*|127.*|10.*|0.0.0.0*|192.168.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|*.local|*.internal|metadata*)
+              echo "::error::نطاق داخلي محجوب" >&2; exit 1 ;;
+          esac
+          case "$METHOD" in
+            GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) ;;
+            *) echo "::error::method غير مدعوم: $METHOD" >&2; exit 1 ;;
+          esac
+
+          ARGS=(-sS --max-time 30 -X "$METHOD" -o /tmp/probe-body.txt -w '%{http_code}')
+          if [ "$METHOD" != "GET" ] && [ -n "$BODY" ]; then
+            ARGS+=(-H 'Content-Type: application/json' --data "$BODY")
+          fi
+
+          # محاولة واحدة فقط احترامًا لحد المعدل على نقاط النهاية المحمية.
+          HTTP_CODE=$(curl "${ARGS[@]}" "${BASE_URL}${PROBE_PATH}" || echo "000")
+
+          BODY_HEAD=$(head -c 1000 /tmp/probe-body.txt 2>/dev/null || true)
+          echo "status=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<PROBE_EOF"
+            echo "$BODY_HEAD"
+            echo "PROBE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "---- RESULT ----"
+          echo "status=$HTTP_CODE"
+          echo "body=$BODY_HEAD"
+
+      - name: Publish summary
+        env:
+          STATUS: ${{ steps.probe.outputs.status }}
+          BODY: ${{ steps.probe.outputs.body }}
+        run: |
+          {
+            echo "## نتيجة المجس"
+            echo ""
+            echo "- **Status:** \`$STATUS\`"
+            echo ""
+            echo '```'
+            echo "$BODY"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$STATUS"
