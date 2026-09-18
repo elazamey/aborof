@@ -8,6 +8,7 @@
 | P0-A | اعتماديات عالية الخطورة | تثبيت `package-lock.json`؛ `npm ci` | بوابة audit في quality وdeploy | `npm audit --omit=dev --audit-level=high` |
 | P0-B | تسريب الأخطاء الداخلية | `src/lib/errors/` + `apiHandler` + `redactSecrets` + `request_id` | `tests/errors.test.ts`, `tests/routes.test.ts`, `security-gates.mjs` | `npm test`؛ فحص استجابة `/api/chat` لخطأ لا تحوي stack/رسالة مزود |
 | P0-C | خلط سر الجلسات بالتشخيص | `src/lib/secrets.ts`: `DIAGNOSTICS_KEY` مستقل، تشخيص معطّل في الإنتاج | `tests/secrets.test.ts`, حاجز static في `security-gates.mjs` | `npm run security:gates` |
+| P0-D | جلسة الإدارة تُرفض بعد تسجيل دخول ناجح (ترميز الكوكي) | `src/lib/auth.ts`: رمز الجلسة بحروف آمنة داخل الكوكي (فاصل `.`) + فك ترميز قيمة الكوكي قبل التحقق + توافق مع الصيغة القديمة | `tests/admin-session-http.test.ts` (دخول فعلي ثم مسار محمي بالقيمة الحرفية للترويسة) | `npm test`؛ دخول صحيح ثم `GET /api/admin/session` ⇒ `{"authenticated":true}` |
 | P1-A | بوابات CI غير إلزامية | `quality.yml` + `deploy.yml`: audit/lint/typecheck/gates/tests/build، فحص أسرار، أقل صلاحيات، artifacts | الـ Workflow نفسه (لا `exit 0`، لا `--if-present`) | أي فشل يوقف النشر؛ راجع تبويب Actions |
 | P1-B | تحقق مدخلات غير موحّد | `src/lib/validation/contracts.ts` (Zod، `.strict()`، حدود) | `tests/contracts.test.ts`, `tests/routes.test.ts` | `npm test`؛ إرسال حقل غير معروف يعيد 422 |
 | P1-C | تحديد معدل عبر نسخ متعددة | `TursoRateLimitStore` بـ UPSERT ذري | `tests/rate-limit.test.ts` (20 ضربة متزامنة عبر نسختين) | `npm test`؛ التحقق من `Retry-After` |
@@ -34,6 +35,7 @@
 | ظهور مفتاح مزود (Gemini/Groq/NVIDIA) في السجلات أو الاستجابات | صفر | ✅ أنماط المفاتيح محجوبة واختبارات تثبته |
 | حقول زائدة تصل للواجهة من مخرجات الأدوات | صفر | ✅ تنقية بعقد صارم + سقف بطاقات |
 | بيانات عملاء في ذاكرة RAG | صفر | ✅ الذاكرة كتالوج ومعلومات متجر فقط، واختبار يفحصها |
+| لوحة إدارة غير قابلة للاستخدام بعد الدخول | صفر | ✅ اختبار HTTP كامل من الدخول إلى مسار محمي بالقيمة الحرفية للكوكي |
 
 ## أوامر التحقق الشامل
 
