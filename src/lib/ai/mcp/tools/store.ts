@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getFaq, getProducts } from "@/lib/db";
+import { searchProductsFts } from "@/lib/search";
 import { STORE } from "@/lib/seed";
 import { GOVERNORATES, SHIPPING_RATES, calculateShipping } from "@/lib/shipping";
 import type { McpTool, McpToolPolicy } from "../types";
@@ -79,12 +80,9 @@ export const searchProductsTool: McpTool = {
   async run(value) {
     const { query, max_results } = value as { query: string; max_results?: number };
     const limit = max_results ?? 3;
-    const products = await getProducts();
-    const hits = products
-      .map((p) => ({ p, s: score(query, `${p.name} ${p.category} ${p.description}`) }))
-      .filter((x) => x.s > 0)
-      .sort((a, b) => b.s - a.s || a.p.name.localeCompare(b.p.name))
-      .slice(0, limit);
+    // محرك FTS5 (Turso) أولًا، مع سقوط آمن داخلي إلى مطابقة الكلمات.
+    const products = await searchProductsFts(query, limit);
+    const hits = products.map((p) => ({ p, s: score(query, `${p.name} ${p.category} ${p.description}`) }));
 
     if (hits.length === 0) {
       return "لا يوجد منتج مطابق في المتجر. اقترح على العميل التواصل على واتساب أو وصف حاجة أخرى.";
