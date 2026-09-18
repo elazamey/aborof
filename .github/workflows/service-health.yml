@@ -1,0 +1,118 @@
+name: Service health probe
+
+# فحص صامت لخدمات الإنتاج: يدخل السر، ويخرج ✅/❌ فقط.
+#  - Turso: اتصال فعلي عبر @libsql/client (نفس اعتمادية التطبيق) وتنفيذ SELECT 1.
+#  - Gemini: ping لنقطة REST نفسها التي يستخدمها /api/chat، مع سلسلة النماذج
+#    الافتراضية في التطبيق (أو نموذج محدد يدويًا). المفتاح اختياري وفق السياسة:
+#    غيابه يعطي تحذيرًا ولا يفشل الفحص، ووجود مفتاح معطّل يفشل الفحص.
+# لا تُطبع أي قيمة سرية؛ رسائل الفشل تمر عبر تنقية تحجب قيمة السر نفسها.
+on:
+  workflow_dispatch:
+    inputs:
+      gemini_model:
+        description: "نموذج Gemini واحد للاختبار (اتركه فارغًا لتجربة سلسلة نماذج التطبيق)"
+        required: false
+        default: ""
+
+# أقل صلاحيات: الفحص لا يحتاج أي صلاحية على المستودع.
+permissions: {}
+
+jobs:
+  health:
+    name: Turso + Gemini health (secrets in, status out)
+    runs-on: ubuntu-latest
+    # نفس نطاق الأسرار المستخدم في وظيفة النشر: يقرأ أسرار البيئة ثم يرجع
+    # إلى نطاق المستودع. إن فعّلت قواعد حماية على البيئة فسيُطلب اعتمادك.
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # اعتماديات الإنتاج فقط — @libsql/client بينها، وهي نفس النسخ المقفولة
+      # في التطبيق (package-lock.json) فلا انحراف بين الفحص والإنتاج.
+      - name: Install production dependencies
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Turso connectivity (SELECT 1)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TURSO_DATABASE_URL:-}" ] || [ -z "${TURSO_AUTH_TOKEN:-}" ]; then
+            echo "::error::TURSO_DATABASE_URL أو TURSO_AUTH_TOKEN غير مضبوطين في الأسرار"
+            exit 1
+          fi
+          if node -e '
+            const { createClient } = require("@libsql/client");
+            (async () => {
+              const db = createClient({
+                url: process.env.TURSO_DATABASE_URL,
+                authToken: process.env.TURSO_AUTH_TOKEN,
+              });
+              await db.execute("SELECT 1 AS ok");
+              db.close();
+              console.log("✅ Turso Database: الاتصال يعمل بنجاح (SELECT 1).");
+            })().catch((e) => {
+              console.error("❌ Turso Database: فشل الاتصال ->", String((e && e.message) || e));
+              process.exit(1);
+            });
+          ' > /tmp/turso.out 2>&1; then
+            cat /tmp/turso.out
+          else
+            # حجب أي ظهور عارض لقيمة الرابط أو الرمز داخل رسالة الخطأ
+            # (استبدال نصي حرفي بلا تعبيرات نمطية).
+            out=$(cat /tmp/turso.out)
+            out=${out//"$TURSO_DATABASE_URL"/***}
+            out=${out//"$TURSO_AUTH_TOKEN"/***}
+            printf '%s\n' "$out" | head -c 400
+            echo "::error::فحص Turso فشل"
+            exit 1
+          fi
+
+      - name: Gemini API ping (same REST endpoint as /api/chat)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MODEL_INPUT: ${{ inputs.gemini_model }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GEMINI_API_KEY:-}" ]; then
+            echo "::warning::GEMINI_API_KEY غير مضبوط — المزود اختياري وفق السياسة (سيليا تعمل بالرد الاحتياطي أو Groq إن ضُبط)."
+            exit 0
+          fi
+
+          MODELS="${MODEL_INPUT}"
+          if [ -z "$MODELS" ]; then
+            # نفس سلسلة النماذج الافتراضية في كود التطبيق.
+            MODELS="gemini-flash-latest gemini-3.5-flash gemini-flash-lite-latest"
+          fi
+
+          # المفتاح في ترويسة وليس في الرابط حتى لا يظهر في سجلات الطلبات.
+          for m in $MODELS; do
+            code=$(curl -sS -o /tmp/gemini.json -w '%{http_code}' --max-time 30 -X POST \
+              "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent" \
+              -H "Content-Type: application/json" \
+              -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+              --data '{"contents":[{"parts":[{"text":"Ping"}]}]}' || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "✅ Gemini AI API: النموذج ${m} استجاب بنجاح."
+              exit 0
+            fi
+            echo "النموذج ${m} أعاد ${code} — نجرب التالي…"
+          done
+
+          out=$(cat /tmp/gemini.json 2>/dev/null || true)
+          out=${out//"$GEMINI_API_KEY"/***}
+          printf '%s\n' "$out" | head -c 400
+          echo "::error::فحص Gemini فشل لكل النماذج المجربة"
+          exit 1
