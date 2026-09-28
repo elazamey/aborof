@@ -177,13 +177,59 @@ describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان",
   const GOOD_URL = "libsql://aborof-elazamey.turso.io";
   const GOOD_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.c2lnbmF0dXJl";
 
-  test("يقبل الزوج الصحيح ويعرض وصفًا شكليًا فقط — بلا أي قيمة سرية", () => {
-    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: GOOD_TOKEN });
+  test("يقبل الزوج الصحيح ويعرض وصفًا شكليًا فقط — بلا أي قيمة سرية (مع --skip-verify)", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: GOOD_TOKEN }, ["--dry-run", "--skip-verify"]);
     assert.equal(res.status, 0);
     assert.match(res.stdout, /التحقق الشكلي نجح/);
     assert.match(res.stdout, /JWT \(طول/);
+    assert.match(res.stdout, /فحص الاتصال الحيّ: مُتخطَّ/);
+    // escape hatch مُسجَّل لا صامت: التخطي يُعلَن في stderr حتى في وضع المعاينة.
+    assert.match(res.stderr, /VERIFY_SKIPPED/);
     assert.doesNotMatch(res.stdout + res.stderr, new RegExp(GOOD_TOKEN));
     assert.doesNotMatch(res.stdout, /aborof-elazamey/, "لا يُطبع المضيف كاملًا");
+  });
+
+  test("الفحص الحيّ حاجز قبل التطبيق: قيم شكلية صحيحة بقاعدة غير متاحة تُوقف قبل أي لمس", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: GOOD_TOKEN }, ["--dry-run"]);
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /فحص اتصال Turso حيًّا/);
+    assert.match(res.stderr, /VERIFY_CONNECTION_FAILED/);
+    assert.match(res.stderr, /القاعدة رفضت هذه القيم/);
+    // لم تُعرض خطوات التطبيق إطلاقًا (الفشل قبل بنائتها)، ولم تتسرب أي قيمة:
+    assert.doesNotMatch(res.stdout, /gh secret set/);
+    assert.doesNotMatch(res.stdout, /لن يُطبَّق أي سرّ/);
+    assert.doesNotMatch(res.stdout + res.stderr, new RegExp(GOOD_TOKEN));
+    assert.doesNotMatch(res.stdout, /aborof-elazamey/, "لا يُطبع المضيف كاملًا");
+  });
+
+  test("العقد: فشل الفحص الحيّ في وضع التنفيذ لا يستدعي GitHub ولا Vercel إطلاقًا", () => {
+    // أدوات وهمية تُسجّل كل استدعاء على `PATH`؛ وضع التنفيذ هنا بلا --dry-run،
+    // فلو اختراق الحاجز لأُسجّل نداء gh/vercel في السجل وأسقط الاختبار.
+    const binDir = fs.mkdtempSync(path.join(tmpdir(), "fake-bin-"));
+    const logFile = path.join(binDir, "calls.log");
+    for (const tool of ["gh", "vercel"]) {
+      const p = path.join(binDir, tool);
+      fs.writeFileSync(p, `#!/usr/bin/env bash\necho "$0 $*" >> "${logFile}"\n`);
+      fs.chmodSync(p, 0o755);
+    }
+    try {
+      const res = spawnSync("bash", ["scripts/apply-turso-secrets.sh"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_DATABASE_URL: GOOD_URL,
+          TURSO_AUTH_TOKEN: GOOD_TOKEN,
+        },
+      });
+      assert.equal(res.status, 1, "فشل الفحص الحيّ = خروج 1 قبل أي كتابة");
+      assert.match(res.stderr, /VERIFY_CONNECTION_FAILED/);
+      const calls = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+      assert.equal(calls.trim(), "", `لا يجوز لأي أداة كتابة أن تُستدعى بعد فشل الفحص: ${calls}`);
+      assert.doesNotMatch(res.stdout + res.stderr, new RegExp(GOOD_TOKEN));
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   test("يرفض رابط لوحة التحكم ويرشد إلى زر Connect", () => {

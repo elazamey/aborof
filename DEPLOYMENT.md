@@ -147,11 +147,38 @@ npm run front:check     # 22 فحصًا: الحدود الأربعة، ميتا�
 | الأمر | ما يفحصه | ملاحظة |
 |---|---|---|
 | `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
-| `bash scripts/apply-turso-secrets.sh` | يضبط `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` في المكانين معًا (GitHub بيئة `production` + Vercel Production) بعد تحقق شكلي: يرفض رابط لوحة التحكم ويرفض رابطًا في حقل الرمز | القيم من متغيرات البيئة أو مدخل مخفي، **ولا تُطبع أبدًا** وتُمرَّر عبر `stdin`؛ `--dry-run` يعرض ما سيُفعل بلا تنفيذ |
+| `bash scripts/apply-turso-secrets.sh` | يضبط `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` في المكانين معًا (GitHub بيئة `production` + Vercel Production): تحقق شكلي يرفض رابط لوحة التحكم ويرفض رابطًا في حقل الرمز، **ثم فحص اتصال حيّ بـ `verify-turso.mjs` قبل أي لمس** — إن رفضت القاعدة القيم يتوقف بلا تطبيق | القيم من متغيرات البيئة أو مدخل مخفي، **ولا تُطبع أبدًا** وتُمرَّر عبر `stdin` أو بيئة الطفل؛ `--dry-run` معاينة، `--skip-verify` تخطّي الفحص الحيّ، `--github-only`/`--vercel-only` لجهة واحدة |
 | `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
 | `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 و**15 و16 و16b و17** (صفحة منتج حقيقية، منع 404 الناعم، مسار غير موجود، ملفات robots/sitemap/manifest/icon) + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--chat-probe` للصف 12، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط (لا يعمل على localhost عن قصد) |
 | `npm run security:bundle` | فحص ما ينزّله المتصفح فعلاً (`.next/static`): أسماء وقيم أسرار الخادم | يُشغَّل آليًا بعد `npm run build` في `quality.yml` و`deploy.yml` |
 | `npm run routes:inventory` | جرد المسارات وبواباتها (نفس بوابة CI) | يفشل إن غاب أي مسار مطلوب |
+
+### تطبيق أسرار Turso في المكانين معًا
+
+بدل التحرّر يدويًا في لوحتي GitHub وVercel، شغّل أمرًا واحدًا:
+
+```bash
+export TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io"   # من زر Connect في لوحة Turso
+export TURSO_AUTH_TOKEN="eyJ…"                              # من Tokens → Create Token (Full access · Never expire)
+bash scripts/apply-turso-secrets.sh --dry-run               # معاينة بلا تطبيق
+bash scripts/apply-turso-secrets.sh                         # التنفيذ الفعلي
+```
+
+ثلاثة أسوار متتالية قبل أي كتابة، والسكربت يتوقف عند أول فشل:
+
+1. **تحقق شكلي** — يرفض رابط لوحة التحكم (`app.turso.tech`) بدل رابط الاتصال، وأي مخطط غير `libsql://`/`turso://`/`https://`/`wss://`، وأي قيمة ليست رمز JWT بثلاثة مقاطع.
+2. **فحص اتصال حيّ** — يشغّل `scripts/verify-turso.mjs --json` (للقراءة فقط، بلا هجرة) بالقيم نفسها عبر بيئة العملية الفرعية لا سطر الأوامر؛ **القرار يُستخرج من بنية التقرير (معرّفات الصفوف) لا من مطابقة نصوص الأخطاء** ويُصنَّف: `VERIFY_CONNECTION_FAILED` = حاجز قاطع قبل أي لمس لـ GitHub أو Vercel، و`VERIFY_SCHEMA_NOT_READY` = تحذير فقط (مثل جدول هجرات لم يُنشأ بعد على قاعدة جديدة، والهجرات تُطبَّق تلقائيًا عند أول طلب `ensureSchema`)، و`VERIFY_SUCCESS` عند اخضرار كل الصفوف. وعند استخدام `--skip-verify` تُطبع علامة `VERIFY_SKIPPED` في السجل كي يبقى التخطي مُعلَنًا لا صامتًا.
+3. **التطبيق** — القيم عبر `stdin` فقط إلى `gh secret set` و`vercel env add` (بعد حذف القديم لتفادي التكرار)، ثم تذكير بـ `vercel deploy --prod` لأن المتغيرات تُقرأ في نشر جديد.
+
+| الخيار | الأثر |
+|---|---|
+| `--dry-run` | يعرض الخطوات المخطَّطة بلا تطبيق (الأسوار 1 و2 تُنفَّذ لأنها للقراءة فقط) |
+| `--skip-verify` | يتخطّى الفحص الحيّ ويُطبّع علامة `VERIFY_SKIPPED` في السجل (عند انقطاع الشبكة أو `npm ci` ناقصة) |
+| `--github-only` / `--vercel-only` | يطبّق على موضع واحد |
+| `--repo owner/name` | مستودع مختلف عن الحالي |
+| `--env <name>` | بيئة GitHub الهدف (افتراضي `production`) |
+
+**المتطلبات:** `gh` مصادَق بصلاحية كتابة أسرار البيئة، و`vercel login` + CLI إن أردت نصف Vercel (وإلا أعِد النشر من اللوحة: Project → Deployments → Redeploy)، و`npm ci` لتوفر `@libsql/client` ما لم تستخدم `--skip-verify`، وبيئة `production` موجودة في GitHub (**Settings → Environments** — أنشئها أولًا إن لم تكن). بعد النجاح: أي دفع إلى `main` يعيد تشغيل مجسّ `turso-evidence.yml` تلقائيًا، أو بعد الدمج `gh workflow run turso-evidence.yml --ref main`.
 
 ### قراءة نتائج الـ Smoke بلا لبس
 
