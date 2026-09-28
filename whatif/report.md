@@ -5,13 +5,13 @@
 
 | بند | قيمة |
 |---|---|
-| تاريخ التشغيل | `2026-09-28T09:22:32.960Z` |
-| معرّف التشغيل | `run24` |
+| تاريخ التشغيل | `2026-09-28T09:26:59.207Z` |
+| معرّف التشغيل | `run25` |
 | الـ Runtime قيد القياس | `http://127.0.0.1:3000` (Next.js على `0.0.0.0:3000`) |
 | نسخة DB-down | `http://127.0.0.1:3001` (نفس الكود، `TURSO_DATABASE_URL` فارغ) |
 | قاعدة البيانات | `file:local.db` عبر `@libsql/client` — نفس مسار كود Turso |
-| حالة خط الأساس | orders=`204` · order_items=`204` · orphans=`0` · negative_stock=`0` |
-| الحالة النهائية | orders=`217` · order_items=`217` · orphans=`0` · negative_stock=`0` |
+| حالة خط الأساس | orders=`217` · order_items=`217` · orphans=`0` · negative_stock=`0` |
+| الحالة النهائية | orders=`230` · order_items=`230` · orphans=`0` · negative_stock=`0` |
 
 ## الملخّص
 
@@ -29,7 +29,7 @@
 
 ### WF-001 — المنتج موجود والمخزون يكفي — «عايز 20 عبوة من منظف الأرضيات باللافندر»
 
-**✅ PASS** · 8/8 فحوص · 89ms
+**✅ PASS** · 8/8 فحوص · 85ms
 
 | الحقل | القيمة |
 |---|---|
@@ -55,10 +55,10 @@
 ```json
 {
   "http": 200,
-  "request_id": "req_cd7b6e8b-e3fe-4eab-9047-088b60820eba",
+  "request_id": "req_fd27d1ad-122d-42e2-8c69-8cc9c82a38e2",
   "body": {
     "ok": true,
-    "id": "ORD-87350017-48f79a5d",
+    "id": "ORD-87616302-704e85ca",
     "subtotal": 3600,
     "shipping": 0,
     "total": 3600
@@ -66,12 +66,12 @@
   "stock_before": 50,
   "stock_after": 30,
   "db": {
-    "orders": 205,
-    "order_items": 205,
+    "orders": 218,
+    "order_items": 218,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-87350017-48f79a5d",
+      "id": "ORD-87616302-704e85ca",
       "total": 3600,
       "shipping_fee": 0,
       "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":20}]"
@@ -83,7 +83,7 @@
 
 ### WF-002 — منتج غير موجود — بحث + محاولة شراء
 
-**✅ PASS** · 7/7 فحوص · 58ms
+**✅ PASS** · 7/7 فحوص · 40ms
 
 | الحقل | القيمة |
 |---|---|
@@ -100,7 +100,7 @@
 - ✅ الرد لم يؤكّد توافر منتج غير موجود
 - ✅ HTTP 409 (المتوقع 409)
 - ✅ code=CONFLICT (المتوقع CONFLICT)
-- ✅ عدد الطلبات 205 → 205 (بلا تغيير)
+- ✅ عدد الطلبات 218 → 218 (بلا تغيير)
 - ✅ أصناف يتيمة = 0
 
 **ACTUAL (دليل خام)**
@@ -112,21 +112,21 @@
   "chat_reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف زجاج ومرايا 1 لتر — 55 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 جنيه\n• منظف حمامات ومزيل جير 1 لتر — 75 جنيه\n• مز",
   "http": 409,
   "code": "CONFLICT",
-  "request_id": "req_7b22b62c-cfce-44f0-ae76-9f176fc8e6a4",
+  "request_id": "req_b267e2df-d1d9-456a-815e-0e66f6b56237",
   "body": {
     "error": "أحد المنتجات لم يعد متاحًا",
     "code": "CONFLICT",
-    "request_id": "req_7b22b62c-cfce-44f0-ae76-9f176fc8e6a4"
+    "request_id": "req_b267e2df-d1d9-456a-815e-0e66f6b56237"
   },
-  "orders_before": 205,
-  "orders_after": 205
+  "orders_before": 218,
+  "orders_after": 218
 }
 ```
 
 
 ### WF-003 — الكمية أكبر من المخزون — طلب 20 والمتاح 7
 
-**✅ PASS** · 6/6 فحوص · 77ms
+**✅ PASS** · 6/6 فحوص · 59ms
 
 | الحقل | القيمة |
 |---|---|
@@ -143,7 +143,7 @@
 - ✅ الرسالة تشرح السبب: «الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة»
 - ✅ الرسالة تسمّي المنتج المعني
 - ✅ المخزون 7 → 7 (لم يُخصم شيء)
-- ✅ عدد الطلبات 205 → 205 (لم يُنشأ طلب)
+- ✅ عدد الطلبات 218 → 218 (لم يُنشأ طلب)
 
 **ACTUAL (دليل خام)**
 
@@ -152,18 +152,18 @@
   "http": 409,
   "code": "CONFLICT",
   "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-  "request_id": "req_50d5ce0c-9090-40ec-94df-7710cbf188f0",
+  "request_id": "req_e33472da-fcaa-4f72-ba8d-9f34623fb28a",
   "stock_before": 7,
   "stock_after": 7,
-  "orders_before": 205,
-  "orders_after": 205
+  "orders_before": 218,
+  "orders_after": 218
 }
 ```
 
 
 ### WF-004 — المخزون صفر — AVAILABILITY = FALSE
 
-**✅ PASS** · 6/6 فحوص · 56ms
+**✅ PASS** · 6/6 فحوص · 63ms
 
 | الحقل | القيمة |
 |---|---|
@@ -179,7 +179,7 @@
 - ✅ HTTP 409 (المتوقع 409)
 - ✅ code=CONFLICT
 - ✅ المخزون بعد = 0 (لم يصبح سالبًا)
-- ✅ عدد الطلبات 205 → 205
+- ✅ عدد الطلبات 218 → 218
 - ✅ صفوف بمخزون سالب = 0
 
 **ACTUAL (دليل خام)**
@@ -189,17 +189,17 @@
   "http": 409,
   "code": "CONFLICT",
   "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-  "request_id": "req_a55f59ca-42af-4f16-bfcc-b8f80ba5c91e",
+  "request_id": "req_e7f69f69-4a6d-42d3-be94-b2d87f31af2d",
   "stock_before": 0,
   "stock_after": 0,
-  "orders_after": 205
+  "orders_after": 218
 }
 ```
 
 
 ### WF-005 — حمولة غير صحيحة — مفتاح غير معروف + سلة فارغة
 
-**✅ PASS** · 8/8 فحوص · 40ms
+**✅ PASS** · 8/8 فحوص · 29ms
 
 | الحقل | القيمة |
 |---|---|
@@ -214,11 +214,11 @@
 - ✅ chat HTTP 422 (المتوقع 422)
 - ✅ chat code=VALIDATION_FAILED
 - ✅ العقد strict رفض المفتاح: Unrecognized key(s) in object: 'message'
-- ✅ request_id=req_4e8a4f9b-6589-4bbd-b81a-9e32f4b77c59
+- ✅ request_id=req_8739e5dd-b4bf-4325-a5d8-3939acb87eb6
 - ✅ orders HTTP 422 (المتوقع 422)
 - ✅ orders code=VALIDATION_FAILED
 - ✅ رسالة عربية مفهومة: items: السلة فارغة
-- ✅ عدد الطلبات 205 → 205 (بلا تغيير)
+- ✅ عدد الطلبات 218 → 218 (بلا تغيير)
 
 **ACTUAL (دليل خام)**
 
@@ -227,20 +227,20 @@
   "chat_http": 422,
   "chat_code": "VALIDATION_FAILED",
   "chat_error": "Unrecognized key(s) in object: 'message'",
-  "chat_request_id": "req_4e8a4f9b-6589-4bbd-b81a-9e32f4b77c59",
+  "chat_request_id": "req_8739e5dd-b4bf-4325-a5d8-3939acb87eb6",
   "order_http": 422,
   "order_code": "VALIDATION_FAILED",
   "order_error": "items: السلة فارغة",
-  "order_request_id": "req_b45f5579-bf9d-4bba-b5cc-f17dea0c1a75",
-  "orders_before": 205,
-  "orders_after": 205
+  "order_request_id": "req_9eac999f-222c-4192-87f3-224c89b842d7",
+  "orders_before": 218,
+  "orders_after": 218
 }
 ```
 
 
 ### WF-010 — الضغط على «إرسال الطلب» مرتين — double submit
 
-**✅ PASS** · 5/5 فحوص · 89ms
+**✅ PASS** · 5/5 فحوص · 80ms
 
 | الحقل | القيمة |
 |---|---|
@@ -253,7 +253,7 @@
 **الفحوص**
 
 - ✅ HTTP 200 / 200
-- ✅ رقما الطلبين مختلفان: ORD-87350320-779633ac , ORD-87350338-c1aca006
+- ✅ رقما الطلبين مختلفان: ORD-87616561-d2b36675 , ORD-87616578-39939d7c
 - ✅ المخزون 10 → 8 (خصم 2 — طلب واحد لكل ضغطة)
 - ✅ صفوف بمخزون سالب = 0
 - ✅ أصناف يتيمة = 0
@@ -264,19 +264,19 @@
 {
   "http_1": 200,
   "http_2": 200,
-  "id_1": "ORD-87350320-779633ac",
-  "id_2": "ORD-87350338-c1aca006",
-  "request_id_1": "req_d1aa7820-2ba0-4603-ab6d-c63bcf3a07ec",
-  "request_id_2": "req_6fbb9261-ae0a-4615-9d97-4ee4b544cd79",
+  "id_1": "ORD-87616561-d2b36675",
+  "id_2": "ORD-87616578-39939d7c",
+  "request_id_1": "req_2e5dcece-bb84-4a20-a6a9-67a2817243c1",
+  "request_id_2": "req_af01fe91-f1ea-4ec7-938e-ee4b65eb8b47",
   "stock_before": 10,
   "stock_after": 8,
   "db": {
-    "orders": 207,
-    "order_items": 207,
+    "orders": 220,
+    "order_items": 220,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-87350338-c1aca006",
+      "id": "ORD-87616578-39939d7c",
       "total": 230,
       "shipping_fee": 50,
       "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":1}]"
@@ -289,7 +289,7 @@
 
 ### WF-011 — السعر تغيّر بين العرض وتأكيد الطلب + محاولة تزوير السعر
 
-**✅ PASS** · 9/9 فحوص · 198ms
+**✅ PASS** · 9/9 فحوص · 97ms
 
 | الحقل | القيمة |
 |---|---|
@@ -325,14 +325,14 @@
   "tamper_http": 422,
   "tamper_code": "VALIDATION_FAILED",
   "tamper_error": "items.0: Unrecognized key(s) in object: 'price'",
-  "request_id": "req_4188c6db-208e-4492-87ee-1f36c8d35c71"
+  "request_id": "req_c2dc1dc5-ea78-4ac1-896b-8fc3e9bfd060"
 }
 ```
 
 
 ### WF-016 — قاعدة البيانات غير متاحة أثناء إنشاء الطلب
 
-**✅ PASS** · 7/7 فحوص · 25ms
+**✅ PASS** · 7/7 فحوص · 30ms
 
 | الحقل | القيمة |
 |---|---|
@@ -348,9 +348,9 @@
 - ✅ code=SERVICE_UNAVAILABLE
 - ✅ لا يوجد ok:true في الاستجابة (لا نجاح كاذب)
 - ✅ لا رقم طلب في الاستجابة
-- ✅ request_id=req_48523bbf-791d-45e9-aebb-af1979c7ad53 للربط بالسجلات
+- ✅ request_id=req_ac2f16c0-3515-45e7-9a4a-35382a8e3b98 للربط بالسجلات
 - ✅ قراءة المنتجات HTTP 200 (تدهور آمن)
-- ✅ طلبات DB الحقيقية 208 → 208 (لم يُكتب شيء)
+- ✅ طلبات DB الحقيقية 221 → 221 (لم يُكتب شيء)
 
 **ACTUAL (دليل خام)**
 
@@ -359,18 +359,18 @@
   "http": 503,
   "code": "SERVICE_UNAVAILABLE",
   "message": "قاعدة البيانات غير مربوطة",
-  "request_id": "req_48523bbf-791d-45e9-aebb-af1979c7ad53",
+  "request_id": "req_ac2f16c0-3515-45e7-9a4a-35382a8e3b98",
   "read_http": 200,
   "read_products": 12,
-  "real_db_orders_before": 208,
-  "real_db_orders_after": 208
+  "real_db_orders_before": 221,
+  "real_db_orders_after": 221
 }
 ```
 
 
 ### WF-017 — مستخدم عادي يحاول تنفيذ إجراء إداري
 
-**✅ PASS** · 8/8 فحوص · 54ms
+**✅ PASS** · 8/8 فحوص · 65ms
 
 | الحقل | القيمة |
 |---|---|
@@ -389,7 +389,7 @@
 - ✅ كوكيز موقّع تزويرًا → 401 (HMAC مرفوض)
 - ✅ DELETE /api/products بلا كوكيز → 401
 - ✅ المخزون 49 → 49 (لم يتغير)
-- ✅ عدد الطلبات 208 → 208
+- ✅ عدد الطلبات 221 → 221
 
 **ACTUAL (دليل خام)**
 
@@ -403,15 +403,15 @@
   "delete_product": 401,
   "stock_before": 49,
   "stock_after": 49,
-  "orders_before": 208,
-  "orders_after": 208
+  "orders_before": 221,
+  "orders_after": 221
 }
 ```
 
 
 ### WF-018 — تنفيذ جزئي — صنفان يفشل ثانيهما، ثم تسابق على نفس المخزون
 
-**✅ PASS** · 11/11 فحوص · 161ms
+**✅ PASS** · 11/11 فحوص · 253ms
 
 | الحقل | القيمة |
 |---|---|
@@ -426,12 +426,12 @@
 - ✅ أ) HTTP 409 (المتوقع 409)
 - ✅ أ) code=CONFLICT
 - ✅ أ) p1: 10 → 10 (لا خصم جزئي للصنف الناجح)
-- ✅ أ) عدد الطلبات 208 → 208 (لا طلب)
+- ✅ أ) عدد الطلبات 221 → 221 (لا طلب)
 - ✅ أ) أصناف يتيمة = 0
 - ✅ ب) نتائج التزامن [200, 409] (المتوقع 200 و409 — رابح واحد)
 - ✅ ب) عدد الطلبات الناجحة = 1
 - ✅ ب) المخزون 5 → 1 (المتوقع 1 لا سالب)
-- ✅ ب) طلبات DB 208 → 209 (+1 فقط)
+- ✅ ب) طلبات DB 221 → 222 (+1 فقط)
 - ✅ ب) صفوف بمخزون سالب = 0
 - ✅ ب) أصناف يتيمة = 0
 
@@ -445,8 +445,8 @@
   "a_p1_before": 10,
   "a_p1_after": 10,
   "a_orders": [
-    208,
-    208
+    221,
+    221
   ],
   "b_http": [
     200,
@@ -459,20 +459,20 @@
   "b_stock_before": 5,
   "b_stock_after": 1,
   "b_orders_created": [
-    208,
-    209
+    221,
+    222
   ],
   "b_request_ids": [
-    "req_a6e098ec-6381-476c-aacf-5f18883b67e0",
-    "req_40e7aae7-cfbb-4841-b49b-5d6a8e1f3fef"
+    "req_e5f163d5-1903-41fe-8d1c-9d0e167796a5",
+    "req_90f68f0d-579b-46ec-84d5-18a49d4c6663"
   ],
   "db": {
-    "orders": 209,
-    "order_items": 209,
+    "orders": 222,
+    "order_items": 222,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-87350758-188020a0",
+      "id": "ORD-87616993-e003c5be",
       "total": 1000,
       "shipping_fee": 0,
       "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
@@ -484,7 +484,7 @@
 
 ### WF-012 — أحجام متعددة والعميل قال «هات الكبير»
 
-**✅ PASS** · 4/4 فحوص · 251ms
+**✅ PASS** · 4/4 فحوص · 280ms
 
 | الحقل | القيمة |
 |---|---|
@@ -520,7 +520,7 @@
 
 ### WF-013 — «هات أرخص منظف أرضيات متاح» — ترتيب بالسعر + فلتر توافر
 
-**✅ PASS** · 5/5 فحوص · 137ms
+**✅ PASS** · 5/5 فحوص · 140ms
 
 | الحقل | القيمة |
 |---|---|
@@ -564,7 +564,7 @@
 
 ### WF-014 — منتجان متشابهان جدًا — هل يحسم أم يوضّح؟
 
-**✅ PASS** · 3/3 فحوص · 107ms
+**✅ PASS** · 3/3 فحوص · 118ms
 
 | الحقل | القيمة |
 |---|---|
@@ -621,7 +621,7 @@
 
 ### WF-015 — خدمة الذكاء الاصطناعي توقفت — فشل المزودين
 
-**✅ PASS** · 5/5 فحوص · 44ms
+**✅ PASS** · 5/5 فحوص · 49ms
 
 | الحقل | القيمة |
 |---|---|
@@ -647,7 +647,7 @@
   "code": null,
   "source": "local",
   "reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 جنيه\n\nتقدر تضيفهم للسلة وتكمل الطلب، والد",
-  "request_id": "req_d40606cf-b9dc-4480-ac27-141e4630657d",
+  "request_id": "req_d7d5c4c4-1655-410f-8a20-8dd6a0ab2177",
   "leaked_api_key": false,
   "leaked_stack": false,
   "provider_failure_mode": "fetch failed — انقطاع اتصال على مستوى TLS في بيئة الاختبار، لا رفض مفتاح؛ كلا المسارين يُنتجان نفس قرار التراجع"
@@ -657,7 +657,7 @@
 
 ### WF-019 — أمر غامض — «محتاج حاجة»
 
-**✅ PASS** · 4/4 فحوص · 17ms
+**✅ PASS** · 4/4 فحوص · 32ms
 
 | الحقل | القيمة |
 |---|---|
@@ -671,7 +671,7 @@
 
 - ✅ chat HTTP 200
 - ✅ لم يختلق رقم طلب: true
-- ✅ عدد الطلبات 209 → 209 (لا تنفيذ من محادثة)
+- ✅ عدد الطلبات 222 → 222 (لا تنفيذ من محادثة)
 - ✅ رد مفيد يستوضح أو يعرض خيارات
 
 **ACTUAL (دليل خام)**
@@ -682,15 +682,15 @@
   "source": "local",
   "reply": "أهلاً بحضرتك في روفيده 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على 01095032221.",
   "fabricates_order_id": false,
-  "orders_before": 209,
-  "orders_after": 209
+  "orders_before": 222,
+  "orders_after": 222
 }
 ```
 
 
 ### WF-020 — جلسة إدارة صالحة تُقبل على كل المسارات الإدارية (انحدار D-1)
 
-**✅ PASS** · 6/6 فحوص · 58ms
+**✅ PASS** · 6/6 فحوص · 62ms
 
 | الحقل | القيمة |
 |---|---|
@@ -703,7 +703,7 @@
 **الفحوص**
 
 - ✅ الدخول HTTP 200 (كلمة المرور مقبولة)
-- ✅ كوكيز صدر فعلًا: 1790587351363-dEPYBjDMw1…
+- ✅ كوكيز صدر فعلًا: 1790587617671-AwqbqDHY3H…
 - ✅ GET /api/admin/session HTTP 200
 - ✅ authenticated=true (المتوقع true — DEFECT: القيمة على السلك تحتوي %3A)
 - ✅ GET /api/orders بجلسة صالحة HTTP 200 (المتوقع 200)
@@ -714,7 +714,7 @@
 ```json
 {
   "login_http": 200,
-  "cookie_value_on_the_wire": "1790587351363-dEPYBjDMw1Wn8xLLHBUMMKYiLxJgtunr.Ejzfe16xzLwcuvPO8-yC5FKGKkr1cH8p-eEUweNcLQo",
+  "cookie_value_on_the_wire": "1790587617671-AwqbqDHY3HsTj3WBPefceMQ91A6DTouA.ZsldBjeH3JnKg8REBzVa-ACV2OrIvq_7inAUjb1q38U",
   "wire_contains_percent3A": false,
   "session_http": 200,
   "session_authenticated": true,
@@ -729,7 +729,7 @@
 
 ### WF-021 — تتبّع الطلب بعاملين صحيحين — العلم مفعّل
 
-**✅ PASS** · 7/7 فحوص · 38ms
+**✅ PASS** · 7/7 فحوص · 36ms
 
 | الحقل | القيمة |
 |---|---|
@@ -741,7 +741,7 @@
 
 **الفحوص**
 
-- ✅ أنشئ طلب للتتبّع: ORD-87351427-c5ebb2ad
+- ✅ أنشئ طلب للتتبّع: ORD-87617733-b3bdc99d
 - ✅ HTTP 200 (المتوقع 200)
 - ✅ ok=true
 - ✅ الحالة المُعادة = جديد
@@ -753,11 +753,11 @@
 
 ```json
 {
-  "order_id": "ORD-87351427-c5ebb2ad",
+  "order_id": "ORD-87617733-b3bdc99d",
   "http": 200,
   "body": {
     "ok": true,
-    "id": "ORD-87351427-c5ebb2ad",
+    "id": "ORD-87617733-b3bdc99d",
     "status": "جديد",
     "items": [
       {
@@ -765,9 +765,9 @@
         "qty": 1
       }
     ],
-    "created_at": "2026-09-28 09:22:31"
+    "created_at": "2026-09-28 09:26:57"
   },
-  "request_id": "req_46b177b7-4cd6-4e26-9271-fce669182996",
+  "request_id": "req_d33d20fd-c4af-42eb-ba8e-20fa1a8ddd18",
   "leaks_full_phone": false,
   "leaks_address": false,
   "leaks_price": false
@@ -777,7 +777,7 @@
 
 ### WF-022 — تتبّع بآخر 4 أرقام خاطئة — منع تعداد الطلبات
 
-**✅ PASS** · 5/5 فحوص · 53ms
+**✅ PASS** · 5/5 فحوص · 54ms
 
 | الحقل | القيمة |
 |---|---|
@@ -793,13 +793,13 @@
 - ✅ code=NOT_FOUND
 - ✅ رقم طلب غير موجود أصلًا → HTTP 404
 - ✅ الرسالتان متطابقتان حرفيًا («تعذر العثور على الطلب») — لا تمييز يكشف وجود الطلب
-- ✅ سُجّلت محاولة فاشلة في التدقيق: 29 → 31
+- ✅ سُجّلت محاولة فاشلة في التدقيق: 31 → 33
 
 **ACTUAL (دليل خام)**
 
 ```json
 {
-  "order_id": "ORD-87351461-f5f4478a",
+  "order_id": "ORD-87617767-feb01d0c",
   "wrong_last4_http": 404,
   "wrong_last4_error": "تعذر العثور على الطلب",
   "wrong_last4_code": "NOT_FOUND",
@@ -807,8 +807,8 @@
   "ghost_id_error": "تعذر العثور على الطلب",
   "messages_identical": true,
   "audit_track_failed": [
-    29,
-    31
+    31,
+    33
   ]
 }
 ```
@@ -816,7 +816,7 @@
 
 ### WF-023 — علم التتبّع مغلق — النقطة لا تكشف وجودها
 
-**✅ PASS** · 3/3 فحوص · 13ms
+**✅ PASS** · 3/3 فحوص · 12ms
 
 | الحقل | القيمة |
 |---|---|
@@ -839,7 +839,7 @@
   "http": 404,
   "code": "NOT_FOUND",
   "error": "تعذر العثور على الطلب",
-  "request_id": "req_9289296c-e771-4b80-a5e9-0a7d2af8b3fe",
+  "request_id": "req_796cd057-30b9-4cbe-9683-f702ed7f9879",
   "identical_to_enabled_failure": true
 }
 ```
@@ -847,7 +847,7 @@
 
 ### WF-024 — تجاوز حد المعدل على إنشاء الطلبات — 429 بعد 8 محاولات
 
-**✅ PASS** · 5/5 فحوص · 187ms
+**✅ PASS** · 5/5 فحوص · 224ms
 
 | الحقل | القيمة |
 |---|---|
@@ -893,7 +893,7 @@
 
 ### WF-025 — نقطتان محجوبتان بعلم ميزة — التشخيص وأدوات MCP
 
-**✅ PASS** · 5/5 فحوص · 30ms
+**✅ PASS** · 5/5 فحوص · 22ms
 
 | الحقل | القيمة |
 |---|---|
@@ -930,7 +930,7 @@
 
 ### WF-006 — جسم أكبر من الحد المسموح
 
-**✅ PASS** · 4/4 فحوص · 13ms
+**✅ PASS** · 4/4 فحوص · 21ms
 
 | الحقل | القيمة |
 |---|---|
@@ -944,8 +944,8 @@
 
 - ✅ HTTP 413 (المتوقع 413)
 - ✅ code=PAYLOAD_TOO_LARGE
-- ✅ request_id=req_c00c1748-cd64-4e33-98f9-1e64b48d12c7
-- ✅ عدد الطلبات 217 → 217 (بلا تغيير)
+- ✅ request_id=req_3bb9575c-467e-432f-ab2f-9576dfc2c4ae
+- ✅ عدد الطلبات 230 → 230 (بلا تغيير)
 
 **ACTUAL (دليل خام)**
 
@@ -954,16 +954,16 @@
   "http": 413,
   "code": "PAYLOAD_TOO_LARGE",
   "error": "حجم الطلب كبير جدًا",
-  "request_id": "req_c00c1748-cd64-4e33-98f9-1e64b48d12c7",
-  "orders_before": 217,
-  "orders_after": 217
+  "request_id": "req_3bb9575c-467e-432f-ab2f-9576dfc2c4ae",
+  "orders_before": 230,
+  "orders_after": 230
 }
 ```
 
 
 ### WF-007 — جسم ليس JSON صالحًا
 
-**✅ PASS** · 4/4 فحوص · 10ms
+**✅ PASS** · 4/4 فحوص · 17ms
 
 | الحقل | القيمة |
 |---|---|
@@ -987,16 +987,16 @@
   "http": 422,
   "code": "VALIDATION_FAILED",
   "error": "جسم الطلب ليس JSON صالحًا",
-  "request_id": "req_c8c26711-967c-4b66-bc44-19816712a970",
+  "request_id": "req_02d6cb64-ea33-4a73-a062-ac111c27f23d",
   "leaks_parser_internals": false,
-  "body_excerpt": "{\"error\":\"جسم الطلب ليس JSON صالحًا\",\"code\":\"VALIDATION_FAILED\",\"request_id\":\"req_c8c26711-967c-4b66-bc44-19816712a970\"}"
+  "body_excerpt": "{\"error\":\"جسم الطلب ليس JSON صالحًا\",\"code\":\"VALIDATION_FAILED\",\"request_id\":\"req_02d6cb64-ea33-4a73-a062-ac111c27f23d\"}"
 }
 ```
 
 
 ### WF-008 — تجاوز حدود أطوال الحقول
 
-**✅ PASS** · 7/7 فحوص · 165ms
+**✅ PASS** · 7/7 فحوص · 82ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1014,7 +1014,7 @@
 - ✅ customer_short → HTTP 422 (المتوقع 422) — «customer: الطول الأدنى 2 أحرف»
 - ✅ رسالة customer تسمّي الحد 120: «customer: الطول الأقصى 120 حرفًا»
 - ✅ رسالة address تسمّي الحد 500: «address: الطول الأقصى 500 حرفًا»
-- ✅ عدد الطلبات 217 → 217 (بلا تغيير)
+- ✅ عدد الطلبات 230 → 230 (بلا تغيير)
 
 **ACTUAL (دليل خام)**
 
@@ -1042,15 +1042,15 @@
       "error": "customer: الطول الأدنى 2 أحرف"
     }
   },
-  "orders_before": 217,
-  "orders_after": 217
+  "orders_before": 230,
+  "orders_after": 230
 }
 ```
 
 
 ### WF-009 — هاتف غير صالح ومحافظة خارج القائمة
 
-**✅ PASS** · 6/6 فحوص · 65ms
+**✅ PASS** · 6/6 فحوص · 80ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1067,7 +1067,7 @@
 - ✅ محافظة خارج القائمة → HTTP 422
 - ✅ رسالة تسمّي المحافظة: «اختر المحافظة من القائمة»
 - ✅ المخزون 50 → 50 (لم يُخصم)
-- ✅ عدد الطلبات 217 → 217
+- ✅ عدد الطلبات 230 → 230
 
 **ACTUAL (دليل خام)**
 
@@ -1085,15 +1085,15 @@
   },
   "stock_before": 50,
   "stock_after": 50,
-  "orders_before": 217,
-  "orders_after": 217
+  "orders_before": 230,
+  "orders_after": 230
 }
 ```
 
 
 ### WF-026 — رؤوس الأمان مطبّقة على كل الاستجابات
 
-**✅ PASS** · 4/4 فحوص · 81ms
+**✅ PASS** · 4/4 فحوص · 75ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1140,7 +1140,7 @@
 
 ### WF-027 — حد المعدل على الدردشة — 30 محاولة / 10 دقائق
 
-**✅ PASS** · 4/4 فحوص · 511ms
+**✅ PASS** · 4/4 فحوص · 619ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1165,14 +1165,14 @@
   "last_http": 429,
   "last_code": "RATE_LIMITED",
   "retry_after_seconds": 600,
-  "request_id": "req_dc37bdb5-8cbe-4192-b792-3619bdb5f1d2"
+  "request_id": "req_31e0f9ac-7d65-4814-9e27-efb0460134cd"
 }
 ```
 
 
 ### WF-028 — قيمة غير مسموحة في حقل مُعدَّد وحد الأصناف
 
-**✅ PASS** · 5/5 فحوص · 38ms
+**✅ PASS** · 5/5 فحوص · 29ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1188,7 +1188,7 @@
 - ✅ code=VALIDATION_FAILED
 - ✅ 51 صنفًا → HTTP 422 (المتوقع 422)
 - ✅ الرسالة تسمّي الحد 50: «items: الحد الأقصى 50 صنفًا»
-- ✅ عدد الطلبات 217 → 217
+- ✅ عدد الطلبات 230 → 230
 
 **ACTUAL (دليل خام)**
 
@@ -1204,15 +1204,15 @@
     "code": "VALIDATION_FAILED",
     "error": "items: الحد الأقصى 50 صنفًا"
   },
-  "orders_before": 217,
-  "orders_after": 217
+  "orders_before": 230,
+  "orders_after": 230
 }
 ```
 
 
 ### WF-029 — X-Request-Id على النجاح والخطأ معًا
 
-**✅ PASS** · 5/5 فحوص · 120ms
+**✅ PASS** · 5/5 فحوص · 87ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1224,10 +1224,10 @@
 
 **الفحوص**
 
-- ✅ 200 /api/products — header=req_db5af643-13c8-4990-8188-a7f871e14bb1
-- ✅ 422 chat — header=req_6c08ac09-707a-4c5f-bab3-2e153fda14b9 body=req_6c08ac09-707a-4c5f-bab3-2e153fda14b9
-- ✅ 401 orders — header=req_171e380f-4b56-4192-8807-b63a9a4e3171 body=req_171e380f-4b56-4192-8807-b63a9a4e3171
-- ✅ 409 conflict — header=req_1d624754-7572-4162-baee-57c4e3db3f66 body=req_1d624754-7572-4162-baee-57c4e3db3f66
+- ✅ 200 /api/products — header=req_ce84c261-77e1-4cfd-9f69-670db95255dc
+- ✅ 422 chat — header=req_d7095ea5-6bfc-4e71-b171-2dd62f91a468 body=req_d7095ea5-6bfc-4e71-b171-2dd62f91a468
+- ✅ 401 orders — header=req_2433eb2b-130a-475d-b469-1561efa71b31 body=req_2433eb2b-130a-475d-b469-1561efa71b31
+- ✅ 409 conflict — header=req_2ce2ccd8-611c-4d47-b823-50a6dbcf3598 body=req_2ce2ccd8-611c-4d47-b823-50a6dbcf3598
 - ✅ كل المعرّفات بالصيغة req_ القابلة للبحث في السجلات
 
 **ACTUAL (دليل خام)**
@@ -1237,23 +1237,23 @@
   "probes": [
     {
       "case": "200 /api/products",
-      "header": "req_db5af643-13c8-4990-8188-a7f871e14bb1",
+      "header": "req_ce84c261-77e1-4cfd-9f69-670db95255dc",
       "bodyId": null
     },
     {
       "case": "422 chat",
-      "header": "req_6c08ac09-707a-4c5f-bab3-2e153fda14b9",
-      "bodyId": "req_6c08ac09-707a-4c5f-bab3-2e153fda14b9"
+      "header": "req_d7095ea5-6bfc-4e71-b171-2dd62f91a468",
+      "bodyId": "req_d7095ea5-6bfc-4e71-b171-2dd62f91a468"
     },
     {
       "case": "401 orders",
-      "header": "req_171e380f-4b56-4192-8807-b63a9a4e3171",
-      "bodyId": "req_171e380f-4b56-4192-8807-b63a9a4e3171"
+      "header": "req_2433eb2b-130a-475d-b469-1561efa71b31",
+      "bodyId": "req_2433eb2b-130a-475d-b469-1561efa71b31"
     },
     {
       "case": "409 conflict",
-      "header": "req_1d624754-7572-4162-baee-57c4e3db3f66",
-      "bodyId": "req_1d624754-7572-4162-baee-57c4e3db3f66"
+      "header": "req_2ce2ccd8-611c-4d47-b823-50a6dbcf3598",
+      "bodyId": "req_2ce2ccd8-611c-4d47-b823-50a6dbcf3598"
     }
   ]
 }
@@ -1262,7 +1262,7 @@
 
 ### WF-030 — مسار غير موجود — 404 بلا تسريب
 
-**✅ PASS** · 3/3 فحوص · 66ms
+**✅ PASS** · 3/3 فحوص · 50ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1285,7 +1285,7 @@
   "missing_route_http": 404,
   "missing_route_excerpt": "<!DOCTYPE html><html lang=\"ar\" dir=\"rtl\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet",
   "traversal_http": 404,
-  "traversal_excerpt": "{\"error\":\"هذه النقطة غير متاحة\",\"code\":\"NOT_FOUND\",\"request_id\":\"req_7177afe8-2cb9-4e15-878f-6c58110404e0\"}",
+  "traversal_excerpt": "{\"error\":\"هذه النقطة غير متاحة\",\"code\":\"NOT_FOUND\",\"request_id\":\"req_c2975019-ba02-47ab-842b-ada81de915af\"}",
   "real_leak": false,
   "dev_only_artifact_present": true
 }
@@ -1294,7 +1294,7 @@
 
 ### WF-031 — بناء الإنتاج لا يسرّب ما يسرّبه وضع التطوير
 
-**✅ PASS** · 4/4 فحوص · 71ms
+**✅ PASS** · 4/4 فحوص · 47ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1344,7 +1344,7 @@
 
 ### WF-032 — تكافؤ dev/prod على محرّك الرد الاحتياطي — حارس البناء القديم
 
-**✅ PASS** · 4/4 فحوص · 85ms
+**✅ PASS** · 4/4 فحوص · 31ms
 
 | الحقل | القيمة |
 |---|---|
@@ -1396,7 +1396,7 @@
 | خطوة | نتيجة |
 |---|---|
 | `POST /api/admin/login` بكلمة مرور صحيحة | `200` + `Set-Cookie` |
-| قيمة الكوكيز على السلك | `1790587351363-dEPYBjDMw1Wn8xLLHBUMMKYiLxJgtunr.Ejzfe16xzLwcuvPO8-yC5FKGKkr1cH8p-eEUweNcLQo` |
+| قيمة الكوكيز على السلك | `1790587617671-AwqbqDHY3HsTj3WBPefceMQ91A6DTouA.ZsldBjeH3JnKg8REBzVa-ACV2OrIvq_7inAUjb1q38U` |
 | `GET /api/admin/session` بنفس الكوكيز | `authenticated=true` |
 | `GET /api/orders` بنفس الكوكيز | `200` `undefined` |
 | `POST /api/products` بنفس الكوكيز | `200` `undefined` |
@@ -1429,7 +1429,7 @@
 
 ### D-2 · لا يوجد idempotency key — الضغط المزدوج يُنشئ طلبين
 
-`createOrderContract` لا يحمل أي مفتاح تفرد. في WF-010 أنتجت ضغطتان متطابقتان طلبين منفصلين (`ORD-87350320-779633ac` و`ORD-87350338-c1aca006`) وخصمًا قدره 2 من المخزون. **لا يوجد فساد بيانات** — المخزون لم يتجاوز حدّه ولا سجلات يتيمة — لكن العميل قد يطلب مرتين دون قصد. القرار الحالي «كل ضغطة طلب مستقل» قرار مشروع، لكنه غير معلن ولا محمي.
+`createOrderContract` لا يحمل أي مفتاح تفرد. في WF-010 أنتجت ضغطتان متطابقتان طلبين منفصلين (`ORD-87616561-d2b36675` و`ORD-87616578-39939d7c`) وخصمًا قدره 2 من المخزون. **لا يوجد فساد بيانات** — المخزون لم يتجاوز حدّه ولا سجلات يتيمة — لكن العميل قد يطلب مرتين دون قصد. القرار الحالي «كل ضغطة طلب مستقل» قرار مشروع، لكنه غير معلن ولا محمي.
 
 ### D-3 · ملاحظة CSP
 
@@ -1606,7 +1606,7 @@
    - `:3002` (`~/whatif-aifail`) — مفاتيح Gemini/Groq موجودة + `ENABLE_ORDER_TRACKING=true`، لـ WF-015 وWF-021/022.
    - `:3003` — **بناء إنتاجي** (`npm run build && next start`)، لـ WF-031 ومقاطعة D-6.
    المجلدات منفصلة لأن نسختَي dev في مجلد واحد تتصارعان على `.next`، ولأن Turbopack يرفض `node_modules` الرمزي («points out of the filesystem root») فنُسخت بالوصلات الصلبة.
-5. **لم يُعدَّل أي كود تطبيق أثناء القياس — والتعديلات جاءت بعده وبقياس جديد.** التزم المختبر في جولاته الأولى بتجميد الحالة: التغيير الوحيد كان `next.config.mjs` (قراءة `ALLOWED_DEV_ORIGINS` من البيئة، ومعطّل افتراضيًا) ومجلد `whatif/` الجديد. بعد اكتمال المصفوفة أُصلحت خمسة عيوب (D-1، D-4، D-5، D-6، D-7)، وكل إصلاح أُعيد قياسه بتشغيل جديد للمختبر لا بالاعتماد على التشغيل السابق. فالتسلسل كان: قِس ← اكتشف ← أصلح ← أعِد القياس، ولم يُعلن أي إصلاح قبل دليله.
+5. **لم يُعدَّل أي كود تطبيق أثناء القياس — والتعديلات جاءت بعده وبقياس جديد.** التزم المختبر في جولاته الأولى بتجميد الحالة: التغيير الوحيد كان `next.config.mjs` (قراءة `ALLOWED_DEV_ORIGINS` من البيئة، ومعطّل افتراضيًا) ومجلد `whatif/` الجديد. بعد اكتمال المصفوفة أُصلحت ستة عيوب (D-1، D-4، D-5، D-6، D-7، D-8)، وكل إصلاح أُعيد قياسه بتشغيل جديد للمختبر لا بالاعتماد على التشغيل السابق. فالتسلسل كان: قِس ← اكتشف ← أصلح ← أعِد القياس، ولم يُعلن أي إصلاح قبل دليله. وثلاثة عيوب بقيت مفتوحة بتوثيق كامل لا بإصلاح: D-2 (لا idempotency key)، D-3 (CSP للمراقبة فقط)، D-9 (كتابة إدارة المنتجات بلا حدّ معدّل) — ولم يُصلح أيٌّ منها لأنه لم يُصرَّح به.
 6. **حدود البيئة — ما لم يُقَس:** الاتصال الخارجي محجوب على مستوى TLS (`generativelanguage.googleapis.com` و`api.groq.com` يُرجعان `000` مع `SSL_ERROR_SYSCALL`). لذلك:
    - WF-015 قاس **انقطاع المزود** لا **رفض المفتاح**. كلاهما يُنتج نفس قرار التراجع في `chat/route.ts`، لكن «مفتاح منتهي/غير صالح» تحديدًا لم يُختبر.
    - مسار Gemini/Groq الحقيقي لم يُقَس إطلاقًا، ونتائج D-4/D-5 تخص `localAnswer` وحده.
