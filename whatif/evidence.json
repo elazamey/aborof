@@ -1,0 +1,687 @@
+{
+  "run": "run4",
+  "base": "http://127.0.0.1:3000",
+  "nodb_base": "http://127.0.0.1:3001",
+  "generated_at": "2026-09-28T07:55:46.572Z",
+  "baseline": {
+    "orders": 11,
+    "order_items": 11,
+    "orphan_order_items": 0,
+    "negative_stock_rows": 0,
+    "last_order": {
+      "id": "ORD-82128733-4415d9c6",
+      "total": 1000,
+      "shipping_fee": 0,
+      "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
+    }
+  },
+  "final_db": {
+    "orders": 16,
+    "order_items": 16,
+    "orphan_order_items": 0,
+    "negative_stock_rows": 0,
+    "last_order": {
+      "id": "ORD-82146479-1e121d32",
+      "total": 1000,
+      "shipping_fee": 0,
+      "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
+    }
+  },
+  "totals": {
+    "PASS": 10,
+    "FAIL": 1
+  },
+  "scenarios": [
+    {
+      "id": "WF-001",
+      "title": "المنتج موجود والمخزون يكفي — «عايز 20 عبوة من منظف الأرضيات باللافندر»",
+      "input": "POST /api/orders {items:[{p1,20}]}",
+      "precondition": "p1: stock=50, price=180",
+      "expected_decision": "FIND → CHECK STOCK → ACCEPT",
+      "expected_side_effect": "طلب واحد، subtotal=3600، شحن=0 (فوق 1000)، المخزون 50→30",
+      "evidence_required": "200 + رقم طلب + المخزون بعد + صف الطلب في DB",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "HTTP 200 (المتوقع 200)"
+        },
+        {
+          "ok": true,
+          "detail": "ok=true"
+        },
+        {
+          "ok": true,
+          "detail": "subtotal=3600 (المتوقع 3600 = 20×180)"
+        },
+        {
+          "ok": true,
+          "detail": "shipping=0 (المتوقع 0 — فوق حد الشحن المجاني 1000)"
+        },
+        {
+          "ok": true,
+          "detail": "total=3600 (المتوقع 3600)"
+        },
+        {
+          "ok": true,
+          "detail": "المخزون 50 → 30 (المتوقع 30)"
+        },
+        {
+          "ok": true,
+          "detail": "صفوف بمخزون سالب = 0"
+        },
+        {
+          "ok": true,
+          "detail": "أصناف يتيمة = 0"
+        }
+      ],
+      "actual": {
+        "http": 200,
+        "request_id": "req_cf8c5e72-1bda-4bbe-95ee-017a4e1eb412",
+        "body": {
+          "ok": true,
+          "id": "ORD-82145886-f5ba439f",
+          "subtotal": 3600,
+          "shipping": 0,
+          "total": 3600
+        },
+        "stock_before": 50,
+        "stock_after": 30,
+        "db": {
+          "orders": 12,
+          "order_items": 12,
+          "orphan_order_items": 0,
+          "negative_stock_rows": 0,
+          "last_order": {
+            "id": "ORD-82145886-f5ba439f",
+            "total": 3600,
+            "shipping_fee": 0,
+            "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":20}]"
+          }
+        }
+      },
+      "status": "PASS",
+      "ms": 61
+    },
+    {
+      "id": "WF-002",
+      "title": "منتج غير موجود — بحث + محاولة شراء",
+      "input": "chat: «عندكم منظف زئبق للقمر؟» ثم POST /api/orders {items:[{p-ghost,1}]}",
+      "precondition": "لا يوجد منتج بهذا المعرف/الاسم",
+      "expected_decision": "SEARCH → NOT_FOUND → SAFE RESPONSE / 409 CONFLICT",
+      "expected_side_effect": "لا طلب، لا خصم مخزون، رد آمن بلا اختراع منتج",
+      "evidence_required": "رد الدردشة + 409 + ثبات المخزون وعدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "chat HTTP 200"
+        },
+        {
+          "ok": true,
+          "detail": "الدردشة ردّت نصًا آمنًا"
+        },
+        {
+          "ok": true,
+          "detail": "الرد لم يؤكّد توافر منتج غير موجود"
+        },
+        {
+          "ok": true,
+          "detail": "HTTP 409 (المتوقع 409)"
+        },
+        {
+          "ok": true,
+          "detail": "code=CONFLICT (المتوقع CONFLICT)"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 12 → 12 (بلا تغيير)"
+        },
+        {
+          "ok": true,
+          "detail": "أصناف يتيمة = 0"
+        }
+      ],
+      "actual": {
+        "chat_http": 200,
+        "chat_source": "local",
+        "chat_reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 ج",
+        "http": 409,
+        "code": "CONFLICT",
+        "request_id": "req_f010a45b-cf1f-4e88-bc5c-28049d42eea0",
+        "body": {
+          "error": "أحد المنتجات لم يعد متاحًا",
+          "code": "CONFLICT",
+          "request_id": "req_f010a45b-cf1f-4e88-bc5c-28049d42eea0"
+        },
+        "orders_before": 12,
+        "orders_after": 12
+      },
+      "status": "PASS",
+      "ms": 47
+    },
+    {
+      "id": "WF-003",
+      "title": "الكمية أكبر من المخزون — طلب 20 والمتاح 7",
+      "input": "POST /api/orders {items:[{p1,20}]}",
+      "precondition": "p1: stock=7",
+      "expected_decision": "VALIDATE QUANTITY → BLOCK → EXPLAIN WHY",
+      "expected_side_effect": "لا طلب، المخزون يبقى 7، رسالة تسمّي المنتج",
+      "evidence_required": "409 + نص الرسالة + المخزون قبل/بعد + عدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "HTTP 409 (المتوقع 409)"
+        },
+        {
+          "ok": true,
+          "detail": "code=CONFLICT"
+        },
+        {
+          "ok": true,
+          "detail": "الرسالة تشرح السبب: «الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة»"
+        },
+        {
+          "ok": true,
+          "detail": "الرسالة تسمّي المنتج المعني"
+        },
+        {
+          "ok": true,
+          "detail": "المخزون 7 → 7 (لم يُخصم شيء)"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 12 → 12 (لم يُنشأ طلب)"
+        }
+      ],
+      "actual": {
+        "http": 409,
+        "code": "CONFLICT",
+        "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
+        "request_id": "req_4f9d3e8f-52c5-4354-b51a-c7ff9e84af6d",
+        "stock_before": 7,
+        "stock_after": 7,
+        "orders_before": 12,
+        "orders_after": 12
+      },
+      "status": "PASS",
+      "ms": 54
+    },
+    {
+      "id": "WF-004",
+      "title": "المخزون صفر — AVAILABILITY = FALSE",
+      "input": "POST /api/orders {items:[{p1,1}]}",
+      "precondition": "p1: stock=0",
+      "expected_decision": "CHECK STOCK → ORDER_BLOCKED",
+      "expected_side_effect": "لا طلب، المخزون يبقى 0",
+      "evidence_required": "409 + ثبات المخزون وعدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "precondition: stock=0"
+        },
+        {
+          "ok": true,
+          "detail": "HTTP 409 (المتوقع 409)"
+        },
+        {
+          "ok": true,
+          "detail": "code=CONFLICT"
+        },
+        {
+          "ok": true,
+          "detail": "المخزون بعد = 0 (لم يصبح سالبًا)"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 12 → 12"
+        },
+        {
+          "ok": true,
+          "detail": "صفوف بمخزون سالب = 0"
+        }
+      ],
+      "actual": {
+        "http": 409,
+        "code": "CONFLICT",
+        "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
+        "request_id": "req_d2da546e-3e78-4a8f-931b-a09b33c1b67b",
+        "stock_before": 0,
+        "stock_after": 0,
+        "orders_after": 12
+      },
+      "status": "PASS",
+      "ms": 49
+    },
+    {
+      "id": "WF-005",
+      "title": "حمولة غير صحيحة — مفتاح غير معروف + سلة فارغة",
+      "input": "POST /api/chat {message:...} ثم POST /api/orders {items:[]}",
+      "precondition": "لا شيء",
+      "expected_decision": "ZOD STRICT → 422 VALIDATION_FAILED",
+      "expected_side_effect": "لا طلب، لا كتابة في DB، request_id للربط بالسجلات",
+      "evidence_required": "422 + code + request_id + ثبات عدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "chat HTTP 422 (المتوقع 422)"
+        },
+        {
+          "ok": true,
+          "detail": "chat code=VALIDATION_FAILED"
+        },
+        {
+          "ok": true,
+          "detail": "العقد strict رفض المفتاح: Unrecognized key(s) in object: 'message'"
+        },
+        {
+          "ok": true,
+          "detail": "request_id=req_5c8d216a-ef94-4bc2-bec4-e7045e32ec09"
+        },
+        {
+          "ok": true,
+          "detail": "orders HTTP 422 (المتوقع 422)"
+        },
+        {
+          "ok": true,
+          "detail": "orders code=VALIDATION_FAILED"
+        },
+        {
+          "ok": true,
+          "detail": "رسالة عربية مفهومة: items: السلة فارغة"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 12 → 12 (بلا تغيير)"
+        }
+      ],
+      "actual": {
+        "chat_http": 422,
+        "chat_code": "VALIDATION_FAILED",
+        "chat_error": "Unrecognized key(s) in object: 'message'",
+        "chat_request_id": "req_5c8d216a-ef94-4bc2-bec4-e7045e32ec09",
+        "order_http": 422,
+        "order_code": "VALIDATION_FAILED",
+        "order_error": "items: السلة فارغة",
+        "order_request_id": "req_b7fb62db-6fe9-49f9-8a9c-50bc3fc415c6",
+        "orders_before": 12,
+        "orders_after": 12
+      },
+      "status": "PASS",
+      "ms": 31
+    },
+    {
+      "id": "WF-010",
+      "title": "الضغط على «إرسال الطلب» مرتين — double submit",
+      "input": "POST /api/orders مرتين بنفس الحمولة ونفس هوية العميل",
+      "precondition": "p1: stock=10",
+      "expected_decision": "لكل طلب قرار مستقل — لا مفتاح idempotency في العقد",
+      "expected_side_effect": "طلبان منفصلان، المخزون 10→8، بلا تجاوز للمخزون",
+      "evidence_required": "رقما طلبين مختلفين + المخزون بعد + عدم وجود سجلات يتيمة",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "HTTP 200 / 200"
+        },
+        {
+          "ok": true,
+          "detail": "رقما الطلبين مختلفان: ORD-82146125-28d0d268 , ORD-82146148-b55df240"
+        },
+        {
+          "ok": true,
+          "detail": "المخزون 10 → 8 (خصم 2 — طلب واحد لكل ضغطة)"
+        },
+        {
+          "ok": true,
+          "detail": "صفوف بمخزون سالب = 0"
+        },
+        {
+          "ok": true,
+          "detail": "أصناف يتيمة = 0"
+        }
+      ],
+      "actual": {
+        "http_1": 200,
+        "http_2": 200,
+        "id_1": "ORD-82146125-28d0d268",
+        "id_2": "ORD-82146148-b55df240",
+        "request_id_1": "req_76ae8609-667e-43e5-a1e3-d4dcbd1c836d",
+        "request_id_2": "req_cdd83bcc-bf59-4e45-8a1b-08183ad66428",
+        "stock_before": 10,
+        "stock_after": 8,
+        "db": {
+          "orders": 14,
+          "order_items": 14,
+          "orphan_order_items": 0,
+          "negative_stock_rows": 0,
+          "last_order": {
+            "id": "ORD-82146148-b55df240",
+            "total": 230,
+            "shipping_fee": 50,
+            "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":1}]"
+          }
+        },
+        "finding": "لا يوجد idempotency key في createOrderContract — التكرار يُنشئ طلبين"
+      },
+      "status": "PASS",
+      "ms": 97
+    },
+    {
+      "id": "WF-011",
+      "title": "السعر تغيّر بين العرض وتأكيد الطلب + محاولة تزوير السعر",
+      "input": "عرض 180 ← الإدارة ترفعه إلى 250 ← POST /api/orders {items:[{p1,1}]}",
+      "precondition": "p1: price=180 ثم price=250 (old_price=null)",
+      "expected_decision": "إعادة حساب السعر من مصدر موثوق؛ العقد لا يقبل سعرًا من العميل",
+      "expected_side_effect": "الطلب يُسعَّر بـ 250 لا 180؛ الحمولة المزوّرة تُرفض 422",
+      "evidence_required": "total=300 (250+50) + price داخل items + 422 للتزوير",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "precondition: السعر المعروض = 180"
+        },
+        {
+          "ok": true,
+          "detail": "HTTP 200"
+        },
+        {
+          "ok": true,
+          "detail": "subtotal=250 (المتوقع 250 — سعر وقت التنفيذ لا وقت العرض)"
+        },
+        {
+          "ok": true,
+          "detail": "shipping=50 (المتوقع 50 — تحت حد 1000)"
+        },
+        {
+          "ok": true,
+          "detail": "total=300 (المتوقع 300)"
+        },
+        {
+          "ok": true,
+          "detail": "السعر المخزّن في صف الطلب = 250"
+        },
+        {
+          "ok": true,
+          "detail": "تزوير السعر → HTTP 422 (المتوقع 422)"
+        },
+        {
+          "ok": true,
+          "detail": "code=VALIDATION_FAILED"
+        },
+        {
+          "ok": true,
+          "detail": "العقد strict رفض حقل price: items.0: Unrecognized key(s) in object: 'price'"
+        }
+      ],
+      "actual": {
+        "price_viewed_by_customer": 180,
+        "price_at_commit": 250,
+        "http": 200,
+        "subtotal": 250,
+        "shipping": 50,
+        "total": 300,
+        "stored_items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":1}]",
+        "tamper_http": 422,
+        "tamper_code": "VALIDATION_FAILED",
+        "tamper_error": "items.0: Unrecognized key(s) in object: 'price'",
+        "request_id": "req_f2c95d1b-5793-4ea1-92e5-d05195f43857"
+      },
+      "status": "PASS",
+      "ms": 94
+    },
+    {
+      "id": "WF-016",
+      "title": "قاعدة البيانات غير متاحة أثناء إنشاء الطلب",
+      "input": "POST /api/orders على نسخة Runtime بلا TURSO_DATABASE_URL (:3001)",
+      "precondition": "TURSO_DATABASE_URL فارغ — db() يُعيد null",
+      "expected_decision": "SERVICE_UNAVAILABLE — لا نجاح كاذب",
+      "expected_side_effect": "لا طلب، والقراءة تتدهور بأمان إلى منتجات البذر",
+      "evidence_required": "503 + code + request_id + 200 على القراءة + عدم ظهور طلب في DB الحقيقية",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "HTTP 503 (المتوقع 503)"
+        },
+        {
+          "ok": true,
+          "detail": "code=SERVICE_UNAVAILABLE"
+        },
+        {
+          "ok": true,
+          "detail": "لا يوجد ok:true في الاستجابة (لا نجاح كاذب)"
+        },
+        {
+          "ok": true,
+          "detail": "لا رقم طلب في الاستجابة"
+        },
+        {
+          "ok": true,
+          "detail": "request_id=req_a5c4e5ae-ebda-404d-83b5-0516091599c1 للربط بالسجلات"
+        },
+        {
+          "ok": true,
+          "detail": "قراءة المنتجات HTTP 200 (تدهور آمن)"
+        },
+        {
+          "ok": true,
+          "detail": "طلبات DB الحقيقية 15 → 15 (لم يُكتب شيء)"
+        }
+      ],
+      "actual": {
+        "http": 503,
+        "code": "SERVICE_UNAVAILABLE",
+        "message": "قاعدة البيانات غير مربوطة",
+        "request_id": "req_a5c4e5ae-ebda-404d-83b5-0516091599c1",
+        "read_http": 200,
+        "read_products": 12,
+        "real_db_orders_before": 15,
+        "real_db_orders_after": 15
+      },
+      "status": "PASS",
+      "ms": 37
+    },
+    {
+      "id": "WF-017",
+      "title": "مستخدم عادي يحاول تنفيذ إجراء إداري",
+      "input": "POST /api/products و PATCH /api/orders و GET /api/orders — بلا كوكيز، وبكوكيز مزوّر",
+      "precondition": "لا جلسة إدارة صالحة",
+      "expected_decision": "AUTHORIZATION → 401 AUTH_REQUIRED",
+      "expected_side_effect": "لا كتابة، لا كشف بيانات الطلبات، لا تغيير مخزون",
+      "evidence_required": "401 على المسارات الأربعة + ثبات المخزون وعدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "POST /api/products بلا كوكيز → 401"
+        },
+        {
+          "ok": true,
+          "detail": "PATCH /api/orders بلا كوكيز → 401"
+        },
+        {
+          "ok": true,
+          "detail": "GET /api/orders بلا كوكيز → 401"
+        },
+        {
+          "ok": true,
+          "detail": "code=AUTH_REQUIRED (لا كشف لبيانات الطلبات)"
+        },
+        {
+          "ok": true,
+          "detail": "كوكيز موقّع تزويرًا → 401 (HMAC مرفوض)"
+        },
+        {
+          "ok": true,
+          "detail": "DELETE /api/products بلا كوكيز → 401"
+        },
+        {
+          "ok": true,
+          "detail": "المخزون 49 → 49 (لم يتغير)"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 15 → 15"
+        }
+      ],
+      "actual": {
+        "post_products": 401,
+        "patch_orders": 401,
+        "list_orders": 401,
+        "list_code": "AUTH_REQUIRED",
+        "forged_cookie": 401,
+        "delete_product": 401,
+        "stock_before": 49,
+        "stock_after": 49,
+        "orders_before": 15,
+        "orders_after": 15
+      },
+      "status": "PASS",
+      "ms": 76
+    },
+    {
+      "id": "WF-018",
+      "title": "تنفيذ جزئي — صنفان يفشل ثانيهما، ثم تسابق على نفس المخزون",
+      "input": "أ) items:[{p1,1},{p2,1}] والمخزون p2=0  ب) طلبان متزامنان qty=4 والمخزون 5",
+      "precondition": "أ) p1.stock=10, p2.stock=0   ب) p1.stock=5",
+      "expected_decision": "أ) الكل أو لا شيء — لا خصم جزئي  ب) طلب واحد فقط ينجح",
+      "expected_side_effect": "أ) p1 يبقى 10 ولا طلب  ب) المخزون 1 لا −3، وطلب واحد فقط",
+      "evidence_required": "409 + ثبات p1 + نتائج التزامن + أصناف يتيمة = 0",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "أ) HTTP 409 (المتوقع 409)"
+        },
+        {
+          "ok": true,
+          "detail": "أ) code=CONFLICT"
+        },
+        {
+          "ok": true,
+          "detail": "أ) p1: 10 → 10 (لا خصم جزئي للصنف الناجح)"
+        },
+        {
+          "ok": true,
+          "detail": "أ) عدد الطلبات 15 → 15 (لا طلب)"
+        },
+        {
+          "ok": true,
+          "detail": "أ) أصناف يتيمة = 0"
+        },
+        {
+          "ok": true,
+          "detail": "ب) نتائج التزامن [200, 409] (المتوقع 200 و409 — رابح واحد)"
+        },
+        {
+          "ok": true,
+          "detail": "ب) عدد الطلبات الناجحة = 1"
+        },
+        {
+          "ok": true,
+          "detail": "ب) المخزون 5 → 1 (المتوقع 1 لا سالب)"
+        },
+        {
+          "ok": true,
+          "detail": "ب) طلبات DB 15 → 16 (+1 فقط)"
+        },
+        {
+          "ok": true,
+          "detail": "ب) صفوف بمخزون سالب = 0"
+        },
+        {
+          "ok": true,
+          "detail": "ب) أصناف يتيمة = 0"
+        }
+      ],
+      "actual": {
+        "a_http": 409,
+        "a_code": "CONFLICT",
+        "a_message": "الكمية المطلوبة من كلوركس مبيض ومطهر 4 لتر غير متاحة",
+        "a_p1_before": 10,
+        "a_p1_after": 10,
+        "a_orders": [
+          15,
+          15
+        ],
+        "b_http": [
+          200,
+          409
+        ],
+        "b_codes": [
+          null,
+          "CONFLICT"
+        ],
+        "b_stock_before": 5,
+        "b_stock_after": 1,
+        "b_orders_created": [
+          15,
+          16
+        ],
+        "b_request_ids": [
+          "req_ef51bcf1-b9f9-480b-9b2f-2c89209077ae",
+          "req_1c655196-f9d8-49a7-a011-de0adacd9096"
+        ],
+        "db": {
+          "orders": 16,
+          "order_items": 16,
+          "orphan_order_items": 0,
+          "negative_stock_rows": 0,
+          "last_order": {
+            "id": "ORD-82146479-1e121d32",
+            "total": 1000,
+            "shipping_fee": 0,
+            "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
+          }
+        }
+      },
+      "status": "PASS",
+      "ms": 116
+    },
+    {
+      "id": "WF-019",
+      "title": "جلسة إدارة صالحة تُرفض — defect ترميز الكوكيز (اكتشاف المختبر)",
+      "input": "POST /api/admin/login (كلمة مرور صحيحة) ← GET /api/admin/session و GET /api/orders بنفس الكوكيز",
+      "precondition": "ADMIN_PASSWORD و ADMIN_SESSION_SECRET صحيحان",
+      "expected_decision": "login 200 + جلسة مقبولة على كل المسارات الإدارية",
+      "expected_side_effect": "authenticated:true وقراءة الطلبات 200",
+      "evidence_required": "200 على الدخول + authenticated + حالة المسارات الإدارية + قيمة الكوكيز على السلك",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "الدخول HTTP 200 (كلمة المرور مقبولة)"
+        },
+        {
+          "ok": true,
+          "detail": "كوكيز صدر فعلًا: 1790582146533%3AVUiIdqTj…"
+        },
+        {
+          "ok": true,
+          "detail": "GET /api/admin/session HTTP 200"
+        },
+        {
+          "ok": false,
+          "detail": "authenticated=false (المتوقع true — DEFECT: القيمة على السلك تحتوي %3A)"
+        },
+        {
+          "ok": false,
+          "detail": "GET /api/orders بجلسة صالحة HTTP 401 (المتوقع 200)"
+        },
+        {
+          "ok": false,
+          "detail": "POST /api/products بجلسة صالحة HTTP 401 (المتوقع 200)"
+        }
+      ],
+      "actual": {
+        "login_http": 200,
+        "cookie_value_on_the_wire": "1790582146533%3AVUiIdqTjyXgnuXuky7gbvWmOiiRvg3fv.wNo8LPTwCssty2HM92nAJVFk4pFXBrlQMvGHyl2oB6U",
+        "wire_contains_percent3A": true,
+        "session_http": 200,
+        "session_authenticated": false,
+        "list_orders_http": 401,
+        "list_orders_code": "AUTH_REQUIRED",
+        "admin_write_http": 401,
+        "admin_write_code": "AUTH_REQUIRED",
+        "root_cause": "response.cookies.set() يرمّز ':' إلى '%3A'؛ verifyAdminSession تحسب HMAC فوق النص المُرمَّز وتفشل كذلك في Number(payload.split(':')[0])",
+        "repro": "whatif/repro-auth-cookie.mjs → verify(خام)=true ، verify(على السلك)=false",
+        "defect": true
+      },
+      "status": "FAIL",
+      "ms": 56
+    }
+  ]
+}
