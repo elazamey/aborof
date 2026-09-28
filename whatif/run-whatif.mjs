@@ -22,6 +22,9 @@ const ROOT = join(HERE, "..");
 const BASE = process.env.BASE ?? "http://127.0.0.1:3000";
 const NODB_BASE = process.env.NODB_BASE ?? "http://127.0.0.1:3001";
 const AIFAIL_BASE = process.env.AIFAIL_BASE ?? "http://127.0.0.1:3002";
+/** نفس نسخة :3002 لكن بعلم تتبُّع الطلبات مفعّل — تُستخدم لمسار التتبّع. */
+const TRACK_BASE = process.env.TRACK_BASE ?? AIFAIL_BASE;
+const TRACK_DB_URL = process.env.WHATIF_TRACK_DB_URL ?? `file:${join(ROOT, "..", "whatif-aifail", "local-aifail.db")}`;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "dev-local-pass-12345";
 const DB_URL = process.env.WHATIF_DB_URL ?? `file:${join(ROOT, "local.db")}`;
 
@@ -1130,6 +1133,265 @@ await scenario(
         ),
         check(list.status === 200, `GET /api/orders بجلسة صالحة HTTP ${list.status} (المتوقع 200)`),
         check(write.status === 200, `POST /api/products بجلسة صالحة HTTP ${write.status} (المتوقع 200)`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-021
+await scenario(
+  {
+    id: "WF-021",
+    title: "تتبّع الطلب بعاملين صحيحين — العلم مفعّل",
+    input: "POST /api/orders/track {id, phoneLast4} على نسخة ENABLE_ORDER_TRACKING=true",
+    precondition: "طلب قائم بهاتف 01012345678؛ آخر 4 = 5678",
+    expected_decision: "AUTHORIZATION بعاملين → كشف الحالة",
+    expected_side_effect: "200 + حالة + أصناف مختصرة، بلا هاتف كامل ولا عنوان ولا أسعار",
+    evidence_required: "200 + محتوى الرد + غياب الهاتف/العنوان/السعر",
+  },
+  async (rec) => {
+    const created = await req(TRACK_BASE, "POST", "/api/orders", {
+      body: order([{ id: "p3", qty: 1 }], { phone: "01012345678", governorate: "الجيزة" }),
+      xff: `${RUN}-wf021create`,
+    });
+    const id = created.json?.id;
+    const r = await req(TRACK_BASE, "POST", "/api/orders/track", {
+      body: { id, phoneLast4: "5678" },
+      xff: `${RUN}-wf021`,
+    });
+    const body = r.text;
+    rec.actual = {
+      order_id: id,
+      http: r.status,
+      body: r.json,
+      request_id: r.requestId,
+      leaks_full_phone: /01012345678/.test(body),
+      leaks_address: /شارع النيل/.test(body),
+      leaks_price: /price|جنيه|\btotal\b/.test(body),
+    };
+    return {
+      checks: [
+        check(created.status === 200 && id, `أنشئ طلب للتتبّع: ${id}`),
+        check(r.status === 200, `HTTP ${r.status} (المتوقع 200)`),
+        check(r.json?.ok === true, `ok=${r.json?.ok}`),
+        check(r.json?.status === "جديد", `الحالة المُعادة = ${r.json?.status}`),
+        check(Array.isArray(r.json?.items) && r.json.items.length === 1, `أصناف مختصرة = ${JSON.stringify(r.json?.items)}`),
+        check(!/01012345678/.test(body), "لا هاتف كامل في الرد"),
+        check(!/شارع النيل/.test(body), "لا عنوان في الرد"),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-022
+await scenario(
+  {
+    id: "WF-022",
+    title: "تتبّع بآخر 4 أرقام خاطئة — منع تعداد الطلبات",
+    input: "POST /api/orders/track بنفس رقم الطلب مع phoneLast4=0000",
+    precondition: "نفس طلب WF-021",
+    expected_decision: "عدم تطابق → 404 برسالة موحّدة لا تكشف وجود الطلب",
+    expected_side_effect: "تسجيل محاولة فاشلة في سجل التدقيق، بلا تسريب",
+    evidence_required: "404 + تطابق الرسالة حرفيًا مع حالة «الرقم غير الموجود أصلًا» + صف تدقيق",
+  },
+  async (rec) => {
+    const created = await req(TRACK_BASE, "POST", "/api/orders", {
+      body: order([{ id: "p3", qty: 1 }], { phone: "01012345678", governorate: "الجيزة" }),
+      xff: `${RUN}-wf022create`,
+    });
+    const id = created.json?.id;
+
+    const c = createClient({ url: TRACK_DB_URL });
+    let auditBefore = 0;
+    try {
+      const a = await c.execute({
+        sql: "SELECT COUNT(*) AS n FROM admin_audit_log WHERE action='track_failed'",
+      });
+      auditBefore = Number(a.rows[0].n);
+    } finally {
+      c.close();
+    }
+
+    const wrongLast4 = await req(TRACK_BASE, "POST", "/api/orders/track", {
+      body: { id, phoneLast4: "0000" },
+      xff: `${RUN}-wf022a`,
+    });
+    const ghostId = await req(TRACK_BASE, "POST", "/api/orders/track", {
+      body: { id: "ORD-00000000-deadbeef", phoneLast4: "5678" },
+      xff: `${RUN}-wf022b`,
+    });
+
+    let auditAfter = 0;
+    try {
+      const cc = createClient({ url: TRACK_DB_URL });
+      try {
+        const a = await cc.execute({
+          sql: "SELECT COUNT(*) AS n FROM admin_audit_log WHERE action='track_failed'",
+        });
+        auditAfter = Number(a.rows[0].n);
+      } finally {
+        cc.close();
+      }
+    } catch {
+      auditAfter = auditBefore;
+    }
+
+    rec.actual = {
+      order_id: id,
+      wrong_last4_http: wrongLast4.status,
+      wrong_last4_error: wrongLast4.json?.error,
+      wrong_last4_code: wrongLast4.json?.code,
+      ghost_id_http: ghostId.status,
+      ghost_id_error: ghostId.json?.error,
+      messages_identical: wrongLast4.json?.error === ghostId.json?.error,
+      audit_track_failed: [auditBefore, auditAfter],
+    };
+    return {
+      checks: [
+        check(wrongLast4.status === 404, `آخر 4 خاطئة → HTTP ${wrongLast4.status} (المتوقع 404)`),
+        check(wrongLast4.json?.code === "NOT_FOUND", `code=${wrongLast4.json?.code}`),
+        check(ghostId.status === 404, `رقم طلب غير موجود أصلًا → HTTP ${ghostId.status}`),
+        check(
+          wrongLast4.json?.error === ghostId.json?.error,
+          `الرسالتان متطابقتان حرفيًا («${wrongLast4.json?.error}») — لا تمييز يكشف وجود الطلب`
+        ),
+        check(auditAfter > auditBefore, `سُجّلت محاولة فاشلة في التدقيق: ${auditBefore} → ${auditAfter}`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-023
+await scenario(
+  {
+    id: "WF-023",
+    title: "علم التتبّع مغلق — النقطة لا تكشف وجودها",
+    input: "POST /api/orders/track على النسخة الأساسية (ENABLE_ORDER_TRACKING غير مفعّل)",
+    precondition: "العلم مغلق افتراضيًا على :3000",
+    expected_decision: "404 موحّد قبل أي فحص لبيانات",
+    expected_side_effect: "لا كشف لوجود الميزة، ولا فرق بين طلب موجود وغير موجود",
+    evidence_required: "404 + تطابق الرسالة مع النسخة المفعّلة الفاشلة",
+  },
+  async (rec) => {
+    const r = await req(BASE, "POST", "/api/orders/track", {
+      body: { id: "ORD-83180654-1a1806de", phoneLast4: "5678" },
+      xff: `${RUN}-wf023`,
+    });
+    rec.actual = {
+      http: r.status,
+      code: r.json?.code,
+      error: r.json?.error,
+      request_id: r.requestId,
+      identical_to_enabled_failure: r.json?.error === "تعذر العثور على الطلب",
+    };
+    return {
+      checks: [
+        check(r.status === 404, `HTTP ${r.status} (المتوقع 404 لا 403/404 مميزة)`),
+        check(r.json?.code === "NOT_FOUND", `code=${r.json?.code} (لا FEATURE_DISABLED كاشف)`),
+        check(
+          r.json?.error === "تعذر العثور على الطلب",
+          `الرسالة مطابقة لحالة الفشل العادية: «${r.json?.error}»`
+        ),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-024
+await scenario(
+  {
+    id: "WF-024",
+    title: "تجاوز حد المعدل على إنشاء الطلبات — 429 بعد 8 محاولات",
+    input: "9 طلبات POST /api/orders متتالية من نفس هوية العميل",
+    precondition: "الحد 8 / 10 دقائق لكل (مسار، عميل)",
+    expected_decision: "الثامن يمر، التاسع 429 RATE_LIMITED مع retry_after_seconds",
+    expected_side_effect: "لا طلب تاسع، والمخزون لا يُخصم مرة إضافية",
+    evidence_required: "تسلسل الحالات + 429 + retry_after_seconds + ثبات المخزون",
+  },
+  async (rec) => {
+    await setProduct("p3", { stock: 100 });
+    const stockBefore = await stockOf("p3");
+    const xff = `${RUN}-wf024`;
+    const statuses = [];
+    let last = null;
+    for (let i = 0; i < 9; i++) {
+      const r = await req(BASE, "POST", "/api/orders", {
+        body: order([{ id: "p3", qty: 1 }], { governorate: "القاهرة" }),
+        xff,
+      });
+      statuses.push(r.status);
+      last = r;
+    }
+    const stockAfter = await stockOf("p3");
+    const accepted = statuses.filter((s) => s === 200).length;
+    rec.actual = {
+      statuses,
+      accepted_count: accepted,
+      ninth_http: statuses[8],
+      ninth_code: last.json?.code,
+      retry_after_seconds: last.json?.retry_after_seconds,
+      stock_before: stockBefore,
+      stock_after: stockAfter,
+      stock_delta: stockBefore - stockAfter,
+    };
+    return {
+      checks: [
+        check(accepted === 8, `عدد المقبول = ${accepted} (المتوقع 8 = الحد)`),
+        check(statuses[8] === 429, `التاسع → HTTP ${statuses[8]} (المتوقع 429)`),
+        check(last.json?.code === "RATE_LIMITED", `code=${last.json?.code}`),
+        check(
+          Number(last.json?.retry_after_seconds) > 0,
+          `retry_after_seconds=${last.json?.retry_after_seconds} (يوجّه العميل لإعادة المحاولة)`
+        ),
+        check(stockBefore - stockAfter === 8, `المخزون خُصم 8 فقط: ${stockBefore} → ${stockAfter}`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-025
+await scenario(
+  {
+    id: "WF-025",
+    title: "نقطتان محجوبتان بعلم ميزة — التشخيص وأدوات MCP",
+    input: "GET /api/admin/diagnostics و GET /api/admin/mcp/tools",
+    precondition: "DIAGNOSTICS_ENABLED=false و ENABLE_MCP_TOOLS غير مفعّل",
+    expected_decision: "404 موحّد لا يكشف وجود النقطتين، حتى بجلسة/مفتاح",
+    expected_side_effect: "لا مقاييس ولا مانيفست أدوات",
+    evidence_required: "404 على المسارين + تطابق الرسالة + عدم تسريب أسماء أدوات",
+  },
+  async (rec) => {
+    const diag = await req(BASE, "GET", "/api/admin/diagnostics", { xff: `${RUN}-wf025a` });
+    const diagWithKey = await req(BASE, "GET", "/api/admin/diagnostics?key=anything", {
+      xff: `${RUN}-wf025b`,
+    });
+    const mcp = await req(BASE, "GET", "/api/admin/mcp/tools", { xff: `${RUN}-wf025c` });
+    rec.actual = {
+      diagnostics_http: diag.status,
+      diagnostics_code: diag.json?.code,
+      diagnostics_error: diag.json?.error,
+      diagnostics_with_key_http: diagWithKey.status,
+      mcp_http: mcp.status,
+      mcp_code: mcp.json?.code,
+      mcp_error: mcp.json?.error,
+      messages_identical: diag.json?.error === mcp.json?.error,
+      leaks_tool_names: /search_products|lookup_faq|shipping_estimate|store_info/.test(
+        diag.text + mcp.text
+      ),
+    };
+    return {
+      checks: [
+        check(diag.status === 404, `التشخيص → HTTP ${diag.status} (المتوقع 404 لا 401/403)`),
+        check(diagWithKey.status === 404, `التشخيص بمفتاح مُخمَّن → HTTP ${diagWithKey.status}`),
+        check(mcp.status === 404, `أدوات MCP → HTTP ${mcp.status}`),
+        check(
+          diag.json?.error === mcp.json?.error,
+          `رسالتان موحّدتان («${diag.json?.error}») — لا تمييز بين نقطتين`
+        ),
+        check(
+          !/search_products|lookup_faq|shipping_estimate|store_info/.test(diag.text + mcp.text),
+          "لا أسماء أدوات مسرّبة"
+        ),
       ],
     };
   }
