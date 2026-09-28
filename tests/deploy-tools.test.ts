@@ -185,9 +185,13 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
   test("صفّا الصيغة والسبب يُسجَّلان دائمًا (بلا علم ترميم) ولا تُطبع أي قيمة", () => {
     // حالة فحص 2026-09-28: رابط سليم الشكل + رمز JWT سليم الشكل مرفوض (401).
     // بلا هذين الصفين كان التقرير يقول «401» فقط بلا تمييز رمز/قاعدة.
+    // النطاق `.invalid` محجوز (RFC 2606) لا يحلّ أبدًا — فيجعل الكود حتميًا
+    // (`TURSO_UNREACHABLE`) في كل البيئات. مضيف `*.turso.io` وهمي كان سيحلّ
+    // عبر wildcard إلى حافة Turso في CI (404) بينما يفشل DNS محليًا —
+    // لاحتمية كاذبة أسقطت البوابة مرة (انظر سجل PR #18).
     const env = {
       ...process.env,
-      TURSO_DATABASE_URL: "libsql://no-such-db-xyz123.turso.io",
+      TURSO_DATABASE_URL: "libsql://no-such-db-xyz123.invalid",
       TURSO_AUTH_TOKEN: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.c2lnbmF0dXJl",
     };
     const res = spawnSync("node", ["scripts/verify-turso.mjs"], { encoding: "utf8", env });
