@@ -72,7 +72,22 @@
 2. **`vercel env add NAME production` تفاعلي.** في سكربت/سطر أوامر واحد: `vercel env add NAME production --value "…" --yes` أو تمرير القيمة عبر stdin. وبعد أي تغيير في المتغيرات **لا بد من نشر جديد** ليتأثر (خطوة 4 عندك تفعل ذلك).
 3. **`gh run rerun 35320925636 --failed` لن ينجح قبل استبدال `VERCEL_TOKEN`** — أعد التشغيل بعده فقط، وإلا فشل الطيران التمهيدي بنفس `404`.
 
-**بديل دائم بلا أي رمز:** اربط المستودع بالمشروع من Vercel (Project → Settings → Git) واجعل Production Branch = `main`؛ بعدها كل دفع إلى `main` ينشر تلقائيًا، ويبقى `Quality and Security` بوابةً للجودة. أما مسار Actions الحالي (بوابة + `vercel build` + `deploy --prebuilt`) فيبقى أفضل إن أردت أن تُبنى الحزمة بعد اجتياز البوابات محليًا.
+**بديل دائم بلا أي رمز — وهو شبه مُهيَّأ أصلًا:** فحوص الـ PR رقم 14 تُظهر أن تكامل Git في Vercel **فعّال على المستودع**، وأن ثلاث مشاريع Vercel تُبنى منه تلقائيًا وكلها تنجح:
+
+```text
+gh pr checks 14
+Vercel Preview Comments                pass
+Vercel – aborof                        pass   https://vercel.com/elazameys-projects/aborof/…
+Vercel – aborof-store-v2               pass   https://vercel.com/elazameys-projects/aborof-store-v2/…
+Vercel – aborof-updated-17d3397        pass   https://vercel.com/elazameys-projects/aborof-updated-17d3397/…
+```
+
+معنى ذلك: النشر إلى Vercel **لا يحتاج `VERCEL_TOKEN` إطلاقًا** — Vercel يبني من المستودع بنفسه متى أُضيف الملف إلى الفرع. الخطوتان الباقيتان بيد المالك:
+
+1. **حدّد المشروع الذي يخدم `aborof.vercel.app`** (Vercel → المشروع → Settings → Domains): هذا وحده هو الذي يجب أن تكون متغيرات §3 مضبوطة عليه و Production Branch = `main`؛ واحذف/افصل المشروعين المكرّرين (`aborof-store-v2` و`aborof-updated-17d3397`) لتفادي دقائق بناء مهدرة وحيرة في أي نشر يخدم النطاق.
+2. إن كان ذلك المشروع مربوطًا بـ Git و Production Branch = `main`، فكل دفع إلى `main` ينشر إنتاجيًا تلقائيًا — ويمكن إبقاء `Quality and Security` بوابةً إلزامية على الـ PR، أو تعطيل وظيفة `Deploy to Vercel` في Actions والاعتماد على تكامل Git وحدها.
+
+الملاحظة المقابلة: بناء Vercel من Git **يتجاوز** بوابات CI (lint/typecheck/tests/security) ما لم تكن إلزامًا على الـ PR — وهذا سبب كافٍ لإبقاء `Quality and Security` مطلوبة.
 
 ---
 
