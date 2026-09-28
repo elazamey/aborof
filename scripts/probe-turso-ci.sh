@@ -29,6 +29,15 @@ code=$?
 cat "$REPORT"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"; fi
 
+# قسم إعلامي: سطح الإنتاج الحيّ قراءةً (GET فقط، بلا --admin-probe الذي يستهلك
+# حد المعدل وبلا --allow-mutations الذي ينشئ طلبًا حقيقيًا). صف `db-binding` هنا
+# قرينة مصدر الكتالوج — تكمل صفوف Turso ولا يُحكم بها على الاتصال.
+{
+  echo "### 🌐 الواجهة الحيّة (قراءة فقط)"
+  echo
+} >> "$REPORT"
+node scripts/smoke-production.mjs >> "$REPORT" 2>&1 || true
+
 # تعليق على طلب الدمج إن وُجد رقمه؛ `--edit-last` يمنع تكديس تعليق لكل تشغيل.
 if [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_TOKEN:-}" ]; then
   gh pr comment "$PR_NUMBER" --body-file "$REPORT" --edit-last --create-if-none \
