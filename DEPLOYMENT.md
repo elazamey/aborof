@@ -94,7 +94,7 @@
 | 6 | `GET /api/admin/mcp/tools` | `404` بدون `ENABLE_MCP_TOOLS`، و`401` بدونه مع التفعيل | 404 = الطبقة مغلقة (السلوك الافتراضي)؛ 401 = الطبقة مفتوحة فعليًا وجلسة الإدارة مطلوبة |
 | 7 | على قاعدة Turso: `SELECT COUNT(*) FROM order_items;` | استعلام ناجح بلا خطأ «no such table» | إصلاح P0 لم يُفعَّل (راجع «إصلاح قاعدة البيانات P0» في نهاية الملف) |
 | 8 | على قاعدة Turso: `SELECT name FROM sqlite_master WHERE type='table' AND name='product_search';` | يظهر الصف `product_search` | هجرة `0002` (FTS5) لم تُطبَّق على البيئة الحيّة |
-| 9 | على قاعدة Turso: `SELECT COUNT(*) FROM product_search;` | يساوي `SELECT COUNT(*) FROM products;` | الفهرس غير متزامن مع الكتالوج؛ أعد نشرًا لتشغيل مزامنة التجهيز |
+| 9 | على قاعدة Turso: `SELECT COUNT(*) FROM product_search;` | يساوي `SELECT COUNT(*) FROM products;` | الفهرس غير متزامن مع الكتالوج؛ يكفي أول عملية/طلب بعد التجهيز لأن المزامنة في نهاية `runMigrations` (وأعد النشر إن بقيت الفجوة) |
 | 10 | `POST /api/orders` بطلي مستخدِم تجريبي | `200 {ok:true,...}` وخفض المخزون وظهور `order_items` | فشل كتابة الطلب: راجع الربط `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` |
 | 11 | `POST /api/orders` ثانية بعد الخطوة 10 | `200` بلا أخطاء تكرار معرف أو فقدان أصناف | مشكلة في المعاملة المركّبة (خصم + طلب + أصناف) |
 | 12 | `POST /api/chat` بسؤال «منظف أرضيات» مع تفعيل `ENABLE_AI_AGENT` و`ENABLE_MCP_TOOLS` | رد يحمل بطاقات منتجات مطابقة | FTS5 أو طبقة الأدوات عاطلة؛ راجع سجل النشر |

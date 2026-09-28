@@ -3,6 +3,8 @@
 المرجع: [`DEPLOYMENT.md`](../DEPLOYMENT.md) (قائمة التحقق) و[`deploy-activation-runbook.md`](./deploy-activation-runbook.md) (تفعيل النشر).
 النطاق: `https://aborof.vercel.app` — `main` = `d02c0e7`، والنشر الحيّ = `9a4f3e1` (تشغيل `35317168194`). الفرق بينهما ملفات CI/سكربتات/اختبارات فقط بلا أي تغيير في `src/`، أي أن **كود التطبيق الحيّ مطابق لـ `main`**.
 
+> 🔄 **تحديث 2026-09-28 (لاحق):** مجسّ CI جديد ([`turso-probe-report.md`](./turso-probe-report.md)) رقّى «قرينة عدم الربط» في §3 إلى **سبب جذري**: قيمة `TURSO_DATABASE_URL` نفسها في بيئة `production` هي **رابط لوحة تحكم** (`https://app.turso.tech/…`) لا رابط اتصال (`libsql://…`). لذلك تبقى الصفوف 7–9 محجوبة حتى تصحيح القيمتين في Vercel **وفي أسرار البيئة** على GitHub.
+
 قيود بيئة الوكيل (جعلت بعض الصفوف غير قابلة للتنفيذ من هنا):
 لا اتصال شبكي مباشر من صندوق الأدوات إلى نطاق Vercel (`ECONNRESET`)، ولا صلاحية `workflow_dispatch` (`403 Resource not accessible by integration`)، ولا قراءة أسرار Actions (`403`)، ولا `POST` عبر أداة قراءة الصفحات.
 لذلك قُرئ رمز الحالة ورؤوس الاستجابة عبر قارئ خارجي (`api.hackertarget.com/httpheaders`) والأجسام عبر جلب الصفحات؛ وكل ما يلزمه `POST` (الصفوف 4 و10–14) يبقى بيد المالك.
