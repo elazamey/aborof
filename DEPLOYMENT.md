@@ -53,7 +53,9 @@
 > للتشخيص فقط. يفحص حاجز النشر الثابت أنهما غير متطابقين وأن سر الجلسات لا يُذكر
 > خارج وحدتي الجلسات والأسرار.
 
-يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel.
+> ⚠️ **`VERCEL_TOKEN` لا يُملأ من `~/.vercel/auth.json`:** توكن `vercel login` هو OAuth قصير العمر (`expiresAt` خلال ساعات + `refreshToken`) وموضعه في CLI الحديث تحت `com.vercel.cli` داخل `XDG_DATA_HOME` — يصلح للنشر من جهازك، ولا يصلح سرًّا دائمًا. أنشئ رمزًا من **Vercel → Account Settings → Tokens** بصلاحية Full access على الفريق. فحص الرمز في `deploy.yml` يستدعي `api.vercel.com/v2/user`، و`404: User not found` تعني رمزًا مصادَقًا عليه لكنه ملغى/غير موجود (استبدله)، بينما `403` تعني صلاحية ناقصة على الفريق.
+
+يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel. إن غاب `TURSO_DATABASE_URL` عن بيئة Production فالموقع يظل يعرض المنتجات من البذرة المحلية بينما يفشل كل إنشاء طلب بـ `503` (انظر «قراءة نتائج الـ Smoke بلا لبس» أعلاه).
 
 ## التفعيل والتحقق
 
@@ -132,10 +134,16 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
 |---|---|---|
 | `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
 | `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
-| `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 + رؤوس الأمان + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط |
+| `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط |
 | `npm run routes:inventory` | جرد المسارات وبواباتها (نفس بوابة CI) | يفشل إن غاب أي مسار مطلوب |
 
-تفاصيل الاستخدام والتشخيص في [`handoff/deploy-activation-runbook.md`](handoff/deploy-activation-runbook.md).
+### قراءة نتائج الـ Smoke بلا لبس
+
+- **وضع CSP**: الرأس يُنشر افتراضيًا في وضع المراقبة (`Content-Security-Policy-Report-Only`) حتى يُفعَّل `CSP_ENFORCE=true`؛ لذلك صف الرؤوس يقبل الوضعين، وصف `csp-mode` يبيّن الوضع الفعلي، ولا يُفرض الحجب إلا مع `--require-csp-enforce` (استخدمه بعد ضبط `CSP_ENFORCE=true` وإلا فشل الفحص عمدًا).
+- **قرينة ربط قاعدة البيانات (صف `db-binding`)**: مسار Turso في `getProducts()` يمرّر مفتاح `old_price` في كل صف دائمًا (ولو `null`)، بينما الاحتياطي يعيد كائنات `SEED_PRODUCTS` كما هي. ظهور صف بلا المفتاح يعني أن الكتالوج من البذرة المحلية ⇒ على الأرجح `TURSO_DATABASE_URL` غير مضبوط في Vercel، وعندها يفشل أي طلب حقيقي بـ `503 «قاعدة البيانات غير مربوطة»` (الصفان 10 و11). القرينة **ليست إثباتًا**: إثبات الاتصال هو الصفوف 7–9 (`npm run verify:turso`). التنازل الصريح عن القرينة: `--allow-seed-fallback`.
+- **`503` في الصف 4**: الرسالة تسمّي المتغير الناقص بدقة على Vercel؛ و`401` تعني أن اللوحة مهيأة فعلًا.
+
+تفاصيل الاستخدام والتشخيص في [`handoff/deploy-activation-runbook.md`](handoff/deploy-activation-runbook.md)، وسجل آخر تحقق حيّ في [`handoff/post-deploy-verification.md`](handoff/post-deploy-verification.md).
 
 ## تشغيل محلي
 
