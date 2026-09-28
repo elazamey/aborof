@@ -1,6 +1,5 @@
-import { getFaq } from "@/lib/db";
-import { searchProductsFts } from "@/lib/search";
-import { STORE } from "@/lib/seed";
+import { getFaq, getProducts } from "@/lib/db";
+import { composeLocalAnswer } from "../local-answer";
 import type { AgentMessage, AgentOptions, AIAgentProvider } from "../types";
 
 /**
@@ -21,23 +20,26 @@ export class LocalFallbackProvider implements AIAgentProvider {
   }
 }
 
-/** إجابة محلية من بيانات المتجر — البحث عبر FTS5 مع سقوط آمن للمطابقة الحرفية. */
+/**
+ * إجابة محلية من بيانات المتجر.
+ *
+ * تُفوّض إلى `composeLocalAnswer` — نفس السياسة التي يستخدمها مسار الدردشة —
+ * بدل أن تحمل نسخة خاصة منها.
+ *
+ * لماذا التفويض لا نسخة ثانية: كانت هنا نسخة مستقلة من المنطق نفسه. فلمّا
+ * أُصلح خطف الأسئلة الشائعة (D-4) وحسم المقاس والإسقاط الصامت (D-5) في
+ * `local-answer.ts`، بقيت هذه على السلوك القديم — فأعادت «هات أرخص منظف
+ * أرضيات متاح» جواب طرق الدفع. والأخطر أن هذا هو المسار الذي سيعمل فعلًا
+ * بعد توصيل Gemini/Celia، فكان سيُعيد إنتاج العيوب المُصلَحة حرفيًا.
+ * سياسة ترتيب واحدة، في مكان واحد.
+ *
+ * لماذا الكتالوج كاملًا لا نتائج FTS5: كان البحث هنا يمرّ عبر
+ * `searchProductsFts(question, 3)`، أي قطع عند أول 3 حسب صلة FTS5 — وهو
+ * الإسقاط الصامت نفسه بصورة أخرى، فقد يُستبعد الأرخص المتاح قبل أن تصل إليه
+ * سياسة «أرخص متاح» أصلًا. لذلك تُمرَّر القائمة كاملة وتُترك المفاضلة
+ * للسياسة. FTS5 باقٍ في موضعه الصحيح: أداة `search_products` في طبقة MCP.
+ */
 export async function buildLocalAnswer(question: string): Promise<string> {
-  const faq = await getFaq();
-  const t = question.toLowerCase();
-  const words = t.split(/\s+/).filter((w) => w.length > 2);
-  const score = (s: string) => words.reduce((n, w) => n + (s.toLowerCase().includes(w) ? 1 : 0), 0);
-
-  const bestFaq = faq.map((f) => ({ f, s: score(f.question) })).sort((a, b) => b.s - a.s)[0];
-  if (bestFaq && bestFaq.s >= 1) return bestFaq.f.answer;
-
-  const hits = (await searchProductsFts(question, 3)) as { name: string; price: number }[];
-  if (hits.length)
-    return (
-      "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n" +
-      hits.map((h) => `• ${h.name} — ${h.price} جنيه`).join("\n") +
-      `\n\nتقدر تضيفهم للسلة وتكمل الطلب، والدفع فودافون كاش على ${STORE.vodafoneCash} أو عند الاستلام.`
-    );
-
-  return `أهلاً بحضرتك في ${STORE.name} 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على ${STORE.phone}.`;
+  const [products, faq] = await Promise.all([getProducts(), getFaq()]);
+  return composeLocalAnswer(question, products, faq);
 }
