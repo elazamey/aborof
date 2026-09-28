@@ -1,0 +1,127 @@
+name: Turso evidence probe
+
+# ‏أداة قياس لا أداة نشر: تفتح اتصالًا **للقراءة فقط** بقاعدة الإنتاج وتطبع جدول
+# الصفوف (conn · mig-table · mig-parity · row-7 · row-8 · row-9 · tables) في
+# ملخّص التشغيل وسجلّه — بلا أي كتابة وبلا أي سرّ في المخرجات (السكربت ينقّي
+# الرابط والرمز قبل الطباعة).
+#
+# المشغّلات:
+#  - `pull_request`: السؤال «هل القاعدة مطابقة للكود؟» سؤال ما قبل الدمج، فيُطرح
+#    في مكانه الطبيعي بدل انتظار تشغيل يدوي بعد النشر.
+#  - `workflow_dispatch`: التشغيل اليدوي متى شئت (نفس مدخل `service-health.yml`).
+#
+# نطاق الأسرار: الوظيفة الأولى تقرأ نطاق المستودع، والثانية تعمل فقط عند غيابه
+# لتجرّب نطاق بيئة `production` — فيعرف المالك من الملخّص أيّ النطاقين مضبوط.
+# (بيئات GitHub لا تُقرأ من وظيفة واحدة بلا `environment` على مستوى الوظيفة.)
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: turso-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  repo-scope:
+    name: Probe (repository-scope secrets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      configured: ${{ steps.detect.outputs.configured }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Detect secret scope
+        id: detect
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+        run: |
+          if [ -n "${TURSO_DATABASE_URL:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "✅ TURSO_DATABASE_URL مرئي من نطاق المستودع."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TURSO_DATABASE_URL غير مضبوط على نطاق المستودع — ستجرّب الوظيفة التالية نطاق بيئة production."
+          fi
+
+      - name: Setup Node.js
+        if: steps.detect.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # اعتماديات الإنتاج فقط — @libsql/client بينها، بنفس النسخ المقفولة في
+      # التطبيق (package-lock.json) فلا انحراف بين الفحص والإنتاج.
+      - name: Install production dependencies
+        if: steps.detect.outputs.configured == 'true'
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Turso probe (read-only)
+        if: steps.detect.outputs.configured == 'true'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          # ضع كود الخروج من node لا من tee (pipefail يغطي ذلك، و PIPESTATUS أدق).
+          node scripts/verify-turso.mjs | tee /tmp/probe.md
+          code=${PIPESTATUS[0]}
+          cat /tmp/probe.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" = "2" ]; then
+            echo "::error::تهيئة الفحص ناقصة (كود 2) — راجع ترويسة السكربت: TURSO_AUTH_TOKEN مطلوب لأي رابط غير محلي."
+            exit 1
+          fi
+          if [ "$code" != "0" ]; then
+            echo "::error::فحص Turso أعاد كود $code — توجد صفوف حمراء (الجدول في ملخّص التشغيل)."
+            exit 1
+          fi
+
+  env-scope:
+    name: Probe (environment-scope secrets)
+    needs: repo-scope
+    if: needs.repo-scope.outputs.configured != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # قد ترفض سياسة حماية البيئة (`Production` = الفروع المحمية فقط) تشغيل هذا
+    # الفرع؛ لا يُفشل ذلك الفحصَ كله — الغرض معرفة نطاق الأسرار لا أكثر.
+    continue-on-error: true
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install production dependencies
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Turso probe (read-only)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TURSO_DATABASE_URL:-}" ]; then
+            echo "::warning::TURSO_DATABASE_URL غير مضبوط على نطاق المستودع ولا على بيئة production — أضِفه في Settings → Secrets and variables → Actions."
+            exit 0
+          fi
+          node scripts/verify-turso.mjs | tee /tmp/probe.md
+          code=${PIPESTATUS[0]}
+          cat /tmp/probe.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" != "0" ]; then
+            echo "::error::فحص Turso أعاد كود $code — توجد صفوف حمراء (الجدول في ملخّص التشغيل)."
+            exit 1
+          fi
