@@ -7,6 +7,7 @@ import { redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 import { chatRequestContract, firstZodIssue } from "@/lib/validation/contracts";
 import {
+  fleetAuditRecord,
   fleetPromptSection,
   fleetResponseMeta,
   fleetToolAllowlist,
@@ -168,6 +169,16 @@ export const POST = apiHandler("/api/chat", async (req) => {
       engineSy = `${sys}\n\n${fleetPromptSection(selection)}`;
       agentAllowlist = fleetToolAllowlist(selection);
       fleet = fleetResponseMeta(selection);
+      // سجل تدقيقي لقرار التوجيه — بلا نص رسالة العميل ولا أي بيانات شخصية.
+      // نفس نمط mcp_tool_call: سطر JSON واحد قابل للتجميع في Vercel Logs.
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "fleet_routing",
+          ...fleetAuditRecord(selection, agentAllowlist),
+          message_chars: last.length,
+        })
+      );
     }
 
     const agentMessages: AgentMessage[] = [

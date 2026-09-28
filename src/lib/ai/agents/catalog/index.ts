@@ -166,6 +166,56 @@ export function isAgentFleetEnabled(): boolean {
 }
 
 /**
+ * قائمة تعطيل وكلاء بعينهم — `FLEET_DISABLED_AGENTS=sales_glass_surfaces,ops_stock_alerts`.
+ *
+ * قرار تصميمي مقصود: الحالة تُقرأ من البيئة (لا من ذاكرة العملية ولا من قاعدة
+ * بيانات)، لأن النشر على Vercel يوزّع الطلبات على نسخ متعددة — أي «مفتاح إيقاف»
+ * قابل للتغيير وقت التشغيل سيكون غير متسق بين النسخ (بعضها يعطّل وبعضها لا).
+ * تغيير البيئة في Vercel يستلزم إعادة نشر، وهذا هو الثمن المقبول مقابل حالة
+ * حتمية ومتسقة في كل النسخ.
+ *
+ * قيمة خاصة: `*` أو `all` ⇒ تعطيل كل المتخصصين والإبقاء على الوكيل الافتراضي
+ * (وضع طوارئ ألطف من إغلاق الأسطول كليًا: تبقى الشخصية وتختفي التخصصات).
+ * الوكيل الافتراضي لا يُعطَّل أبدًا — لا يبقى التوجيه بلا مخرج.
+ */
+export function disabledAgentIds(): string[] {
+  const raw = process.env.FLEET_DISABLED_AGENTS;
+  if (raw == null || raw.trim() === "") return [];
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0)
+    )
+  );
+}
+
+export function isFleetWildcardDisabled(): boolean {
+  const ids = disabledAgentIds();
+  return ids.includes("*") || ids.some((id) => id.toLowerCase() === "all");
+}
+
+/** الأسطول الفعّال الآن: الكتالوج ناقص المعطَّلين (والافتراضي مضمون دائمًا). */
+export function effectiveFleet(): StoreAgent[] {
+  const wildcard = isFleetWildcardDisabled();
+  const disabled = new Set(disabledAgentIds());
+  return AGENT_FLEET.filter((agent) => {
+    if (agent.isDefault) return true;
+    if (wildcard) return false;
+    return !disabled.has(agent.id);
+  });
+}
+
+/** هل هذا الوكيل معطَّل الآن بأمر بيئي؟ (للعرض الإداري لا للقرار) */
+export function isAgentDisabled(id: string): boolean {
+  const agent = BY_ID.get(id);
+  if (agent?.isDefault) return false;
+  if (isFleetWildcardDisabled()) return true;
+  return disabledAgentIds().includes(id);
+}
+
+/**
  * الأسطول يعمل فقط فوق المحرك النمطي الموحّد (المرحلة الأولى). تفعيل العلم
  * بلا `ENABLE_AI_AGENT` لا يغيّر شيئًا في المسار القديم عمدًا — فلا يُكسر سلوك
  * مستقر بسبب علم جديد.
@@ -181,6 +231,9 @@ export function fleetSnapshot() {
     active: isAgentFleetActive(),
     size: AGENT_FLEET.length,
     declared_size: AGENT_FLEET_SIZE,
+    effective_size: effectiveFleet().length,
+    disabled_agents: disabledAgentIds(),
+    disabled_all_specialists: isFleetWildcardDisabled(),
     read_only_tools: READ_ONLY_TOOL_NAMES,
     departments: AGENT_DEPARTMENTS.map((department) => ({
       department,

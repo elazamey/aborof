@@ -1,4 +1,5 @@
-import { AGENT_FLEET, READ_ONLY_TOOL_NAMES } from "./catalog";
+import { AGENT_FLEET, READ_ONLY_TOOL_NAMES, isAgentDisabled } from "./catalog";
+import { LOW_CONFIDENCE_THRESHOLD } from "./router";
 import type { AgentSelection, FleetResponseMeta, StoreAgent } from "./types";
 
 /**
@@ -69,6 +70,29 @@ export function fleetResponseMeta(selection: AgentSelection): FleetResponseMeta 
   };
 }
 
+/**
+ * سطر تدقيقي لقرار التوجيه — **لا يُسجَّل نص رسالة العميل إطلاقًا**.
+ *
+ * الحقول كلها من عندنا (معرّفات وكلاء، كلمات محفّزات من الكتالوج، درجات)،
+ * فالسجل قابل للتجميع والتنبيه بلا أي مخاطرة خصوصية، ويجيب على أسئلة التشغيل:
+ * هل التوجيه يختار الصحيح؟ أي وكيل يُستدعى؟ هل الثقة منخفضة باستمرار؟
+ */
+export function fleetAuditRecord(selection: AgentSelection, allowedTools: readonly string[]) {
+  return {
+    primary: selection.primary.id,
+    primary_department: selection.primary.department,
+    supporters: selection.supporters.map((agent) => agent.id),
+    routed_by: selection.routedBy,
+    confidence: Number(selection.confidence.toFixed(2)),
+    low_confidence: selection.confidence < LOW_CONFIDENCE_THRESHOLD,
+    matched_terms: selection.matched.slice(0, 5),
+    matched_count: selection.matched.length,
+    allowed_tools: [...allowedTools],
+    // طول الرسالة رقم لا نص — يكفي لرصد المدخلات الشاذة بلا تخزين محتوى.
+    message_chars: 0,
+  };
+}
+
 /** فهرس الوكلاء للعرض الإداري — بلا أي سر، ومحمي بجلسة الإدارة عند الاستخدام. */
 export function fleetCatalogManifest() {
   return AGENT_FLEET.map((agent) => ({
@@ -80,5 +104,7 @@ export function fleetCatalogManifest() {
     tools: agent.tools,
     escalate_to_human: agent.escalateToHuman === true,
     is_default: agent.isDefault === true,
+    /** هل هو معطَّل الآن بأمر بيئي؟ (العرض فقط — القرار في الموجّه) */
+    disabled: isAgentDisabled(agent.id),
   }));
 }

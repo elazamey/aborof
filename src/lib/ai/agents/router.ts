@@ -1,6 +1,7 @@
-import { AGENT_FLEET, agentKeywords, getDefaultAgent } from "./catalog";
+import { effectiveFleet, getDefaultAgent, isFleetWildcardDisabled } from "./catalog";
+import { agentKeywords } from "./catalog";
 import { normalizeForMatch, normalizedTokens } from "./normalize";
-import type { AgentSelection, StoreAgent } from "./types";
+import { AGENT_DEPARTMENTS, type AgentDepartment, type AgentSelection, type StoreAgent } from "./types";
 
 /**
  * موجّه الأسطول — قرار حتمي بالكامل.
@@ -14,9 +15,31 @@ import type { AgentSelection, StoreAgent } from "./types";
  *   - كلمة مفردة مطابقة كرمز كامل: 1.5.
  *   - كلمة مفردة طويلة (>= 5 أحرف) واردة داخل المدخل: 1 (تعامل مع الاشتقاق).
  *   - كلمة من اسم الوكيل: 0.75.
+ *
+ * حسم التعادل (عند تساوي الدرجة تمامًا) بترتيب ثابت موثّق:
+ *   1) أولوية القسم (FLEET_DEPARTMENT_PRIORITY) — المبيعات ثم اللوجستيات ثم الدعم…
+ *      لأن سؤال العميل يحمل غالبًا نية شرائية، والخطأ نحو البيع أرخص من الخطأ بعيدًا عنه.
+ *   2) ترتيب الكتالوج (ترتيب التأليف) — لا أبجدية المعرّف، حتى يبقى القرار مقروءًا.
  */
 
 export const FLEET_MAX_SUPPORTERS = 2;
+
+/**
+ * أولوية حسم التعادل بين الأقسام — سياسة معلنة وقابلة للاختبار.
+ * ملاحظة: لا أثر لها إلا عند **تساوي الدرجة تمامًا**؛ لا تُقدَّم درجة أدنى أبدًا.
+ */
+export const FLEET_DEPARTMENT_PRIORITY: readonly AgentDepartment[] = [
+  "sales",
+  "logistics",
+  "payments",
+  "support",
+  "operations",
+];
+
+const DEPARTMENT_RANK = new Map(
+  FLEET_DEPARTMENT_PRIORITY.map((department, index) => [department, index])
+);
+
 const POLICY = {
   phraseBase: 2,
   tokenExact: 1.5,
@@ -26,7 +49,24 @@ const POLICY = {
   supporterMin: 1.5,
   /** درجة تُعتبر ثقة كاملة (1.0) عند المراقبة. */
   confidenceFull: 4,
+  /**
+   * حد الثقة المنخفضة — لا يمنع التوجيه (منع الأسئلة الغامضة يحوّلها للرد العام
+   * وهو أسوأ للعميل)، بل يُوسَم في السجل التدقيقي ويظهر في المانيفست الإداري.
+   */
+  lowConfidence: 0.5,
 } as const;
+
+/** حد الثقة المنخفضة — مُصدَّر ليكون مصدر الحقيقة الوحيد للسجل والمانيفست والاختبارات. */
+export const LOW_CONFIDENCE_THRESHOLD = POLICY.lowConfidence;
+
+/** هل القرار منخفض الثقة (يستحق مراجعة بشرية في السجل)؟ */
+export function isLowConfidence(confidence: number): boolean {
+  return confidence < LOW_CONFIDENCE_THRESHOLD;
+}
+
+export function departmentRank(department: AgentDepartment): number {
+  return DEPARTMENT_RANK.get(department) ?? FLEET_DEPARTMENT_PRIORITY.length;
+}
 
 interface Scored {
   agent: StoreAgent;
@@ -78,9 +118,19 @@ export function selectAgents(message: string, options?: { maxSupporters?: number
     return { primary: getDefaultAgent(), supporters: [], confidence: 0, matched: [], routedBy: "fallback" };
   }
 
-  const scored = AGENT_FLEET.map((agent) => scoreAgent(agent, normalizedMessage, tokens))
+  // الأسطول الفعّال: الكتالوج ناقص وكلاء مُعطَّلين بأمر بيئي (والافتراضي باقٍ دائمًا).
+  const fleet = effectiveFleet();
+  const catalogIndex = new Map(fleet.map((agent, index) => [agent.id, index]));
+
+  const scored = fleet
+    .map((agent) => scoreAgent(agent, normalizedMessage, tokens))
     .filter((entry) => entry.score > 0)
-    .sort((a, b) => (b.score - a.score) || a.agent.id.localeCompare(b.agent.id));
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        departmentRank(a.agent.department) - departmentRank(b.agent.department) ||
+        (catalogIndex.get(a.agent.id) ?? 0) - (catalogIndex.get(b.agent.id) ?? 0)
+    );
 
   const best = scored[0];
   if (!best) {

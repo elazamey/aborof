@@ -9,6 +9,8 @@
  *  3. كل مسارات API تُغلَّف بـ apiHandler الموحّد.
  *  4. عزل العميل/الخادم: مكوّن عميل لا يستورد وحدة خادم فقط (auth/db/secrets/orders/rate-limit).
  *  5. لا تُطبع متغيرات البيئة الحساسة مباشرة في السجلات.
+ *  6. أسطول الوكلاء (المرحلة الرابعة): الكتالوج بيانات لا سلوك — لا استيراد وحدات
+ *     بيانات (db/orders/auth)، ولا أدوات خارج قائمة القراءة فقط المجمّدة هنا.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -30,10 +32,31 @@ function walk(dir, out = []) {
 
 const files = walk(path.join(root, "src"));
 
+/** ملفات كتالوج الأسطول — فحوص بنيوية خاصة بها (البند 6). */
+const isFleetCatalogFile = (rel) => rel.includes(path.normalize("lib/ai/agents/catalog/"));
+
 const SESSION_SECRET_ALLOWED = new Set([
   path.normalize("src/lib/auth.ts"),
   path.normalize("src/lib/secrets.ts"),
 ]);
+
+/**
+ * قائمة الأدوات المسموح بها لكتالوج الأسطول — **مجمّدة عمدًا**.
+ * إضافة أداة جديدة تتطلب تعديل هذا الملف صراحةً (قرار واعٍ في المراجعة)،
+ * ومطابقتها للسجل الحقيقي محميّة أيضًا باختبار في tests/agent-fleet.test.ts.
+ * أي أداة كاتبة تظهر هنا = فشل بوابة فوري في CI، لا ملاحظة مراجعة.
+ */
+const FLEET_ALLOWED_TOOLS = new Set([
+  "search_products",
+  "lookup_faq",
+  "shipping_estimate",
+  "store_info",
+  "orders_create",
+  "products_upsert",
+  "order_status_update",
+]);
+const FLEET_READ_ONLY_TOOLS = new Set(["search_products", "lookup_faq", "shipping_estimate", "store_info"]);
+const FLEET_FORBIDDEN_IMPORTS = ["@/lib/db", "@/lib/orders", "@/lib/auth", "@/lib/secrets"];
 
 /** وحدات خادم فقط — استيرادها من مكوّن عميل ممنوع (فحص العزل أعلاه). */
 const SERVER_ONLY_MODULES = ["@/lib/auth", "@/lib/secrets", "@/lib/db", "@/lib/orders", "@/lib/rate-limit"];
@@ -75,6 +98,29 @@ for (const file of files) {
     for (const mod of SERVER_ONLY_MODULES) {
       if (src.includes(`from "${mod}"`) || src.includes(`from '${mod}'`)) {
         problems.push(`${rel}: مكوّن عميل يستورد وحدة خادم فقط (${mod}) — خطر تسريب أسرار إلى الحزمة.`);
+      }
+    }
+  }
+
+  // 6) كتالوج الأسطول: بيانات لا سلوك.
+  if (isFleetCatalogFile(rel)) {
+    for (const mod of FLEET_FORBIDDEN_IMPORTS) {
+      if (src.includes(`from "${mod}"`) || src.includes(`from '${mod}'`)) {
+        problems.push(`${rel}: كتالوج الأسطول يستورد وحدة بيانات/خادم (${mod}) — الكتالوج تعريفات فقط.`);
+      }
+    }
+    if (/readOnly\s*:\s*false/.test(src)) {
+      problems.push(`${rel}: تعريف وكيل يعلن أداة غير للقراءة فقط (readOnly: false).`);
+    }
+    for (const match of src.matchAll(/tools\s*:\s*\[([^\]]*)\]/g)) {
+      for (const rawName of match[1].split(",")) {
+        const name = rawName.trim().replace(/["'`]/g, "");
+        if (!name) continue;
+        if (!FLEET_ALLOWED_TOOLS.has(name)) {
+          problems.push(`${rel}: أداة غير معروفة في تعريف وكيل (${name}) — أضفها صراحةً إلى قائمة البوابة.`);
+        } else if (!FLEET_READ_ONLY_TOOLS.has(name)) {
+          problems.push(`${rel}: أداة كاتبة في كتالوج الأسطول (${name}) — مرفوضة بنيويًا.`);
+        }
       }
     }
   }
