@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createClient, type Client } from "@libsql/client";
 import { tmpdir } from "node:os";
@@ -146,6 +146,25 @@ describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كش�
     assert.ok(!masked.includes("store-abc"));
     assert.ok(masked.startsWith("sto"));
     assert.ok(masked.endsWith("turso.io"));
+  });
+});
+
+describe("scripts/verify-turso — مسار فشل الاتصال", () => {
+  test("يطبع الجدول ولا يسقط بخطأ مرجعي، ويرصد رابطًا لُصق في حقل الرمز", () => {
+    // هذا الاختبار يغطي بالضبط ما لا يُكتشف محليًا: فرع فشل الاتصال على قاعدة
+    // غير محلية. بلا تغطية، دالة مساعدة غير معرّفة فيه تمر في CI كـ«توقف الفحص».
+    const env = {
+      ...process.env,
+      TURSO_DATABASE_URL: "libsql://example-db-example.turso.io",
+      TURSO_AUTH_TOKEN: "libsql://example-db-example.turso.io?authToken=eyJhbGciOiJIUzI1NiJ9.a.b",
+    };
+    const res = spawnSync("node", ["scripts/verify-turso.mjs", "--allow-secret-repair"], { encoding: "utf8", env });
+    assert.equal(res.status, 1, "صفوف حمراء تعني 1؛ أما خطأ في السكربت نفسه فهو فشل آخر");
+    assert.match(res.stdout, /\| conn \|/);
+    assert.match(res.stdout, /conn-token-shape/);
+    assert.match(res.stdout, /رابط في حقل الرمز/);
+    assert.doesNotMatch(res.stdout + res.stderr, /is not defined/);
+    assert.doesNotMatch(res.stdout, /example-db-example/, "لا يُطبع الرابط ولا الرمز");
   });
 });
 

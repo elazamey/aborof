@@ -79,6 +79,30 @@ function classifyConnectionError(error) {
  * مختلفان تمامًا يخفي `@libsql/client` كليهما وراء رسالة SERVER_ERROR واحدة.
  * لا يُطبع الرد؛ فقط رمز الحالة والحكم المُترجَم منه.
  */
+/**
+ * وصف آمن لبنية الرابط عند فشل الاتصال — بلا قيمة الرابط وبلا رمزه.
+ * (نص خطأ @libsql/client نفسه، مثل `Unexpected token '<'`، يقول إن المضيف رد
+ * HTML لا JSON؛ وهذا عرض مختلف تمامًا عن «رمز غير صالح» أو «شبكة محجوبة».)
+ */
+async function diagnoseEndpoint() {
+  const shape = describeDatabaseUrl(url);
+  const parts = [
+    `بنية الرابط: ${shape.scheme} · ${shape.kind} · المضيف ${shape.hostMasked} (طول ${shape.hostLength}) · مقاطع المسار ${shape.pathShape} · طول الرابط ${shape.length}` +
+      (shape.hasPlaceholder ? " · يحتوي علامة موضع (<…> أو ... أو xx) فهو قيمة موضعية لا رابط حقيقي" : ""),
+  ];
+  const origin = originForHttpProbe(url);
+  if (!origin) return parts;
+  const guard = [...secrets, origin];
+  try {
+    const res = await fetch(origin, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(8_000) });
+    const body = redact(String(await res.text()).slice(0, 160).replace(/\s+/g, " ").trim(), guard);
+    parts.push(`استجابة أصل الرابط: HTTP ${res.status} · content-type: ${res.headers.get("content-type") ?? "—"} · body: ${body || "—"}`);
+  } catch (e) {
+    parts.push(`تعذّر الوصول إلى أصل الرابط: ${redact(String(e?.message ?? e), guard)}`);
+  }
+  return parts;
+}
+
 async function probeHttpEndpoint(candidateUrl, token) {
   const origin = originForHttpProbe(candidateUrl);
   if (!origin) return { ok: false, verdict: "رابط غير قابل للفحص عبر HTTP" };
@@ -92,7 +116,7 @@ async function probeHttpEndpoint(candidateUrl, token) {
       body: JSON.stringify({
         requests: [{ type: "execute", stmt: { sql: "SELECT 1 AS ok" } }, { type: "close" }],
       }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(8_000),
     });
     const body = await res.text().catch(() => "");
     return interpretProbeStatus(res.status, redact(body, [...secrets, candidateUrl]));
