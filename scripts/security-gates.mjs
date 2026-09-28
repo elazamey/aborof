@@ -7,7 +7,8 @@
  *  2. منع تسريب الأخطاء: يُمنع إرجاع `String(e.message)` أو `e.stack` للعميل،
  *     ويُمنع `status: 200` مع حقل error في مسارات API.
  *  3. كل مسارات API تُغلَّف بـ apiHandler الموحّد.
- *  4. لا تُطبع متغيرات البيئة الحساسة مباشرة في السجلات.
+ *  4. عزل العميل/الخادم: مكوّن عميل لا يستورد وحدة خادم فقط (auth/db/secrets/orders/rate-limit).
+ *  5. لا تُطبع متغيرات البيئة الحساسة مباشرة في السجلات.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -33,6 +34,9 @@ const SESSION_SECRET_ALLOWED = new Set([
   path.normalize("src/lib/auth.ts"),
   path.normalize("src/lib/secrets.ts"),
 ]);
+
+/** وحدات خادم فقط — استيرادها من مكوّن عميل ممنوع (فحص العزل أعلاه). */
+const SERVER_ONLY_MODULES = ["@/lib/auth", "@/lib/secrets", "@/lib/db", "@/lib/orders", "@/lib/rate-limit"];
 
 for (const file of files) {
   const rel = path.relative(root, file);
@@ -65,7 +69,17 @@ for (const file of files) {
     }
   }
 
-  // 4) منع طباعة أسرار البيئة في السجلات.
+  // 4) عزل العميل/الخادم: مكوّن عميل (`use client`) لا يستورد وحدة خادم فقط،
+  //    لأن ذلك هو الطريق الأول لتسرّب أسرار الخادم إلى حزمة المتصفح.
+  if (/^\s*["']use client["']/m.test(src)) {
+    for (const mod of SERVER_ONLY_MODULES) {
+      if (src.includes(`from "${mod}"`) || src.includes(`from '${mod}'`)) {
+        problems.push(`${rel}: مكوّن عميل يستورد وحدة خادم فقط (${mod}) — خطر تسريب أسرار إلى الحزمة.`);
+      }
+    }
+  }
+
+  // 5) منع طباعة أسرار البيئة في السجلات.
   if (/console\.(log|error|warn)\([^)]*process\.env\./.test(src) &&
       /SECRET|PASSWORD|TOKEN|KEY/.test(src.match(/console\.(log|error|warn)\([^)]*process\.env\.([A-Z_]+)/)?.[1] ?? "")) {
     problems.push(`${rel}: لا تطبع قيم البيئة الحساسة في السجلات.`);

@@ -52,6 +52,8 @@ jobs:
         run: npm test
       - name: Production build
         run: npm run build
+      - name: Client bundle secret scan (لا أسرار خادم في ما ينزّله المتصفح)
+        run: npm run security:bundle
       - name: Record SHA
         id: meta
         run: echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"

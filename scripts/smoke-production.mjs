@@ -10,6 +10,7 @@
  * أمثلة:
  *   node scripts/smoke-production.mjs --base https://aborof.vercel.app
  *   node scripts/smoke-production.mjs --admin-probe            # الصف 4 (كلمة خاطئة عمدًا)
+ *   node scripts/smoke-production.mjs --chat-probe             # الصف 12 (لا يكتب في القاعدة)
  *   node scripts/smoke-production.mjs --allow-mutations --orders-body ./order.json   # الصفان 10 و11
  *   node scripts/smoke-production.mjs --track <orderId> --last4 1234                 # الصفان 13 و14
  *   node scripts/smoke-production.mjs --require-csp-enforce                          # بعد ضبط CSP_ENFORCE=true
@@ -30,7 +31,7 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const USAGE = `الاستخدام: node scripts/smoke-production.mjs [--base https://aborof.vercel.app]
-  [--admin-probe] [--allow-mutations --orders-body <file.json>] [--track <orderId> --last4 <4 digits>]
+  [--admin-probe] [--chat-probe] [--allow-mutations --orders-body <file.json>] [--track <orderId> --last4 <4 digits>]
   [--require-csp-enforce] [--allow-seed-fallback] [--json]`;
 
 const args = process.argv.slice(2);
@@ -256,6 +257,30 @@ async function adminProbe() {
   record("4", "POST /api/admin/login بكلمة خاطئة", expected, "401", detail);
 }
 
+// ------------------------------------------- الصف 12 (الدردشة — بلا كتابة في القاعدة)
+async function chatProbe() {
+  const probe = await request("POST", "/api/chat", {
+    messages: [{ role: "user", content: "منظف أرضيات" }],
+  });
+  let parsed = null;
+  try {
+    parsed = JSON.parse(probe.text);
+  } catch {
+    parsed = null;
+  }
+  const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : "";
+  const cards = Array.isArray(parsed?.products) ? parsed.products.length : 0;
+  record(
+    "12",
+    "POST /api/chat بسؤال «منظف أرضيات»",
+    probe.status === 200 && reply.length > 0,
+    '200 + {reply: "…"} (و`products` إن كان ENABLE_AI_AGENT/ENABLE_MCP_TOOLS مفعّلًا)',
+    `${probe.status} — رد بطول ${reply.length} حرفًا${cards ? ` + ${cards} بطاقة منتج` : " (بلا بطاقات — متوقع إن كانت الأعلام مغلقة)"}` +
+      (probe.status === 429 ? " — استُهلك حد المعدل (30/10 دقائق)" : "")
+  );
+  return { status: probe.status, cards };
+}
+
 // ------------------------------------- الصفان 10 و11 (إنشاء طلب حقيقي — بموافقة)
 async function orderProbe() {
   const file = arg("--orders-body");
@@ -338,6 +363,10 @@ async function main() {
   await readOnlyChecks();
   if (flag("--admin-probe")) await adminProbe();
 
+  // الصف 12: قراءة فقط من ناحية القاعدة (لا ينشئ طلبًا)، لكنه POST على نقطة محكومة
+  // بحد معدل — لذلك خلف علم --chat-probe مثل بقية الفحوص التي تُرسل جسمًا.
+  if (flag("--chat-probe")) await chatProbe();
+
   let created = null;
   if (flag("--allow-mutations") && arg("--orders-body")) created = await orderProbe();
 
@@ -366,6 +395,7 @@ async function main() {
         : `\n❌ فشل ${failed.length} فحصًا: ${failed.map((f) => f.id).join(", ")}`
     );
     if (!flag("--admin-probe")) console.log("\nملاحظة: الصف 4 يحتاج تشغيل `--admin-probe` (محاولة واحدة احترامًا لحد المعدل).");
+    if (!flag("--chat-probe")) console.log("ملاحظة: الصف 12 يحتاج تشغيل `--chat-probe` (POST على /api/chat).");
     if (!flag("--allow-mutations")) console.log("ملاحظة: الصفان 10 و11 يحتاجان `--allow-mutations --orders-body <file>` لأن أول إنشاء طلب حقيقي.");
     if (!flag("--require-csp-enforce")) console.log("ملاحظة: وضع CSP يُقبل في الحالتين افتراضيًا؛ بعد ضبط `CSP_ENFORCE=true` على Vercel أضف `--require-csp-enforce` ليفشل الفحص إن بقيت المراقبة.");
     if (!flag("--allow-seed-fallback")) console.log("ملاحظة: صف `db-binding` قرينة على مصدر الكتالوج؛ إثبات اتصال Turso نفسه بالصفوف 7–9 عبر `npm run verify:turso` أو `service-health.yml`.");

@@ -14,6 +14,7 @@ import {
   looksLikeSeedFallback,
   BASELINE_SECURITY_HEADERS,
 } from "../scripts/smoke-production.mjs";
+import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
 import { setDbClientForTest } from "../src/lib/db";
 import { SEED_PRODUCTS } from "../src/lib/seed";
 
@@ -191,6 +192,82 @@ describe("scripts/smoke-production — قرينة ربط قاعدة البيان
       setDbClientForTest(null);
       client.close();
     }
+  });
+});
+
+describe("scripts/scan-bundle-secrets — حاجز تسريب حزمة العميل", () => {
+  test("اسم سر خادم في الأثر المبنيّ = تسريب (بلا حاجة لقيمة)", () => {
+    const hits = scanTextForSecrets('const x = process.env.ADMIN_SESSION_SECRET;');
+    assert.deepEqual(hits, [{ kind: "name", label: "ADMIN_SESSION_SECRET" }]);
+  });
+
+  test("نص نظيف لا يُنتج أي أثر", () => {
+    assert.deepEqual(scanTextForSecrets('console.log("hello", process.env.NEXT_PUBLIC_X)'), []);
+  });
+
+  test("القيمة الحقيقية تُكتشف عند --check-env، والقيم القصيرة تُتجاهل", () => {
+    const values = [
+      { label: "ADMIN_PASSWORD", value: "super-secret-password-123" },
+      { label: "DIAGNOSTICS_KEY", value: "short" },
+    ];
+    const leaked = scanTextForSecrets('var p="super-secret-password-123";', values);
+    assert.deepEqual(leaked, [{ kind: "value", label: "ADMIN_PASSWORD" }]);
+    assert.deepEqual(scanTextForSecrets('var p="short";', values), []);
+  });
+
+  test("قائمة الأسماء تغطي أسرار الخادم الأساسية", () => {
+    for (const name of ["ADMIN_SESSION_SECRET", "ADMIN_PASSWORD", "TURSO_AUTH_TOKEN", "TURSO_DATABASE_URL"]) {
+      assert.ok(SERVER_SECRET_NAMES.includes(name), `${name} غائب عن قائمة الفحص`);
+    }
+  });
+
+  test("أمر الفحص مركّب في البوابات (quality.yml و deploy.yml)", () => {
+    for (const file of [".github/workflows/quality.yml", ".github/workflows/deploy.yml"]) {
+      const workflow = fs.readFileSync(file, "utf8");
+      assert.match(workflow, /npm run security:bundle/, `${file} لا يشغّل فحص حزمة العميل`);
+    }
+  });
+
+  test("حزمة البناء الفعلية نظيفة (يُشغَّل بعد npm run build)", () => {
+    const dir = path.join(process.cwd(), ".next", "static");
+    if (!fs.existsSync(dir)) return; // لا حزمة مبنيّة في هذه البيئة — لا حكم
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(js|mjs|css|html|json|txt)$/.test(entry.name)) files.push(full);
+      }
+    };
+    walk(dir);
+    assert.ok(files.length > 0, "الحزمة المبنيّة يجب أن تحوي ملفات");
+    for (const file of files) {
+      const hits = scanTextForSecrets(fs.readFileSync(file, "utf8"));
+      assert.deepEqual(hits, [], `تسريب محتمل في ${file}: ${JSON.stringify(hits)}`);
+    }
+  });
+});
+
+describe("scripts/security-gates — عزل العميل/الخادم", () => {
+  test("المكوّنات المعلَّمة بـ use client لا تستورد وحدات خادم فقط", () => {
+    const serverOnly = ["@/lib/auth", "@/lib/secrets", "@/lib/db", "@/lib/orders", "@/lib/rate-limit"];
+    const roots = ["src/app", "src/components"];
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name)) {
+          const src = fs.readFileSync(full, "utf8");
+          if (!/^\s*["']use client["']/m.test(src)) continue;
+          for (const mod of serverOnly) {
+            if (src.includes(`from "${mod}"`) || src.includes(`from '${mod}'`)) offenders.push(`${full} → ${mod}`);
+          }
+        }
+      }
+    };
+    for (const root of roots) if (fs.existsSync(root)) walk(root);
+    assert.deepEqual(offenders, [], `مكوّنات عميل تستورد وحدات خادم: ${offenders.join(", ")}`);
   });
 });
 

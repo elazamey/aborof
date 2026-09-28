@@ -63,6 +63,11 @@ jobs:
       - name: Production build
         run: npm run build
 
+      # الفحص الوحيد الذي يقرأ الأثر الذي ينزّله المتصفح فعلاً: أسماء وقيم أسرار
+      # الخادم يجب ألا تظهر أبدًا في .next/static (حاجز تسريب حزمة العميل).
+      - name: Client bundle secret scan
+        run: npm run security:bundle
+
       # حفظ نتائج البناء كأثر للمراجعة والربط مع الـ SHA.
       - name: Upload build summary artifact
         if: always()

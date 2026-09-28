@@ -134,7 +134,8 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
 |---|---|---|
 | `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
 | `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
-| `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط |
+| `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--chat-probe` للصف 12، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط |
+| `npm run security:bundle` | فحص ما ينزّله المتصفح فعلاً (`.next/static`): أسماء وقيم أسرار الخادم | يُشغَّل آليًا بعد `npm run build` في `quality.yml` و`deploy.yml` |
 | `npm run routes:inventory` | جرد المسارات وبواباتها (نفس بوابة CI) | يفشل إن غاب أي مسار مطلوب |
 
 ### قراءة نتائج الـ Smoke بلا لبس

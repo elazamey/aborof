@@ -13,7 +13,8 @@
     "verify:turso": "node scripts/verify-turso.mjs",
     "smoke:prod": "node scripts/smoke-production.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
-    "security:gates": "node scripts/security-gates.mjs"
+    "security:gates": "node scripts/security-gates.mjs",
+    "security:bundle": "node scripts/scan-bundle-secrets.mjs --check-env"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
