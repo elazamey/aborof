@@ -1,6 +1,6 @@
 import { effectiveFleet, getDefaultAgent, isFleetWildcardDisabled } from "./catalog";
 import { agentKeywords } from "./catalog";
-import { normalizeForMatch, normalizedTokens } from "./normalize";
+import { normalizeForMatch, normalizedTokens, stripDefiniteArticle } from "./normalize";
 import { AGENT_DEPARTMENTS, type AgentDepartment, type AgentSelection, type StoreAgent } from "./types";
 
 /**
@@ -111,7 +111,9 @@ function scoreAgent(agent: StoreAgent, normalizedMessage: string, tokens: Set<st
  */
 export function selectAgents(message: string, options?: { maxSupporters?: number }): AgentSelection {
   const normalizedMessage = normalizeForMatch(message);
-  const tokens = new Set(normalizedTokens(message));
+  // الرموز تُطبَّع بنفس مسار المحفزات تمامًا (بما فيه حذف «ال») — وإلا فشل تطابق
+  // مثل «الجيزه» مع محفز مُطبَّع إلى «جيزه». اكتشفه قياس المحفزات الفعلي.
+  const tokens = new Set(normalizedTokens(message).map(stripDefiniteArticle));
   const maxSupporters = Math.max(0, Math.min(options?.maxSupporters ?? FLEET_MAX_SUPPORTERS, FLEET_MAX_SUPPORTERS));
 
   if (normalizedMessage.length === 0) {

@@ -585,3 +585,85 @@ describe("أسطول الوكلاء — فحوص سلبية ومتانة", () =>
     assert.ok(elapsed < 3000, `5000 قرار استغرقت ${elapsed}ms — انحدار أداء`);
   });
 });
+
+describe("أسطول الوكلاء — الأمثلة المعلنة (اختبار مُولَّد من الكتالوج نفسه)", () => {
+  /**
+   * كل وكيل يُعلن 2-4 أمثلة في تعريفه، وهذه الحلقة تُولّد من كل مثال حالة اختبار.
+   * الفائدة: إضافة وكيل جديد مع محفزاته تُنتج تغطية كاملة تلقائيًا — ولا يمكن أن
+   * تُعلن محفزات لا تعمل. هذا هو عقد التوجيه المعلن مقابل السلوك الفعلي.
+   */
+  test("كل مثال معلن يُوجَّه فعلاً إلى الوكيل الذي أعلنه", () => {
+    const failures: string[] = [];
+    let checked = 0;
+    for (const agent of AGENT_FLEET) {
+      for (const example of agent.examples) {
+        checked += 1;
+        const selection = selectAgents(example.input);
+        if (selection.primary.id !== example.expected) {
+          failures.push(`«${example.input}» ⇒ ${selection.primary.id} (المتوقع ${example.expected})`);
+        }
+      }
+    }
+    assert.ok(checked >= 100, `عدد الأمثلة المفحوصة ${checked} — أقل من المتوقع`);
+    assert.deepEqual(failures, [], `أمثلة معلنة لا تطابق السلوك:\n${failures.join("\n")}`);
+  });
+
+  test("كل مثال يخص صاحبه: expected يساوي id الوكيل صاحب المثال", () => {
+    for (const agent of AGENT_FLEET) {
+      for (const example of agent.examples) {
+        assert.equal(example.expected, agent.id, `${agent.id} يعلن مثالاً لوكيل آخر`);
+      }
+    }
+  });
+
+  test("الأمثلة تُصدَّر داخل المانيفست المحمول (للوحة الإدارة وللفرق الأخرى)", async () => {
+    const { buildManifest } = await import("../scripts/export-agent-manifests.mjs");
+    const payload = buildManifest(fleetSnapshot(), fleetCatalogManifest().map((entry) => {
+      const agent = AGENT_FLEET.find((a) => a.id === entry.id);
+      return { ...entry, examples: agent?.examples ?? [] };
+    }), { enabled: false, write_tools_allowed: false, allowed_tools: [], max_calls_per_request: 0, tool_timeout_ms: 0, max_result_chars: 0 });
+
+    assert.equal(payload.agents.length, 50);
+    for (const agent of payload.agents) {
+      assert.ok(agent.examples.length >= 2, `${agent.id} بلا أمثلة في المانيفست`);
+      assert.equal(agent.read_only_only, true);
+    }
+    assert.equal(payload.format_version, 1);
+    assert.ok(payload.generated_by.includes("مُولَّد"));
+  });
+
+  test("مُصدِّر YAML: حتمية المخرجات، وسلامة السلاسل العربية والرموز الخاصة", async () => {
+    const { toYaml } = await import("../scripts/export-agent-manifests.mjs");
+    const sample = {
+      id: "sales_floor_care",
+      name: "خبير منظفات الأرضيات",
+      count: 3,
+      enabled: false,
+      empty: [],
+      nested: { tools: ["search_products", "lookup_faq"] },
+      tricky: 'يقول "مرحبًا" \\ وبسطر\nجديد',
+    };
+    const first = toYaml(sample);
+    assert.equal(toYaml(sample), first, "المخرج غير حتمي");
+    assert.ok(first.includes('id: "sales_floor_care"'));
+    assert.ok(first.includes('enabled: false'));
+    assert.ok(first.includes("count: 3"));
+    assert.ok(first.includes("empty: []"));
+    assert.ok(first.includes('tricky: "يقول \\"مرحبًا\\"'));
+  });
+
+  test("مانيفست الأسطول المولَّد مطابق للكود (فحص انحراف CI)", () => {
+    const fsSync = require("node:fs") as typeof import("node:fs");
+    const jsonPath = "docs/ai/agents.manifest.json";
+    const yamlPath = "docs/ai/agents.manifest.yaml";
+    if (!fsSync.existsSync(jsonPath)) return; // لا مانيفست مولَّد في هذه البيئة — لا حكم
+    const payload = JSON.parse(fsSync.readFileSync(jsonPath, "utf8")) as {
+      agents: { id: string; tools: string[]; examples: unknown[] }[];
+    };
+    assert.equal(payload.agents.length, 50);
+    for (const agent of payload.agents) {
+      for (const tool of agent.tools) assert.ok(READ_ONLY_TOOL_NAMES.includes(tool), `${agent.id}: أداة غير للقراءة فقط`);
+      assert.ok(agent.examples.length >= 2);
+    }
+  });
+});

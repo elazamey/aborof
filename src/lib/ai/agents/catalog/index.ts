@@ -39,6 +39,10 @@ const LIMITS = {
   guidanceMin: 1,
   guidanceMax: 3,
   guidanceCharsMax: 160,
+  examplesMin: 2,
+  examplesMax: 4,
+  exampleInputMin: 3,
+  exampleInputMax: 120,
 } as const;
 
 export interface FleetValidationProblem {
@@ -89,6 +93,20 @@ export function validateFleet(agents: readonly StoreAgent[] = RAW_CATALOG): Flee
     } else if (agent.guidance.some((g) => !g || g.length > LIMITS.guidanceCharsMax)) {
       push(`قاعدة سلوك طويلة أكثر من ${LIMITS.guidanceCharsMax} حرفًا`);
     }
+    const examples = Array.isArray(agent.examples) ? agent.examples : null;
+    if (!examples || examples.length < LIMITS.examplesMin || examples.length > LIMITS.examplesMax) {
+      push(`الأمثلة يجب أن تكون بين ${LIMITS.examplesMin} و${LIMITS.examplesMax} لكل وكيل`);
+    } else {
+      for (const example of examples) {
+        const input = String(example?.input ?? "").trim();
+        if (input.length < LIMITS.exampleInputMin || input.length > LIMITS.exampleInputMax) {
+          push(`مثال بطول غير مسموح (${input.length}) — بين ${LIMITS.exampleInputMin} و${LIMITS.exampleInputMax}`);
+        }
+        if (example?.expected !== id) {
+          push(`مثال يعلن وكيلاً غير صاحبه (${String(example?.expected)}) — يجب أن يساوي id`);
+        }
+      }
+    }
     if (agent.isDefault) defaults += 1;
   }
 
@@ -116,6 +134,7 @@ const SAFE_FALLBACK: StoreAgent = {
   tools: ["search_products", "store_info"],
   guidance: ["لا تخترعي منتجًا أو سعرًا غير موجود في نتائج الأدوات."],
   isDefault: true,
+  examples: [{ input: "عندكم إيه؟", expected: "sales_general_safe" }],
 };
 
 const problems = validateFleet();
@@ -156,7 +175,9 @@ const KEYWORDS_CACHE = new Map<string, string[]>();
 export function agentKeywords(agent: StoreAgent): string[] {
   const cached = KEYWORDS_CACHE.get(agent.id);
   if (cached) return cached;
-  const list = agent.keywords.map((k) => normalizeForMatch(k)).filter((k) => k.length > 0);
+  // إزالة التكرار **بعد** التطبيع: «الشحن» و«شحن» كلمتان مختلفتان نصًّا ومحفز واحد
+  // دلاليًا — بدون ذلك يُحتسب الرمز نفسه مرتين فتتضخم درجة الوكيل بلا سبب حقيقي.
+  const list = Array.from(new Set(agent.keywords.map((k) => normalizeForMatch(k)).filter((k) => k.length > 0)));
   KEYWORDS_CACHE.set(agent.id, list);
   return list;
 }

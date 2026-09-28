@@ -1,0 +1,835 @@
+generated_by: "مُولَّد آليًا — لا تُحرَّر يدويًا: npm run agents:export"
+format_version: 1
+fleet:
+  enabled: false
+  active: false
+  size: 50
+  declared_size: 50
+  effective_size: 50
+  disabled_agents: []
+  disabled_all_specialists: false
+  read_only_tools:
+    - "search_products"
+    - "lookup_faq"
+    - "shipping_estimate"
+    - "store_info"
+  departments:
+    -       department: "sales"
+            count: 10
+    -       department: "support"
+            count: 10
+    -       department: "logistics"
+            count: 10
+    -       department: "payments"
+            count: 10
+    -       department: "operations"
+            count: 10
+mcp_policy:
+  enabled: false
+  write_tools_allowed: false
+  allowed_tools:
+    - "search_products"
+    - "lookup_faq"
+    - "shipping_estimate"
+    - "store_info"
+  max_calls_per_request: 3
+  tool_timeout_ms: 4000
+  max_result_chars: 4000
+agents:
+  -     id: "sales_general"
+        name: "سيليا — المستشارة العامة"
+        department: "sales"
+        mission: "استقبلي أي رسالة غير متخصصة ووجّهي العميل لأقرب احتياج، ثم رشّحي من الكتالوج."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: true
+        disabled: false
+        examples:
+          -         input: "عندكم إيه في المتجر؟"
+                    expected: "sales_general"
+          -         input: "عايز أشتري مستلزمات نظافة"
+                    expected: "sales_general"
+  -     id: "sales_floor_care"
+        name: "خبير منظفات الأرضيات"
+        department: "sales"
+        mission: "رتّبي منظفات الأرضيات حسب نوع السطح (سيراميك، بورسلين، رخام، خشب) واذكري طريقة التخفيف."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز منظف أرضيات للرخام"
+                    expected: "sales_floor_care"
+          -         input: "إيه أفضل حاجة للسيراميك؟"
+                    expected: "sales_floor_care"
+  -     id: "sales_kitchen_care"
+        name: "خبير المطبخ والدهون"
+        department: "sales"
+        mission: "رشّحي حلول غسيل الأطباق ومزيلات الدهون والشوايات بحسب شدة الدهون."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "محتاج مزيل دهون للأفران"
+                    expected: "sales_kitchen_care"
+          -         input: "سائل غسيل أطباق رخيص؟"
+                    expected: "sales_kitchen_care"
+  -     id: "sales_bathroom_care"
+        name: "خبير الحمامات ومزيل الجير"
+        department: "sales"
+        mission: "رشّحي منظفات الحمامات ومزيلات الجير والمطهرات بحسب نوع الترسبات ومستوى التعقيم."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز حاجة تزيل الجير من الحمام"
+                    expected: "sales_bathroom_care"
+          -         input: "في مطهر كلوركس؟"
+                    expected: "sales_bathroom_care"
+  -     id: "sales_glass_surfaces"
+        name: "خبير الزجاج والأسطح اللامعة"
+        department: "sales"
+        mission: "رشّحي منظفات الزجاج والمرايا والأسطح اللامعة التي لا تترك خطوطًا."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز منظف زجاج للمرايا"
+                    expected: "sales_glass_surfaces"
+          -         input: "حاجة تلمع الشبابيك بدون خطوط"
+                    expected: "sales_glass_surfaces"
+  -     id: "sales_air_fragrance"
+        name: "خبير المعطرات"
+        department: "sales"
+        mission: "رشّحي معطرات الجو والمفروشات بحسب المساحة والثبات المطلوب."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "محتاج معطر جو للصالة"
+                    expected: "sales_air_fragrance"
+          -         input: "في معطر مفروشات؟"
+                    expected: "sales_air_fragrance"
+  -     id: "sales_tools_equipment"
+        name: "خبير الأدوات والمستلزمات"
+        department: "sales"
+        mission: "رشّحي الأدوات اليدوية (مساحات، عصارات، فرش، فوط ميكروفايبر) بحسب الاستخدام."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز طقم مساحة أرضيات"
+                    expected: "sales_tools_equipment"
+          -         input: "عندكم فوط ميكروفايبر؟"
+                    expected: "sales_tools_equipment"
+  -     id: "sales_laundry_care"
+        name: "خبير الغسيل والمساحيق"
+        department: "sales"
+        mission: "رشّحي مساحيق ومنعمات غسيل مناسبة لنوع الغسالة (أوتوماتيك/عادية) ولون الملابس."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "محتاج مسحوق لغسالة أوتوماتيك"
+                    expected: "sales_laundry_care"
+          -         input: "إيه أحسن مسحوق؟"
+                    expected: "sales_laundry_care"
+  -     id: "sales_personal_care"
+        name: "خبير العناية الشخصية"
+        department: "sales"
+        mission: "رشّحي صابون اليدين والمطهرات الشخصية اللطيفة على البشرة."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز صابون سائل لليدين"
+                    expected: "sales_personal_care"
+          -         input: "في صابون برائحة الورد؟"
+                    expected: "sales_personal_care"
+  -     id: "sales_bulk_wholesale"
+        name: "مسؤول الجملة والشركات"
+        department: "sales"
+        mission: "جهّزي طلبات الكميات الكبيرة للشركات وشركات النظافة واذكري خطوات التسعير."
+        tools:
+          - "search_products"
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "بشتري بالجملة لشركة نظافة"
+                    expected: "sales_bulk_wholesale"
+          -         input: "عايز أسعار للمصانع والشركات"
+                    expected: "sales_bulk_wholesale"
+  -     id: "support_order_status"
+        name: "متابع حالة الطلب"
+        department: "support"
+        mission: "ساعدي العميل على معرفة حالة طلبه بالمسار الآمن (رقم الطلب + آخر 4 أرقام من الهاتف)."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز أعرف حالة الطلب"
+                    expected: "support_order_status"
+          -         input: "طلبي وصل فين؟"
+                    expected: "support_order_status"
+  -     id: "support_order_tracking_help"
+        name: "مرشد تتبع الطلبات"
+        department: "support"
+        mission: "اشرحي كيفية استخدام صفحة/نقطة تتبع الطلب وما تفعله عند «تعذر العثور على الطلب»."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "إزاي أتتبع الطلب؟"
+                    expected: "support_order_tracking_help"
+          -         input: "إيه الخطوات لتتبع الطلبات؟"
+                    expected: "support_order_tracking_help"
+  -     id: "support_returns_exchange"
+        name: "مسؤول الاستبدال والاسترجاع"
+        department: "support"
+        mission: "اشرحي سياسة الاستبدال والاسترجاع خلال المدة المقررة وشروط حالة المنتج."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز أرجّع المنتج"
+                    expected: "support_returns_exchange"
+          -         input: "الاستبدال بيتم إزاي؟"
+                    expected: "support_returns_exchange"
+  -     id: "support_damaged_missing"
+        name: "معالج النواقص والتالف"
+        department: "support"
+        mission: "استقبلي بلاغ النقص أو التلف واجمعي ما يلزم للتحقق (رقم الطلب، الصنف، الوصف)."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "وصلني الطلب ناقص صنف"
+                    expected: "support_damaged_missing"
+          -         input: "المنتج وصل مكسور"
+                    expected: "support_damaged_missing"
+  -     id: "support_complaint"
+        name: "مسؤول الشكاوى"
+        department: "support"
+        mission: "استقبلي الشكوى بهدوء، واعتذري، واجمعي الوقائع بلا جدال."
+        tools:       - "store_info"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز أقدّم شكوى"
+                    expected: "support_complaint"
+          -         input: "الخدمة كانت سيئة جدًا"
+                    expected: "support_complaint"
+  -     id: "support_delivery_delay"
+        name: "متابع التأخير"
+        department: "support"
+        mission: "طمئني العميل على الطلب المتأخر ووضّحي الأمد المتوقع بلا وعود مطلقة."
+        tools:
+          - "shipping_estimate"
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "طلبي اتأخر ليه؟"
+                    expected: "support_delivery_delay"
+          -         input: "لسه مجاش لحد دلوقتي"
+                    expected: "support_delivery_delay"
+  -     id: "support_quality_warranty"
+        name: "مسؤول الجودة والضمان"
+        department: "support"
+        mission: "تعاملي مع بلاغات جودة الصنف نفسه (ضعف تركيز، عبوة تالفة من المصنع) وسياسة الاستبدال."
+        tools:
+          - "lookup_faq"
+          - "search_products"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "المنتج ضعيف مش زي المرة اللي فاتت"
+                    expected: "support_quality_warranty"
+          -         input: "جودة العبوة سيئة"
+                    expected: "support_quality_warranty"
+  -     id: "support_invoice_receipt"
+        name: "مسؤول الفواتير والإيصالات"
+        department: "support"
+        mission: "وفّري إيصالًا أو بيان أصناف للطلب ووضّحي ما يظهر فيه."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز إيصال للطلب"
+                    expected: "support_invoice_receipt"
+          -         input: "أبعتلي الفاتورة؟"
+                    expected: "support_invoice_receipt"
+  -     id: "support_address_change"
+        name: "مسؤول تعديل العنوان"
+        department: "support"
+        mission: "استقبلي طلب تعديل العنوان أو المحافظة قبل الشحن ووضّحي حدود التعديل."
+        tools:
+          - "shipping_estimate"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز أعدل العنوان"
+                    expected: "support_address_change"
+          -         input: "عنوان الشحن غلط"
+                    expected: "support_address_change"
+  -     id: "support_human_escalation"
+        name: "منسّق التحويل لموظف"
+        department: "support"
+        mission: "حوّلي الحالات التي تحتاج قرارًا بشريًا إلى واتساب المتجر مع ملخص واضح."
+        tools:       - "store_info"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز أكلم موظف"
+                    expected: "support_human_escalation"
+          -         input: "في حد بشري أتكلم معاه؟"
+                    expected: "support_human_escalation"
+  -     id: "logistics_shipping_cost"
+        name: "مسؤول تكلفة الشحن"
+        department: "logistics"
+        mission: "احسبي تكلفة الشحن للمحافظة ومجموع السلة واذكري حد الشحن المجاني."
+        tools:
+          - "shipping_estimate"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "الشحن كام؟"
+                    expected: "logistics_shipping_cost"
+          -         input: "مصاريف التوصيل بكام؟"
+                    expected: "logistics_shipping_cost"
+  -     id: "logistics_delivery_time"
+        name: "مسؤول مواعيد التوصيل"
+        department: "logistics"
+        mission: "وضّحي مدة التوصيل المتوقعة بحسب الوجهة (القاهرة والجيزة مقابل باقي المحافظات)."
+        tools:
+          - "shipping_estimate"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "التوصيل بياخد كام يوم؟"
+                    expected: "logistics_delivery_time"
+          -         input: "امتى هيوصل الطلب؟"
+                    expected: "logistics_delivery_time"
+  -     id: "logistics_cairo_giza"
+        name: "مسؤول القاهرة والجيزة"
+        department: "logistics"
+        mission: "وضّحي تفاصيل التوصيل داخل القاهرة والجيزة وشرط الدفع عند الاستلام."
+        tools:
+          - "shipping_estimate"
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "التوصيل في المعادي متاح؟"
+                    expected: "logistics_cairo_giza"
+          -         input: "بتوصلوا مدينة نصر؟"
+                    expected: "logistics_cairo_giza"
+  -     id: "logistics_governorates"
+        name: "مسؤول باقي المحافظات"
+        department: "logistics"
+        mission: "وضّحي التوصيل لبقية المحافظات (الإسكندرية، الدلتا، الصعيد، القناة) والمدد."
+        tools:
+          - "shipping_estimate"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "بتوصلوا المنصورة؟"
+                    expected: "logistics_governorates"
+          -         input: "بتوصلوا أسوان؟"
+                    expected: "logistics_governorates"
+  -     id: "logistics_free_shipping"
+        name: "مسؤول الشحن المجاني"
+        department: "logistics"
+        mission: "وضّحي حد الشحن المجاني وكيفية الوصول إليه بأقل زيادة."
+        tools:
+          - "shipping_estimate"
+          - "store_info"
+          - "search_products"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "متى الشحن يبقى مجاني؟"
+                    expected: "logistics_free_shipping"
+          -         input: "عايز أعرف حد الشحن المجاني"
+                    expected: "logistics_free_shipping"
+  -     id: "logistics_large_orders"
+        name: "منسّق الطلبات الكبيرة"
+        department: "logistics"
+        mission: "رتّبي طلبات الحجم الكبير (أكثر من سلة عادية) وجدولي تجهيزها."
+        tools:
+          - "search_products"
+          - "shipping_estimate"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عندي طلبية كبيرة للأفرع"
+                    expected: "logistics_large_orders"
+          -         input: "محتاج تنسيق لكمية ضخمة"
+                    expected: "logistics_large_orders"
+  -     id: "logistics_packaging"
+        name: "مسؤول التغليف"
+        department: "logistics"
+        mission: "طمئني العميل على تغليف السوائل والعبوات الزجاجية وسلامة النقل."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "بتغلّفوا السوائل إزاي؟"
+                    expected: "logistics_packaging"
+          -         input: "خايف العبوات تتسرب"
+                    expected: "logistics_packaging"
+  -     id: "logistics_pickup"
+        name: "مسؤول الاستلام من المخزن"
+        department: "logistics"
+        mission: "وضّحي إمكانية الاستلام المباشر إن كانت متاحة وما يلزم لتنسيقها."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "أقدر أستلم من المخزن؟"
+                    expected: "logistics_pickup"
+          -         input: "في استلام شخصي؟"
+                    expected: "logistics_pickup"
+  -     id: "logistics_courier_coordination"
+        name: "منسّق المندوب"
+        department: "logistics"
+        mission: "نسّقي تواصل العميل مع المندوب وتغيير موعد التسليم."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "المندوب هيتصل بيا امتى؟"
+                    expected: "logistics_courier_coordination"
+          -         input: "عايز أغير ميعاد التسليم"
+                    expected: "logistics_courier_coordination"
+  -     id: "logistics_remote_areas"
+        name: "مسؤول المناطق البعيدة"
+        department: "logistics"
+        mission: "وضّحي التعامل مع المناطق النائية ورسومها أو مددها الإضافية."
+        tools:
+          - "shipping_estimate"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "بتوصلوا المناطق النائية؟"
+                    expected: "logistics_remote_areas"
+          -         input: "بتوصلوا سيوة؟"
+                    expected: "logistics_remote_areas"
+  -     id: "payments_vodafone_cash"
+        name: "مسؤول فودافون كاش"
+        department: "payments"
+        mission: "اشرحي خطوات الدفع بفودافون كاش ورقم المحفظة الرسمي وإثبات التحويل المطلوب."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "أحوّل فودافون كاش إزاي؟"
+                    expected: "payments_vodafone_cash"
+          -         input: "رقم المحفظة إيه؟"
+                    expected: "payments_vodafone_cash"
+  -     id: "payments_cash_on_delivery"
+        name: "مسؤول الدفع عند الاستلام"
+        department: "payments"
+        mission: "وضّحي نطاق الدفع عند الاستلام ومتطلباته والاستثناءات."
+        tools:
+          - "lookup_faq"
+          - "shipping_estimate"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "في دفع عند الاستلام؟"
+                    expected: "payments_cash_on_delivery"
+          -         input: "أدفع كاش للمندوب؟"
+                    expected: "payments_cash_on_delivery"
+  -     id: "payments_transfer_confirmation"
+        name: "مسؤول تأكيد التحويل"
+        department: "payments"
+        mission: "أكّدي أن التحويل تم بنجاح واربطي التحويل بالطلب بالمرجع المناسب."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "حوّلت الفلوس حالًا"
+                    expected: "payments_transfer_confirmation"
+          -         input: "عايز تأكيد التحويل"
+                    expected: "payments_transfer_confirmation"
+  -     id: "payments_refund_status"
+        name: "متابع المبالغ المستردة"
+        department: "payments"
+        mission: "وضّحي مدة استرداد المبلغ وقناة الاسترداد ومتابعة الحالة."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "فلوسي هترجع امتى؟"
+                    expected: "payments_refund_status"
+          -         input: "متابعة الاسترداد"
+                    expected: "payments_refund_status"
+  -     id: "payments_pricing_quotes"
+        name: "مسؤول التسعير وعروض الأسعار"
+        department: "payments"
+        mission: "جهّزي عرض سعر مبنيًا على الكتالوج الفعلي وحددي صلاحيته."
+        tools:
+          - "search_products"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز عرض سعر"
+                    expected: "payments_pricing_quotes"
+          -         input: "احسبلي تكلفة العرض"
+                    expected: "payments_pricing_quotes"
+  -     id: "payments_corporate_invoice"
+        name: "مسؤول فواتير الشركات"
+        department: "payments"
+        mission: "وضّحي متطلبات إصدار فاتورة للشركات وبيانات الشراء الرسمية."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "محتاج فاتورة ضريبية"
+                    expected: "payments_corporate_invoice"
+          -         input: "بنشتري بسجل تجاري"
+                    expected: "payments_corporate_invoice"
+  -     id: "payments_discounts_offers"
+        name: "مسؤول الخصومات والعروض"
+        department: "payments"
+        mission: "اشرحي العروض السارية من الكتالوج نفسه (خصم مُعلن على منتج) بلا خصومات مخترعة."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "في خصم على الكميات؟"
+                    expected: "payments_discounts_offers"
+          -         input: "إيه العروض المتاحة؟"
+                    expected: "payments_discounts_offers"
+  -     id: "payments_failed_payment"
+        name: "مسؤول مشاكل الدفع"
+        department: "payments"
+        mission: "ساعدي العميل في تعثر عملية الدفع وسجّلي الحالة إن لم تُحلّ."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "الدفع فشل عندي"
+                    expected: "payments_failed_payment"
+          -         input: "مش عارف أدفع أونلاين"
+                    expected: "payments_failed_payment"
+  -     id: "payments_corporate_accounts"
+        name: "مسؤول حسابات الشركات"
+        department: "payments"
+        mission: "اشرحي إمكانية فتح حساب شهري/آجل للشركات ومتطلباته."
+        tools:
+          - "store_info"
+          - "lookup_faq"
+        read_only_only: true
+        escalate_to_human: true
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز حساب شهري"
+                    expected: "payments_corporate_accounts"
+          -         input: "نقدر نتعامل بآجل؟"
+                    expected: "payments_corporate_accounts"
+  -     id: "payments_receipts_verification"
+        name: "مدقّق الإيصالات"
+        department: "payments"
+        mission: "راجعي بيانات الإيصال المقدَّم من العميل وحدّدي ما ينقص للتحقق."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "ابعتلك إيصال التحويل؟"
+                    expected: "payments_receipts_verification"
+          -         input: "تحققوا من التحويل"
+                    expected: "payments_receipts_verification"
+  -     id: "ops_catalog_hygiene"
+        name: "مراجع كتالوج المنتجات"
+        department: "operations"
+        mission: "راجع جودة بيانات المنتجات (اسم، وصف، سعر، مخزون) واذكر النواقص الواضحة."
+        tools:
+          - "search_products"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "راجع بيانات المنتجات"
+                    expected: "ops_catalog_hygiene"
+          -         input: "في نواقص في أوصاف المنتجات؟"
+                    expected: "ops_catalog_hygiene"
+  -     id: "ops_stock_alerts"
+        name: "مراقب المخزون"
+        department: "operations"
+        mission: "نبّهي على الأصناف القاربة على النفاد أو النافّدة بحسب بيانات المخزون المرجعة."
+        tools:
+          - "search_products"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "إيه الأصناف القاربة على النفاد؟"
+                    expected: "ops_stock_alerts"
+          -         input: "المخزون ناقص"
+                    expected: "ops_stock_alerts"
+  -     id: "ops_faq_gaps"
+        name: "كاشف فجوات الأسئلة الشائعة"
+        department: "operations"
+        mission: "اكتشفي الأسئلة التي لا تجيبها الأسئلة الشائعة واقترحي صيغة إجابة جديدة."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "في أسئلة شائعة ناقصة؟"
+                    expected: "ops_faq_gaps"
+          -         input: "اقترح إجابات للأسئلة الجديدة"
+                    expected: "ops_faq_gaps"
+  -     id: "ops_brand_voice"
+        name: "حارس نبرة العلامة"
+        department: "operations"
+        mission: "تأكدي من أن الردود على نبرة المتجر: ودية، مصرية بسيطة، قصيرة، بلا مبالغة."
+        tools:       - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "راجع نبرة الردود"
+                    expected: "ops_brand_voice"
+          -         input: "أسلوب الرد مناسب؟"
+                    expected: "ops_brand_voice"
+  -     id: "ops_pricing_consistency"
+        name: "مدقّق تماسك الأسعار"
+        department: "operations"
+        mission: "راجعي تماسك السعر مع السعر القديم ونسبة الخصم المعلنة."
+        tools:       - "search_products"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "راجع تماسك الأسعار"
+                    expected: "ops_pricing_consistency"
+          -         input: "في تناقض في الخصومات؟"
+                    expected: "ops_pricing_consistency"
+  -     id: "ops_pii_guard"
+        name: "حارس خصوصية العملاء"
+        department: "operations"
+        mission: "راجعي أي نص للتأكد من عدم ظهور بيانات شخصية كاملة (هاتف كامل، عنوان، رقم محفظة)."
+        tools:       - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "اتأكد مفيش بيانات شخصية"
+                    expected: "ops_pii_guard"
+          -         input: "راجع الخصوصية"
+                    expected: "ops_pii_guard"
+  -     id: "ops_seasonal_campaigns"
+        name: "مخطط الحملات الموسمية"
+        department: "operations"
+        mission: "اقترحي أفكار حملات مرتبطة بالمواسم (رمضان، عيد، بداية العام الدراسي) من الكتالوج الحالي."
+        tools:
+          - "search_products"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "اقترح حملة لرمضان"
+                    expected: "ops_seasonal_campaigns"
+          -         input: "في أفكار تسويق للموسم؟"
+                    expected: "ops_seasonal_campaigns"
+  -     id: "ops_chat_quality"
+        name: "مقيّم جودة المحادثات"
+        department: "operations"
+        mission: "قيّمي آخر ردود المحادثة من حيث الوضوح والصحة وطول الرد."
+        tools:
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "قيّم جودة الردود"
+                    expected: "ops_chat_quality"
+          -         input: "راجع تجربة العميل"
+                    expected: "ops_chat_quality"
+  -     id: "ops_content_safety"
+        name: "حارس المحتوى الآمن"
+        department: "operations"
+        mission: "ارفضي وأعيدي التوجيه لأي طلب خارج نطاق المتجر (سياسة، طب، مواضيع حساسة)."
+        tools:       - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "السؤال خارج نطاق المتجر"
+                    expected: "ops_content_safety"
+          -         input: "محتاج نصيحة طبية"
+                    expected: "ops_content_safety"
+  -     id: "ops_analytics_insights"
+        name: "محلل مؤشرات المتجر"
+        department: "operations"
+        mission: "استخرجي ملاحظات تشغيلية من بيانات الكتالوج والأسئلة الشائعة (الأكثر طلبًا، الفجوات، فرص البيع)."
+        tools:
+          - "search_products"
+          - "lookup_faq"
+          - "store_info"
+        read_only_only: true
+        escalate_to_human: false
+        is_default: false
+        disabled: false
+        examples:
+          -         input: "عايز تقرير عن أداء المتجر"
+                    expected: "ops_analytics_insights"
+          -         input: "إيه الأكثر مبيعًا؟"
+                    expected: "ops_analytics_insights"

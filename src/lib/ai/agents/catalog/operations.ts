@@ -13,11 +13,15 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
     name: "مراجع كتالوج المنتجات",
     department: "operations",
     mission: "راجع جودة بيانات المنتجات (اسم، وصف، سعر، مخزون) واذكر النواقص الواضحة.",
-    keywords: ["كتالوج", "بيانات المنتجات", "وصف المنتج", "مراجعه المنتجات", "نواقص البيانات"],
+    keywords: ["كتالوج", "بيانات المنتجات", "اوصاف المنتجات", "وصف المنتج", "مراجعه المنتجات", "نواقص البيانات"],
     tools: ["search_products", "store_info"],
     guidance: [
       "اذكري ملاحظات محددة على منتجات موجودة فعلًا في النتيجة.",
       "اقترحي صياغة بديلة للوصف بدل النقد العام.",
+    ],
+    examples: [
+      { input: "راجع بيانات المنتجات", expected: "ops_catalog_hygiene" },
+      { input: "في نواقص في أوصاف المنتجات؟", expected: "ops_catalog_hygiene" },
     ],
   },
   {
@@ -25,11 +29,15 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
     name: "مراقب المخزون",
     department: "operations",
     mission: "نبّهي على الأصناف القاربة على النفاد أو النافّدة بحسب بيانات المخزون المرجعة.",
-    keywords: ["مخزون", "نفد", "كميات", "قارب على النفاد", "اعاده تعبئه", "نقص المخزون"],
+    keywords: ["مخزون", "قاربه على النفاد", "المخزون ناقص", "كميات", "اعاده تعبئه"],
     tools: ["search_products", "store_info"],
     guidance: [
       "اذكري رقم المخزون كما ورد من الأداة بلا تخمين.",
       "رتّبي الأصناف بالأكثر إلحاحًا من حيث انخفاض المخزون.",
+    ],
+    examples: [
+      { input: "إيه الأصناف القاربة على النفاد؟", expected: "ops_stock_alerts" },
+      { input: "المخزون ناقص", expected: "ops_stock_alerts" },
     ],
   },
   {
@@ -37,11 +45,15 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
     name: "كاشف فجوات الأسئلة الشائعة",
     department: "operations",
     mission: "اكتشفي الأسئلة التي لا تجيبها الأسئلة الشائعة واقترحي صيغة إجابة جديدة.",
-    keywords: ["الاسئله الشائعه", "فجوه", "سؤال متكرر", "تحديث الاسئله", "محتوى الدعم"],
+    keywords: ["الاسئله الشائعه", "اقترح اجابات", "فجوه", "سؤال متكرر", "محتوى الدعم"],
     tools: ["lookup_faq", "store_info"],
     guidance: [
       "لا تخترعي سياسة جديدة؛ اقترحي إجابة مبنية على ما هو معلن.",
       "اقترحي الصيغة النهائية جاهزة للنسخ.",
+    ],
+    examples: [
+      { input: "في أسئلة شائعة ناقصة؟", expected: "ops_faq_gaps" },
+      { input: "اقترح إجابات للأسئلة الجديدة", expected: "ops_faq_gaps" },
     ],
   },
   {
@@ -49,11 +61,15 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
     name: "حارس نبرة العلامة",
     department: "operations",
     mission: "تأكدي من أن الردود على نبرة المتجر: ودية، مصرية بسيطة، قصيرة، بلا مبالغة.",
-    keywords: ["نبره", "اسلوب الردود", "شخصيه المتجر", "لهجه", "صياغه الرد"],
+    keywords: ["نبره", "اسلوب الرد", "شخصيه المتجر", "لهجه", "صياغه الرد"],
     tools: ["store_info"],
     guidance: [
       "اذكري مخالفة واحدة محددة إن وُجدت مع نص بديل.",
       "حافظي على اللهجة المصرية البسيطة في أي اقتراح.",
+    ],
+    examples: [
+      { input: "راجع نبرة الردود", expected: "ops_brand_voice" },
+      { input: "أسلوب الرد مناسب؟", expected: "ops_brand_voice" },
     ],
   },
   {
@@ -61,11 +77,15 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
     name: "مدقّق تماسك الأسعار",
     department: "operations",
     mission: "راجعي تماسك السعر مع السعر القديم ونسبة الخصم المعلنة.",
-    keywords: ["تماسك الاسعار", "سعر قديم", "نسبه الخصم", "المهنه", "سعر غير منطقي"],
+    keywords: ["تماسك الاسعار", "تناقض في الخصومات", "سعر قديم", "نسبه الخصم", "سعر غير منطقي"],
     tools: ["search_products"],
     guidance: [
       "أشيري للتناقض بالأرقام كما وردت من الأداة.",
       "لا تقترحي سعرًا نهائيًا؛ اقترحي قيمة متسقة فقط.",
+    ],
+    examples: [
+      { input: "راجع تماسك الأسعار", expected: "ops_pricing_consistency" },
+      { input: "في تناقض في الخصومات؟", expected: "ops_pricing_consistency" },
     ],
   },
   {
@@ -79,6 +99,10 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
       "أشيري إلى نمط البيانات فقط بلا إعادة كتابة القيمة نفسها.",
       "اقترحي الصيغة المحجوبة الآمنة بدلًا منها.",
     ],
+    examples: [
+      { input: "اتأكد مفيش بيانات شخصية", expected: "ops_pii_guard" },
+      { input: "راجع الخصوصية", expected: "ops_pii_guard" },
+    ],
   },
   {
     id: "ops_seasonal_campaigns",
@@ -90,6 +114,10 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
     guidance: [
       "اربطي كل فكرة بمنتجات موجودة فعلًا مع سعرها.",
       "اذكري هدف الحملة ومقياس نجاحها في سطر واحد.",
+    ],
+    examples: [
+      { input: "اقترح حملة لرمضان", expected: "ops_seasonal_campaigns" },
+      { input: "في أفكار تسويق للموسم؟", expected: "ops_seasonal_campaigns" },
     ],
   },
   {
@@ -103,17 +131,25 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
       "اذكري معيارًا واحدًا واضحًا للتحسين مع مثال.",
       "لا تجمعي بيانات عميل أثناء التقييم.",
     ],
+    examples: [
+      { input: "قيّم جودة الردود", expected: "ops_chat_quality" },
+      { input: "راجع تجربة العميل", expected: "ops_chat_quality" },
+    ],
   },
   {
     id: "ops_content_safety",
     name: "حارس المحتوى الآمن",
     department: "operations",
     mission: "ارفضي وأعيدي التوجيه لأي طلب خارج نطاق المتجر (سياسة، طب، مواضيع حساسة).",
-    keywords: ["خارج النطاق", "موضوع حساس", "سياسه", "طب", "نصيحه قانونيه", "غير مناسب"],
+    keywords: ["خارج النطاق", "نصيحه طبيه", "موضوع حساس", "سياسه", "نصيحه قانونيه", "غير مناسب"],
     tools: ["store_info"],
     guidance: [
       "اعتذري بلطف في سطر واحد وأعيدي الحديث لمنتجات النظافة.",
       "لا تدخلي في جدال ولا تعطي رأيًا في الموضوع الخارجي.",
+    ],
+    examples: [
+      { input: "السؤال خارج نطاق المتجر", expected: "ops_content_safety" },
+      { input: "محتاج نصيحة طبية", expected: "ops_content_safety" },
     ],
   },
   {
@@ -126,6 +162,10 @@ export const OPERATIONS_AGENTS: StoreAgent[] = [
     guidance: [
       "اذكري الأرقام كما وردت من الأدوات وحددي الفترة إن ذكرها المستخدم.",
       "لا تدّعي بيانات مبيعات غير متاحة في الأدوات — قولي ما هو متاح فقط.",
+    ],
+    examples: [
+      { input: "عايز تقرير عن أداء المتجر", expected: "ops_analytics_insights" },
+      { input: "إيه الأكثر مبيعًا؟", expected: "ops_analytics_insights" },
     ],
   },
 ];

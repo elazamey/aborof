@@ -17,6 +17,10 @@ export const SUPPORT_AGENTS: StoreAgent[] = [
       "اطلبي العاملين معًا: رقم الطلب وآخر 4 أرقام من الهاتف — لا واحدًا منهما.",
       "لا تذكري أي بيانات شخصية أو عنوان في الرد، واذكري الحالة والأصناف فقط.",
     ],
+    examples: [
+      { input: "عايز أعرف حالة الطلب", expected: "support_order_status" },
+      { input: "طلبي وصل فين؟", expected: "support_order_status" },
+    ],
   },
   {
     id: "support_order_tracking_help",
@@ -29,6 +33,10 @@ export const SUPPORT_AGENTS: StoreAgent[] = [
       "اشرحي أن الرسالة الموحّدة «تعذر العثور على الطلب» لا تعني حذف الطلب بالضرورة، بل عدم تطابق البيانات.",
       "لا تطلبي صورة من الهاتف ولا ترسل بيانات لأي شخص غير صاحب الطلب.",
     ],
+    examples: [
+      { input: "إزاي أتتبع الطلب؟", expected: "support_order_tracking_help" },
+      { input: "إيه الخطوات لتتبع الطلبات؟", expected: "support_order_tracking_help" },
+    ],
   },
   {
     id: "support_returns_exchange",
@@ -40,6 +48,10 @@ export const SUPPORT_AGENTS: StoreAgent[] = [
     guidance: [
       "اذكري الشرط: المنتج بحالته وبعبوته الأصلية داخل المدة المعلنة.",
       "اسألي عن رقم الطلب وسبب الاستبدال قبل تسجيل الطلب.",
+    ],
+    examples: [
+      { input: "عايز أرجّع المنتج", expected: "support_returns_exchange" },
+      { input: "الاستبدال بيتم إزاي؟", expected: "support_returns_exchange" },
     ],
   },
   {
@@ -54,30 +66,42 @@ export const SUPPORT_AGENTS: StoreAgent[] = [
       "لا تعدي بتعويض محدد؛ التعويض يُعتمد من الفريق البشري.",
     ],
     escalateToHuman: true,
+    examples: [
+      { input: "وصلني الطلب ناقص صنف", expected: "support_damaged_missing" },
+      { input: "المنتج وصل مكسور", expected: "support_damaged_missing" },
+    ],
   },
   {
     id: "support_complaint",
     name: "مسؤول الشكاوى",
     department: "support",
     mission: "استقبلي الشكوى بهدوء، واعتذري، واجمعي الوقائع بلا جدال.",
-    keywords: ["شكوى", "زعلان", "سيء", "خدمه سيئه", "مش راضي", "اهمال", "تأخير كبير", "اتعاملتم"],
+    keywords: ["شكوى", "زعلان", "مش راضي", "اهمال", "خدمه سيئه", "سيئه جدا", "تجربه سيئه", "اتعاملتم"],
     tools: ["store_info"],
     guidance: [
       "لا تدافعي ولا تنفي: اسمعي واعتذري وحدّدي ما يطلبه العميل.",
       "صعّدي فورًا للفريق البشري عبر الواتساب مع تعقّب الرقم.",
     ],
     escalateToHuman: true,
+    examples: [
+      { input: "عايز أقدّم شكوى", expected: "support_complaint" },
+      { input: "الخدمة كانت سيئة جدًا", expected: "support_complaint" },
+    ],
   },
   {
     id: "support_delivery_delay",
     name: "متابع التأخير",
     department: "support",
     mission: "طمئني العميل على الطلب المتأخر ووضّحي الأمد المتوقع بلا وعود مطلقة.",
-    keywords: ["متأخر", "اتأخر", "لسه مجاش", "لسه موصلش", "امتى هيسوصل", "تأخير", "استنى كتير"],
+    keywords: ["متأخر", "اتأخر", "طلبي اتاخر", "لسه مجاش", "لسه موصلش", "امتى هيسوصل", "استنى كتير"],
     tools: ["shipping_estimate", "store_info", "lookup_faq"],
     guidance: [
       "لا تعدي بموعد محدد بالدقيقة؛ استخدمي نطاق الأيام المعلن.",
       "اسألي عن المحافظة لتقدير المدة واقعيًا.",
+    ],
+    examples: [
+      { input: "طلبي اتأخر ليه؟", expected: "support_delivery_delay" },
+      { input: "لسه مجاش لحد دلوقتي", expected: "support_delivery_delay" },
     ],
   },
   {
@@ -92,17 +116,25 @@ export const SUPPORT_AGENTS: StoreAgent[] = [
       "اسجّلي بلاغ الجودة وأحليه للفريق لمراجعة الدفعة.",
     ],
     escalateToHuman: true,
+    examples: [
+      { input: "المنتج ضعيف مش زي المرة اللي فاتت", expected: "support_quality_warranty" },
+      { input: "جودة العبوة سيئة", expected: "support_quality_warranty" },
+    ],
   },
   {
     id: "support_invoice_receipt",
     name: "مسؤول الفواتير والإيصالات",
     department: "support",
     mission: "وفّري إيصالًا أو بيان أصناف للطلب ووضّحي ما يظهر فيه.",
-    keywords: ["فاتوره", "ايصال", "وصل", "بيان اصناف", "مطلوب فاتوره", "فاتوره ضريبيه"],
+    keywords: ["فاتوره", "ايصال", "وصل", "بيان اصناف", "مطلوب فاتوره", "طباعه الفاتوره"],
     tools: ["store_info", "lookup_faq"],
     guidance: [
       "وضّحي أن الإيصال يضم الأصناف والمجموع بلا بيانات دفع كاملة.",
       "اطلبي رقم الطلب ولا تطلبي بيانات بطاقة أو محفظة.",
+    ],
+    examples: [
+      { input: "عايز إيصال للطلب", expected: "support_invoice_receipt" },
+      { input: "أبعتلي الفاتورة؟", expected: "support_invoice_receipt" },
     ],
   },
   {
@@ -110,11 +142,15 @@ export const SUPPORT_AGENTS: StoreAgent[] = [
     name: "مسؤول تعديل العنوان",
     department: "support",
     mission: "استقبلي طلب تعديل العنوان أو المحافظة قبل الشحن ووضّحي حدود التعديل.",
-    keywords: ["تعديل العنوان", "اغير العنوان", "عنوان غلط", "محافظه غلط", "نقل الطلب", "عنوان جديد"],
+    keywords: ["تعديل العنوان", "اعدل العنوان", "عنوان غلط", "الشحن غلط", "محافظه غلط", "عنوان جديد"],
     tools: ["shipping_estimate", "store_info"],
     guidance: [
       "وضّحي أن التعديل ممكن قبل خروج الطلب للشحن وفروق الشحن تُحسب عند اللزوم.",
       "اطلبي رقم الطلب والعنوان الجديد بالمحافظة، ولا تكرري بيانات الهاتف كاملة.",
+    ],
+    examples: [
+      { input: "عايز أعدل العنوان", expected: "support_address_change" },
+      { input: "عنوان الشحن غلط", expected: "support_address_change" },
     ],
   },
   {
@@ -129,5 +165,9 @@ export const SUPPORT_AGENTS: StoreAgent[] = [
       "لا تطلبي بيانات شخصية إضافية قبل التحويل.",
     ],
     escalateToHuman: true,
+    examples: [
+      { input: "عايز أكلم موظف", expected: "support_human_escalation" },
+      { input: "في حد بشري أتكلم معاه؟", expected: "support_human_escalation" },
+    ],
   },
 ];

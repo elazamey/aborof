@@ -22,7 +22,8 @@
 ## عند المساس بالأسطول (`src/lib/ai/agents/`)
 
 - [ ] الوكيل الجديد يتبع [`agent-manifest-template.md`](../docs/ai/agent-manifest-template.md) (الحدود: عدد أقسام/محفزات/مهام).
-- [ ] أضفتُ سطر توجيه للوكيل الجديد في `tests/agent-fleet.test.ts`.
+- [ ] أضفتُ `examples` (2-4) لكل وكيل جديد — الاختبار المُولَّد من الكتالوج نفسه يتحقق منها.
+- [ ] شغّلتُ `npm run agents:export` لتحديث المانيفست المولَّد (CI يفشل عند الانحراف).
 - [ ] لا مسار HTTP جديد لتنفيذ وكيل أو أداة — التنفيذ حصرًا داخل `McpToolRegistry`.
 - [ ] أي أداة جديدة أُضيفت **صراحةً** إلى `FLEET_ALLOWED_TOOLS` في `scripts/security-gates.mjs` مع تبريرها في الوصف.
 

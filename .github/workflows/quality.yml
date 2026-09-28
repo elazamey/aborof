@@ -56,6 +56,10 @@ jobs:
       - name: Route inventory and coverage
         run: npm run routes:inventory
 
+      # مانيفست الأسطول المولَّد يجب أن يطابق الكود — لا مصدرَي حقيقة متفرّقين.
+      - name: Agent manifest in sync
+        run: npm run agents:check
+
       # الاختبارات إلزامية: لا --if-present، أي فشل يوقف الـ Pipeline.
       - name: Unit and integration tests
         run: npm test

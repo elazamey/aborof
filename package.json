@@ -14,7 +14,9 @@
     "smoke:prod": "node scripts/smoke-production.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "security:gates": "node scripts/security-gates.mjs",
-    "security:bundle": "node scripts/scan-bundle-secrets.mjs --check-env"
+    "security:bundle": "node scripts/scan-bundle-secrets.mjs --check-env",
+    "agents:export": "node --import tsx scripts/export-agent-manifests.mjs",
+    "agents:check": "node --import tsx scripts/export-agent-manifests.mjs --check"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

@@ -17,6 +17,10 @@ export const SALES_AGENTS: StoreAgent[] = [
       "لا تسردي الكتالوج كله: اقترحي 3 منتجات كحد أقصى مع الأسعار.",
     ],
     isDefault: true,
+    examples: [
+      { input: "عندكم إيه في المتجر؟", expected: "sales_general" },
+      { input: "عايز أشتري مستلزمات نظافة", expected: "sales_general" },
+    ],
   },
   {
     id: "sales_floor_care",
@@ -28,6 +32,10 @@ export const SALES_AGENTS: StoreAgent[] = [
     guidance: [
       "اسألي عن نوع الأرضية قبل الترشيح النهائي إن لم يكن واضحًا.",
       "نبّهي أن التركيز العالي قد يضرّ الرخام، واقترحي الكمية حسب المساحة.",
+    ],
+    examples: [
+      { input: "عايز منظف أرضيات للرخام", expected: "sales_floor_care" },
+      { input: "إيه أفضل حاجة للسيراميك؟", expected: "sales_floor_care" },
     ],
   },
   {
@@ -41,6 +49,10 @@ export const SALES_AGENTS: StoreAgent[] = [
       "فرّقي بين التنظيف اليومي (سائل أطباق) والتراكمات (مزيل دهون).",
       "ذكّري بضرورة التهوية واستخدام قفازات مع المزيلات القوية.",
     ],
+    examples: [
+      { input: "محتاج مزيل دهون للأفران", expected: "sales_kitchen_care" },
+      { input: "سائل غسيل أطباق رخيص؟", expected: "sales_kitchen_care" },
+    ],
   },
   {
     id: "sales_bathroom_care",
@@ -53,6 +65,10 @@ export const SALES_AGENTS: StoreAgent[] = [
       "اسألي عن نوع السطح (إينوكس، أكريليك، سيراميك) قبل ترشيح مزيل الجير.",
       "نبّهي بعدم خلط الكلور مع منظفات أخرى، وضرورة التهوية.",
     ],
+    examples: [
+      { input: "عايز حاجة تزيل الجير من الحمام", expected: "sales_bathroom_care" },
+      { input: "في مطهر كلوركس؟", expected: "sales_bathroom_care" },
+    ],
   },
   {
     id: "sales_glass_surfaces",
@@ -62,6 +78,10 @@ export const SALES_AGENTS: StoreAgent[] = [
     keywords: ["زجاج", "مرايا", "مرايه", "شبابيك", "ترابيزة", "استانلس", "لامع", "لمعه", "بقع", "خطوط"],
     tools: ["search_products", "lookup_faq"],
     guidance: ["اذكري أن الفوطة الميكروفايبر عامل حاسم في منع الخطوط.", "قارني بين المنظف الجاهز والمخفف مع الماء حسب الاستخدام."],
+    examples: [
+      { input: "عايز منظف زجاج للمرايا", expected: "sales_glass_surfaces" },
+      { input: "حاجة تلمع الشبابيك بدون خطوط", expected: "sales_glass_surfaces" },
+    ],
   },
   {
     id: "sales_air_fragrance",
@@ -71,15 +91,23 @@ export const SALES_AGENTS: StoreAgent[] = [
     keywords: ["معطر", "معطرات", "ريحه", "رائحه", "فواحه", "بخور", "مفروشات", "سجاد", "ستائر", "حمام معطر"],
     tools: ["search_products", "lookup_faq"],
     guidance: ["اسألي عن المساحة (غرفة/حمام/صالة) لتحديد الحجم الملائم.", "وضّحي أن معطر المفروشات لا يُستخدم على الجلد مباشرة."],
+    examples: [
+      { input: "محتاج معطر جو للصالة", expected: "sales_air_fragrance" },
+      { input: "في معطر مفروشات؟", expected: "sales_air_fragrance" },
+    ],
   },
   {
     id: "sales_tools_equipment",
     name: "خبير الأدوات والمستلزمات",
     department: "sales",
     mission: "رشّحي الأدوات اليدوية (مساحات، عصارات، فرش، فوط ميكروفايبر) بحسب الاستخدام.",
-    keywords: ["مساحات", "عصاره", "عصا", "مقشه", "فوط", "ميكروفايبر", "فرشه", "ادوات", "مستلزمات", "تنشيف"],
+    keywords: ["مساحات", "عصاره", "مقشه", "فوط", "ميكروفايبر", "فرشه", "ادوات", "مستلزمات", "طقم مساحه", "تنشيف"],
     tools: ["search_products", "lookup_faq"],
     guidance: ["اسألي عن المساحة وتكرار الاستخدام لتحديد الجودة المناسبة.", "اذكري أن رأس الميكروفايبر قابل للغسل ويعيش طويلًا."],
+    examples: [
+      { input: "عايز طقم مساحة أرضيات", expected: "sales_tools_equipment" },
+      { input: "عندكم فوط ميكروفايبر؟", expected: "sales_tools_equipment" },
+    ],
   },
   {
     id: "sales_laundry_care",
@@ -89,6 +117,10 @@ export const SALES_AGENTS: StoreAgent[] = [
     keywords: ["غسيل", "مسحوق", "منعم", "غساله", "اتوماتيك", "غسالة ملابس", "بقع", "ملابس", "مبيض", "كلور ملابس"],
     tools: ["search_products", "lookup_faq"],
     guidance: ["فرّقي بين مسحوق الأوتوماتيك (رغوة منخفضة) والعادي.", "نبّهي من المبيض على الأقمشة الملوّنة والصوف."],
+    examples: [
+      { input: "محتاج مسحوق لغسالة أوتوماتيك", expected: "sales_laundry_care" },
+      { input: "إيه أحسن مسحوق؟", expected: "sales_laundry_care" },
+    ],
   },
   {
     id: "sales_personal_care",
@@ -98,6 +130,10 @@ export const SALES_AGENTS: StoreAgent[] = [
     keywords: ["صابون", "يدين", "بشره", "مرطب", "جليسرين", "ورد", "معقم يدين", "عنايه شخصيه", "شامبو"],
     tools: ["search_products", "lookup_faq"],
     guidance: ["اسألي عن حساسية البشرة قبل الترشيح.", "لا تذكري أي ادعاء طبي — الوصف تجميلي فقط."],
+    examples: [
+      { input: "عايز صابون سائل لليدين", expected: "sales_personal_care" },
+      { input: "في صابون برائحة الورد؟", expected: "sales_personal_care" },
+    ],
   },
   {
     id: "sales_bulk_wholesale",
@@ -111,5 +147,9 @@ export const SALES_AGENTS: StoreAgent[] = [
       "وجّهي الحالات الكبيرة للواتساب مع ذكر أن التسعير يُعتمد كتابةً.",
     ],
     escalateToHuman: true,
+    examples: [
+      { input: "بشتري بالجملة لشركة نظافة", expected: "sales_bulk_wholesale" },
+      { input: "عايز أسعار للمصانع والشركات", expected: "sales_bulk_wholesale" },
+    ],
   },
 ];

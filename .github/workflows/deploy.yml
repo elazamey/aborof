@@ -48,6 +48,8 @@ jobs:
         run: npm run security:gates
       - name: Migration files in sync
         run: node scripts/sync-migrations.mjs --check
+      - name: Agent manifest in sync
+        run: npm run agents:check
       - name: Unit and integration tests
         run: npm test
       - name: Production build

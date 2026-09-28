@@ -94,6 +94,12 @@ vercel env rm ENABLE_AGENT_FLEET production
 - تجاوز ميزانية رسالة النظام ⇒ يكسر اختبار الميزانية.
 - ظهور أي سر في المانيفست أو رسالة النظام ⇒ يكسر اختبار الحجب.
 
+## قواميس ومانيفست محمول
+
+- قاموس الحقول وحدودها، وشرح ما لم يُعتمد ولماذا: [`agent-fleet-schema.md`](./agent-fleet-schema.md).
+- قالب جاهز لإضافة وكيل: [`agent-manifest-template.md`](./agent-manifest-template.md).
+- مانيفست محمول (JSON + YAML) مولَّد من الكود: `npm run agents:export` ← `npm run agents:check` في CI.
+
 ## الاختبار
 
 ```bash
