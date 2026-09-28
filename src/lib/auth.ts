@@ -15,8 +15,22 @@ function sign(payload: string) {
   return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
+/**
+ * فاصل الحمولة.
+ *
+ * يجب أن يكون حرفًا لا تغيّره ترميزة الكوكيز. `response.cookies.set()` تمرّر
+ * القيمة عبر ترميز نسبة-مئوي، فأي حرف يُرمَّز يجعل النص المُوقَّع يختلف عن
+ * النص الذي يصل في ترويسة `Cookie` — وحينها لا يتطابق HMAC أبدًا وترفض
+ * `verifyAdminSession` كل جلسة سليمة (هذا بالضبط ما كان يحدث مع `:`).
+ *
+ * الأبجدية المستخدمة كلها آمنة: أرقام للطابع الزمني، و`base64url` للـ nonce
+ * (`A-Za-z0-9-_`)، و`.` فاصلًا للتوقيع. فاختيار `-` يجعل الرمز بأكمله ثابتًا
+ * تحت الترميز، وهو ما يفرضه الاختبار في tests/auth.test.ts.
+ */
+const PAYLOAD_SEPARATOR = "-";
+
 export function createAdminSession() {
-  const payload = `${Date.now()}:${randomBytes(24).toString("base64url")}`;
+  const payload = `${Date.now()}${PAYLOAD_SEPARATOR}${randomBytes(24).toString("base64url")}`;
   return `${payload}.${sign(payload)}`;
 }
 
@@ -33,7 +47,8 @@ export function verifyAdminSession(token: string | undefined) {
   const validSignature = timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
   if (!validSignature) return false;
 
-  const issuedAt = Number(payload.split(":", 1)[0]);
+  // الطابع الزمني يسبق أول فاصل؛ الأرقام قبله فلا التباس مع `-` داخل base64url.
+  const issuedAt = Number(payload.split(PAYLOAD_SEPARATOR, 1)[0]);
   return Number.isFinite(issuedAt) && Date.now() - issuedAt <= SESSION_MAX_AGE * 1000;
 }
 

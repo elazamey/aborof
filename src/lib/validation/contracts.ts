@@ -59,8 +59,18 @@ export const productUpsertContract = z
         name: trimmed(2, 200),
         description: optionalText(5000),
         price: positiveMoney,
+        // ترتيب أعضاء الاتحاد مقصود ولا يجوز تغييره.
+        //
+        // `z.union` يجرّب الأعضاء بالترتيب ويأخذ أول نجاح. و`positiveMoney`
+        // مبني على `z.coerce.number()`، و`Number(null) === 0` و`Number("") === 0`
+        // وكلاهما يجتاز `.min(0)`. فلو جاء `positiveMoney` أولًا لابتلع `null`
+        // و`""` وحوّلهما إلى `0` قبل بلوغ الأعضاء الحرفية — وعندها لا ترى
+        // `.transform` قيمة فارغة فتُمرّر `0`، ويسقط `refine` لأن `0 < price`.
+        // النتيجة العملية: يستحيل على الإدارة مسح «السعر قبل الخصم» بعد ضبطه.
+        //
+        // لذلك تُفحص الحرفيات أولًا، ثم الرقم.
         old_price: z
-          .union([positiveMoney, z.literal(""), z.null()])
+          .union([z.null(), z.literal(""), positiveMoney])
           .optional()
           .transform((v) => (v === "" || v == null ? null : (v as number))),
         category: z.string().trim().max(100).default(""),

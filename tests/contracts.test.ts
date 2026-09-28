@@ -89,4 +89,52 @@ describe("validation contracts", () => {
     const ok = productUpsertContract.safeParse({ product: { name: "منتج", price: 100, old_price: 150, stock: 1 } });
     assert.ok(ok.success);
   });
+
+  /**
+   * انحدار D-7: يجب أن يظل «مسح السعر قبل الخصم» ممكنًا.
+   *
+   * `z.union` يجرّب الأعضاء بالترتيب، و`positiveMoney` مبني على
+   * `z.coerce.number()` حيث `Number(null) === 0` و`Number("") === 0` وكلاهما
+   * يجتاز `.min(0)`. فحين كان `positiveMoney` أول الأعضاء كان يبتلع `null`
+   * و`""` ويحوّلهما إلى `0` قبل بلوغ الأعضاء الحرفية، فتسقط قاعدة
+   * `old_price >= price` ويستحيل على الإدارة إلغاء الخصم بعد ضبطه.
+   *
+   * لذلك هذه الاختبارات تثبّت أن كل صور «بلا سعر قبل الخصم» تُقبل وتتحول
+   * إلى `null`، وأن التحويل لا يُنتج `0` أبدًا.
+   */
+  test("old_price can be cleared with null, empty string, or omission", () => {
+    for (const cleared of [null, "", undefined]) {
+      const r = productUpsertContract.safeParse({
+        product: { name: "منتج", price: 100, old_price: cleared, stock: 1 },
+      });
+      assert.ok(r.success, `old_price=${JSON.stringify(cleared)} يجب أن يُقبل`);
+      if (r.success) {
+        assert.equal(r.data.product.old_price, null);
+      }
+    }
+  });
+
+  test("cleared old_price never collapses to zero", () => {
+    // `0` وحده هو ما كان يُنتجه الابتلاع، وهو ما يُسقط refine.
+    const r = productUpsertContract.safeParse({ product: { name: "منتج", price: 100, old_price: null, stock: 1 } });
+    assert.ok(r.success);
+    if (r.success) assert.notEqual(r.data.product.old_price, 0);
+  });
+
+  test("old_price still coerces numeric strings and rejects negatives", () => {
+    const coerced = productUpsertContract.safeParse({
+      product: { name: "منتج", price: 100, old_price: "150", stock: 1 },
+    });
+    assert.ok(coerced.success);
+    if (coerced.success) assert.equal(coerced.data.product.old_price, 150);
+
+    assert.equal(
+      productUpsertContract.safeParse({ product: { name: "منتج", price: 100, old_price: -5, stock: 1 } }).success,
+      false
+    );
+    assert.equal(
+      productUpsertContract.safeParse({ product: { name: "منتج", price: 100, old_price: "abc", stock: 1 } }).success,
+      false
+    );
+  });
 });

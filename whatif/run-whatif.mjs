@@ -90,36 +90,37 @@ async function products() {
 }
 
 /**
- * ضبط الـ precondition.
+ * ضبط الـ precondition عبر واجهة الإدارة الحقيقية.
  *
- * ملاحظة منهجية مهمة: المسار الطبيعي لضبط المخزون هو `POST /api/products`
- * بجلسة إدارة. لكن WF-020 أثبت أن جلسة الإدارة لا تُقبل أبدًا كما تُرسل على
- * السلك (defect في ترميز الكوكيز)، فكل كتابة إدارية تُرجع 401.
+ * تاريخ: كانت هذه الدوال تكتب مباشرة في قاعدة البيانات لأن D-1 جعل كل كتابة
+ * إدارية تُرجع 401. بعد إصلاح D-1 (فاصل حمولة الجلسة) صارت الجلسة تُقبل،
+ * فأصبحت الحالات تُضبط عبر `POST /api/products` بجلسة إدارة فعلية — أي أن
+ * الـ precondition نفسه يمر الآن عبر عقد Zod والتفويض وسجل التدقيق ومزامنة
+ * FTS5، بدل تجاوزها.
  *
- * لذلك تُضبط الحالات هنا كتابةً مباشرة في قاعدة البيانات — وهي *fixture*
- * للاختبار وليست مسارًا قيد القياس. كل فعل قيد القياس (إنشاء الطلب،
- * التفويض، التحقق، التزامن) ما زال يمر عبر HTTP على الـ Runtime الحقيقي.
- * مسار الإدارة نفسه مغطّى ومستقل في WF-017 وWF-020.
+ * كل فعل قيد القياس ما زال يمر عبر HTTP على الـ Runtime الحقيقي.
  */
 async function setProduct(id, patch) {
-  const c = createClient({ url: DB_URL });
-  try {
-    const cur = await c.execute({ sql: "SELECT * FROM products WHERE id=?", args: [id] });
-    const p = cur.rows[0];
-    if (!p) throw new Error(`setProduct: ${id} not in catalog`);
-    const next = {
-      price: patch.price ?? Number(p.price),
-      old_price: "old_price" in patch ? patch.old_price : (p.old_price == null ? null : Number(p.old_price)),
-      stock: patch.stock ?? Number(p.stock),
-    };
-    await c.execute({
-      sql: "UPDATE products SET price=?, old_price=?, stock=? WHERE id=?",
-      args: [next.price, next.old_price, next.stock, id],
-    });
-    return { id, ...next };
-  } finally {
-    c.close();
-  }
+  const p = (await products()).get(id);
+  if (!p) throw new Error(`setProduct: ${id} not in catalog`);
+  const next = {
+    id,
+    name: p.name,
+    description: p.description ?? "",
+    price: patch.price ?? Number(p.price),
+    old_price: "old_price" in patch ? patch.old_price : (p.old_price == null ? null : Number(p.old_price)),
+    category: p.category ?? "",
+    image: p.image ?? "🧴",
+    stock: patch.stock ?? Number(p.stock),
+    featured: "featured" in patch ? Boolean(patch.featured) : Boolean(p.featured),
+  };
+  const r = await req(BASE, "POST", "/api/products", {
+    body: { product: next },
+    headers: auth(),
+    xff: `${RUN}-fixture`,
+  });
+  if (r.status !== 200) throw new Error(`setProduct ${id} failed: ${r.status} ${r.text}`);
+  return next;
 }
 
 /**
@@ -133,31 +134,32 @@ async function setProduct(id, patch) {
  * `getProducts()` وتسجيل الكلمات لا على الفهرس.
  */
 async function upsertFixture(p) {
-  const c = createClient({ url: DB_URL });
-  try {
-    await c.execute({
-      sql: `INSERT INTO products (id,name,description,price,old_price,category,image,stock,featured)
-            VALUES (?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,
-            price=excluded.price,old_price=excluded.old_price,category=excluded.category,
-            image=excluded.image,stock=excluded.stock,featured=excluded.featured`,
-      args: [
-        p.id, p.name, p.description ?? "", p.price, p.old_price ?? null,
-        p.category ?? "", p.image ?? "🧴", p.stock ?? 0, p.featured ? 1 : 0,
-      ],
-    });
-  } finally {
-    c.close();
-  }
+  const r = await req(BASE, "POST", "/api/products", {
+    body: {
+      product: {
+        id: p.id,
+        name: p.name,
+        description: p.description ?? "",
+        price: p.price,
+        old_price: p.old_price ?? null,
+        category: p.category ?? "",
+        image: p.image ?? "🧴",
+        stock: p.stock ?? 0,
+        featured: Boolean(p.featured),
+      },
+    },
+    headers: auth(),
+    xff: `${RUN}-fixture`,
+  });
+  if (r.status !== 200) throw new Error(`upsertFixture ${p.id} failed: ${r.status} ${r.text}`);
 }
 
 async function deleteFixture(id) {
-  const c = createClient({ url: DB_URL });
-  try {
-    await c.execute({ sql: "DELETE FROM products WHERE id=?", args: [id] });
-  } finally {
-    c.close();
-  }
+  const r = await req(BASE, "DELETE", `/api/products?id=${encodeURIComponent(id)}`, {
+    headers: auth(),
+    xff: `${RUN}-fixture`,
+  });
+  if (r.status !== 200) throw new Error(`deleteFixture ${id} failed: ${r.status} ${r.text}`);
 }
 
 /**
@@ -168,37 +170,18 @@ async function deleteFixture(id) {
  * المرشح الأول، فيصبح الاختبار غير حاسم (وهذا ما كشفه تشغيل سابق).
  */
 async function clearAllFeatured() {
-  const prev = [...(await products()).values()].map((p) => ({
-    id: String(p.id),
-    featured: Boolean(p.featured),
-  }));
-  const c = createClient({ url: DB_URL });
-  try {
-    await c.execute("UPDATE products SET featured=0");
-  } finally {
-    c.close();
-  }
+  const list = [...(await products()).values()];
+  const prev = list.map((p) => ({ id: String(p.id), featured: Boolean(p.featured) }));
+  for (const p of list) if (p.featured) await setProduct(String(p.id), { featured: false });
   return prev;
 }
 
 async function restoreFeatured(prev) {
-  const c = createClient({ url: DB_URL });
-  try {
-    for (const p of prev) {
-      await c.execute({ sql: "UPDATE products SET featured=? WHERE id=?", args: [p.featured ? 1 : 0, p.id] });
-    }
-  } finally {
-    c.close();
-  }
+  for (const p of prev) if (p.featured) await setProduct(p.id, { featured: true });
 }
 
 async function setFeatured(id, featured) {
-  const c = createClient({ url: DB_URL });
-  try {
-    await c.execute({ sql: "UPDATE products SET featured=? WHERE id=?", args: [featured ? 1 : 0, id] });
-  } finally {
-    c.close();
-  }
+  return setProduct(id, { featured });
 }
 
 async function chat(message, xff) {
@@ -215,23 +198,16 @@ async function stockOf(id) {
 }
 
 /**
- * قراءة صفوف الطلبات.
+ * قراءة صفوف الطلبات عبر `GET /api/orders` بجلسة الإدارة.
  *
- * المسار الطبيعي `GET /api/orders` محمي بجلسة الإدارة، وWF-020 أثبت أن الجلسة
- * لا تُقبل كما تُرسل على السلك. لذا تُقرأ الصفوف هنا مباشرة من قاعدة البيانات
- * كجزء من جمع الدليل — القرار قيد القياس (التسعير وقت التنفيذ) ما زال صادرًا
- * عن الـ Runtime نفسه عبر استجابة `POST /api/orders`.
+ * كانت تقرأ مباشرة من القاعدة لأن D-1 كان يرفض كل جلسة إدارة. بعد إصلاحه
+ * صار الدليل نفسه يُجمع عبر المسار المحمي الحقيقي، فأي انحدار في التفويض
+ * يُسقط جمع الدليل فورًا بدل أن يمرّ بصمت.
  */
 async function orders() {
-  const c = createClient({ url: DB_URL });
-  try {
-    const r = await c.execute(
-      "SELECT id,customer,phone,address,governorate,items,total,shipping_fee,payment,transfer_ref,receipt_url,status,note,created_at FROM orders ORDER BY created_at DESC LIMIT 200"
-    );
-    return r.rows.map((x) => ({ ...x }));
-  } finally {
-    c.close();
-  }
+  const r = await req(BASE, "GET", "/api/orders", { headers: auth(), xff: `${RUN}-evidence` });
+  if (r.status !== 200) throw new Error(`orders() failed: ${r.status} ${r.text}`);
+  return r.json?.orders ?? [];
 }
 
 /** دليل مباشر من قاعدة البيانات: عدد الطلبات/الأصناف وفحص السجلات اليتيمة. */
@@ -1078,7 +1054,7 @@ await scenario(
 await scenario(
   {
     id: "WF-020",
-    title: "جلسة إدارة صالحة تُرفض — defect ترميز الكوكيز (اكتشاف المختبر)",
+    title: "جلسة إدارة صالحة تُقبل على كل المسارات الإدارية (انحدار D-1)",
     input: "POST /api/admin/login (كلمة مرور صحيحة) ← GET /api/admin/session و GET /api/orders بنفس الكوكيز",
     precondition: "ADMIN_PASSWORD و ADMIN_SESSION_SECRET صحيحان",
     expected_decision: "login 200 + جلسة مقبولة على كل المسارات الإدارية",
