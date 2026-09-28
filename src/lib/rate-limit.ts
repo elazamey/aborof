@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { runMigrations } from "@/lib/db/migrate";
+import { Errors } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 
 /**
@@ -147,4 +148,22 @@ export async function rateLimit(
     storePromise = Promise.resolve(new InMemoryRateLimitStore());
     return (await storePromise).hit(bucketKey(request, scope), limit, windowMs);
   }
+}
+
+/**
+ * يفحص الحدّ ويرمي `429` عند تجاوزه — الصيغة التي تحتاجها المسارات.
+ *
+ * موجود هنا لا داخل كل مسار: كان هذا الدالة معرَّفة محليًا في
+ * `src/app/api/orders/route.ts`، فأي مسار آخر يحتاجها كان سيضطر لنسخها.
+ * والنسخ هو ما أنتج D-8 (تنفيذان للرد الاحتياطي، أحدهما لم يصله الإصلاح).
+ * فالقاعدة هنا واحدة في مكان واحد، وكل مسار يستوردها.
+ */
+export async function enforceRateLimit(
+  request: Request,
+  scope: string,
+  limit: number,
+  windowMs: number
+): Promise<void> {
+  const result = await rateLimit(request, scope, limit, windowMs);
+  if (!result.ok) throw Errors.rateLimited(result.retryAfter);
 }

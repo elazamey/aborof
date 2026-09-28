@@ -3,7 +3,7 @@ import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { getProducts, db } from "@/lib/db";
 import { createOrder, listOrders, updateOrderStatus } from "@/lib/orders";
 import { isAdminRequest } from "@/lib/auth";
-import { rateLimit } from "@/lib/rate-limit";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { GOVERNORATES } from "@/lib/shipping";
 import { createOrderContract, orderStatusContract, firstZodIssue } from "@/lib/validation/contracts";
 
@@ -11,11 +11,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 32_000;
-
-async function enforceRateLimit(request: Request, scope: string, limit: number, windowMs: number) {
-  const result = await rateLimit(request, scope, limit, windowMs);
-  if (!result.ok) throw Errors.rateLimited(result.retryAfter);
-}
 
 export const POST = apiHandler("/api/orders", async (request) => {
   await enforceRateLimit(request, "orders", 8, 10 * 60 * 1000);

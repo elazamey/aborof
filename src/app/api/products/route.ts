@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { getProducts, db, ensureSchema } from "@/lib/db";
 import { isAdminRequest } from "@/lib/auth";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { productUpsertContract, firstZodIssue } from "@/lib/validation/contracts";
 import { upsertProductSearch, removeProductSearch } from "@/lib/search";
 import type { Product } from "@/lib/seed";
@@ -15,6 +16,7 @@ export const GET = apiHandler("/api/products", async () => {
 
 export const POST = apiHandler("/api/products/admin-post", async (request) => {
   if (!isAdminRequest(request)) throw Errors.authRequired();
+  await enforceRateLimit(request, "admin-product-write", 30, 10 * 60 * 1000);
 
   const raw = await readJson(request, 24_000);
   const parsed = productUpsertContract.safeParse(raw);
@@ -76,6 +78,7 @@ export const POST = apiHandler("/api/products/admin-post", async (request) => {
 
 export const DELETE = apiHandler("/api/products/admin-delete", async (request) => {
   if (!isAdminRequest(request)) throw Errors.authRequired();
+  await enforceRateLimit(request, "admin-product-write", 30, 10 * 60 * 1000);
 
   const id = new URL(request.url).searchParams.get("id");
   if (!id || id.length > 80) throw Errors.validationFailed("معرف غير صالح");

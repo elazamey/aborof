@@ -102,6 +102,15 @@ export const createOrderContract = z
     note: optionalText(500),
     payment: z.enum(["cod", "vodafone_cash"]).default("vodafone_cash"),
     transferRef: optionalText(120),
+    // مفتاح idempotency (D-2). اختياري حتى لا يُكسر عميل قديم لا يرسله،
+    // ومقيّد بمحارف آمنة حتى لا يُحقن شيء عبره في استعلام أو سجل.
+    // يولّده العميل مرة واحدة لكل محاولة دفع ويعيد إرساله كما هو عند
+    // إعادة المحاولة، فالخادم يعيد الطلب الأول بدل إنشاء ثانٍ.
+    clientRef: optionalText(64)
+      .refine((v) => v === undefined || v === "" || /^[A-Za-z0-9_-]{8,64}$/.test(v), {
+        message: "clientRef غير صالح",
+      })
+      .transform((v) => v ?? ""),
     items: z.array(orderItemContract).min(1, "السلة فارغة").max(50, "الحد الأقصى 50 صنفًا"),
   })
   .strict();

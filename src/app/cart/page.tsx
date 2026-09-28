@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useCart } from "@/lib/cart";
 import { STORE } from "@/lib/seed";
@@ -11,6 +11,28 @@ export default function CartPage() {
   const [done, setDone] = useState<{ id: string; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /**
+   * مفتاح idempotency لمحاولة الدفع الحالية (D-2).
+   *
+   * يُولَّد مرة واحدة ويُعاد إرساله **كما هو** عند إعادة المحاولة، فالخادم
+   * يعيد الطلب الأول بدل إنشاء ثانٍ. ويُصفَّر بعد نجاح الطلب فقط — لا بعد
+   * الخطأ — وإلا صار الضغط على «تأكيد» مرة أخرى بعد رسالة خطأ طلبًا جديدًا،
+   * وهو بالضبط ما نمنعه.
+   *
+   * `useRef` لا `useState`: القيمة لا تُعرض ولا تُعيد الرسم، ويجب أن تبقى
+   * ثابتة عبر محاولات الإرسال المتتالية.
+   */
+  const clientRefKey = useRef<string>("");
+  function idempotencyKey(): string {
+    if (!clientRefKey.current) {
+      // crypto.randomUUID متوفر في المتصفح وفي Node 18+ على حد سواء.
+      clientRefKey.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID().replace(/-/g, "")
+          : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+    }
+    return clientRefKey.current;
+  }
 
   const shipping = calculateShipping(form.governorate, subtotal, STORE.freeShippingOver);
   const total = subtotal + shipping;
@@ -26,10 +48,13 @@ export default function CartPage() {
     if (items.length === 0 || busy) return;
     setBusy(true); setError("");
     try {
-      const r = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, items }) });
+      const r = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, clientRef: idempotencyKey(), items }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setError(j.error || "تعذر تسجيل الطلب"); return; }
       const id = String(j.id);
+      // الطلب نجح فعلًا، فالمحاولة انتهت: أي طلب تالٍ هو طلب جديد ويستحق
+      // مفتاحًا جديدًا. لا يُصفَّر قبل هذه النقطة — وإلا ضاع معنى المفتاح.
+      clientRefKey.current = "";
       window.open(`https://wa.me/${STORE.whatsapp}?text=${encodeURIComponent(waText(id))}`, "_blank", "noopener,noreferrer");
       setDone({ id, total: Number(j.total) }); clear();
     } catch { setError("تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مرة أخرى."); }

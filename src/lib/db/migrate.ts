@@ -21,10 +21,12 @@ export interface Migration {
  */
 import { migrationSql as migration0001Sql } from "./migrations/0001_initial";
 import { migrationSql as migration0002Sql } from "./migrations/0002_search_fts5";
+import { migrationSql as migration0003Sql } from "./migrations/0003_order_idempotency";
 
 export const MIGRATIONS: Migration[] = [
   { version: "0001", name: "initial", sql: migration0001Sql },
   { version: "0002", name: "search_fts5", sql: migration0002Sql },
+  { version: "0003", name: "order_idempotency", sql: migration0003Sql },
 ];
 
 function checksum(sql: string): string {

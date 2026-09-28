@@ -131,6 +131,28 @@ async function products() {
  *
  * كل فعل قيد القياس ما زال يمر عبر HTTP على الـ Runtime الحقيقي.
  */
+/**
+ * هوية مستقلة لكل كتابة fixture.
+ *
+ * كتابات الـ fixture كانت تتشارك هوية واحدة (`${RUN}-fixture`)، فتراكم 29
+ * كتابة في bucket واحد. ظلّ هذا سليمًا ما دام مسار كتابة الإدارة بلا حدّ
+ * معدّل — وبمجرد إضافة D-9 صار المختبر يحجب نفسه بنفسه عند الكتابة الثلاثين،
+ * وسقط WF-029 بـ 429 لا بسبب في التطبيق.
+ *
+ * الإصلاح هنا لا في الإنتاج: القاعدة المكتوبة عند `req` أصلًا أن «كل سيناريو
+ * يأخذ هوية عميل مستقلة»، و38 موضعًا تلتزم بها وثلاثة فقط كانت تخالفها.
+ * ولم يُخفَّض الحدّ في `products/route.ts` لإرضاء المختبر — فتغيير سلوك
+ * الإنتاج ليمرّ الاختبار هو القلب الخاطئ للأولوية.
+ *
+ * الحدّ نفسه مقاس ومحمي بشكل مستقل في tests/admin-write-rate-limit.test.ts
+ * (7 اختبارات)، فالمختبر لا يحتاج أن يستهلكه ليثبت وجوده.
+ */
+let fixtureSeq = 0;
+function fixtureXff() {
+  fixtureSeq += 1;
+  return `${RUN}-fixture-${fixtureSeq}`;
+}
+
 async function setProduct(id, patch) {
   const p = (await products()).get(id);
   if (!p) throw new Error(`setProduct: ${id} not in catalog`);
@@ -148,7 +170,7 @@ async function setProduct(id, patch) {
   const r = await req(BASE, "POST", "/api/products", {
     body: { product: next },
     headers: auth(),
-    xff: `${RUN}-fixture`,
+    xff: fixtureXff(),
   });
   if (r.status !== 200) throw new Error(`setProduct ${id} failed: ${r.status} ${r.text}`);
   return next;
@@ -180,7 +202,7 @@ async function upsertFixture(p) {
       },
     },
     headers: auth(),
-    xff: `${RUN}-fixture`,
+    xff: fixtureXff(),
   });
   if (r.status !== 200) throw new Error(`upsertFixture ${p.id} failed: ${r.status} ${r.text}`);
 }
@@ -188,7 +210,7 @@ async function upsertFixture(p) {
 async function deleteFixture(id) {
   const r = await req(BASE, "DELETE", `/api/products?id=${encodeURIComponent(id)}`, {
     headers: auth(),
-    xff: `${RUN}-fixture`,
+    xff: fixtureXff(),
   });
   if (r.status !== 200) throw new Error(`deleteFixture ${id} failed: ${r.status} ${r.text}`);
 }
@@ -552,44 +574,86 @@ await scenario(
   {
     id: "WF-010",
     title: "الضغط على «إرسال الطلب» مرتين — double submit",
-    input: "POST /api/orders مرتين بنفس الحمولة ونفس هوية العميل",
+    input: "POST /api/orders مرتين بنفس الحمولة ونفس هوية العميل — مرة بمفتاح idempotency ومرة بدونه",
     precondition: "p1: stock=10",
-    expected_decision: "لكل طلب قرار مستقل — لا مفتاح idempotency في العقد",
-    expected_side_effect: "طلبان منفصلان، المخزون 10→8، بلا تجاوز للمخزون",
-    evidence_required: "رقما طلبين مختلفين + المخزون بعد + عدم وجود سجلات يتيمة",
+    expected_decision: "بمفتاح clientRef: الطلب الثاني يُردّ إلى الأول. بدونه (عميل قديم): طلبان مستقلان",
+    expected_side_effect: "بمفتاح: طلب واحد والمخزون 10→9. بدونه: طلبان والمخزون 10→8. بلا تجاوز للمخزون",
+    evidence_required: "معرّفا الطلبين في الحالتين + المخزون بعد كل حالة + عدم وجود سجلات يتيمة",
   },
   async (rec) => {
+    // ── الحالة أ: عميل حديث يرسل clientRef (ما يفعله /cart الآن) ──
     await setProduct("p1", { stock: 10 });
-    const before = await stockOf("p1");
-    const xff = `${RUN}-wf010`;
-    const r1 = await req(BASE, "POST", "/api/orders", {
-      body: order([{ id: "p1", qty: 1 }]),
-      xff,
+    const beforeKeyed = await stockOf("p1");
+    const clientRef = `${RUN}-wf010-${Date.now().toString(36)}`;
+    const xffKeyed = `${RUN}-wf010-keyed`;
+    const k1 = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p1", qty: 1 }], { clientRef }),
+      xff: xffKeyed,
     });
-    const r2 = await req(BASE, "POST", "/api/orders", {
-      body: order([{ id: "p1", qty: 1 }]),
-      xff,
+    const k2 = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p1", qty: 1 }], { clientRef }),
+      xff: xffKeyed,
     });
-    const after = await stockOf("p1");
+    const afterKeyed = await stockOf("p1");
+
+    // ── الحالة ب: عميل قديم بلا clientRef — التوافق الرجعي مقصود ──
+    await setProduct("p1", { stock: 10 });
+    const beforeLegacy = await stockOf("p1");
+    const xffLegacy = `${RUN}-wf010-legacy`;
+    const l1 = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p1", qty: 1 }]),
+      xff: xffLegacy,
+    });
+    const l2 = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p1", qty: 1 }]),
+      xff: xffLegacy,
+    });
+    const afterLegacy = await stockOf("p1");
+
     const facts = await dbFacts();
-    const ids = [r1.json?.id, r2.json?.id].filter(Boolean);
     rec.actual = {
-      http_1: r1.status,
-      http_2: r2.status,
-      id_1: r1.json?.id,
-      id_2: r2.json?.id,
-      request_id_1: r1.requestId,
-      request_id_2: r2.requestId,
-      stock_before: before,
-      stock_after: after,
+      keyed: {
+        http_1: k1.status,
+        http_2: k2.status,
+        id_1: k1.json?.id,
+        id_2: k2.json?.id,
+        same_id: k1.json?.id != null && k1.json?.id === k2.json?.id,
+        stock_before: beforeKeyed,
+        stock_after: afterKeyed,
+      },
+      legacy: {
+        http_1: l1.status,
+        http_2: l2.status,
+        id_1: l1.json?.id,
+        id_2: l2.json?.id,
+        same_id: l1.json?.id != null && l1.json?.id === l2.json?.id,
+        stock_before: beforeLegacy,
+        stock_after: afterLegacy,
+      },
       db: facts,
-      finding: "لا يوجد idempotency key في createOrderContract — التكرار يُنشئ طلبين",
+      finding:
+        "D-2 أُصلح: client_ref + فهرس فريد على (phone, client_ref). الطلب المكرر يعيد الأول. العميل القديم بلا مفتاح يبقى بسلوكه القديم عمدًا حتى لا يُكسر.",
     };
     return {
       checks: [
-        check(r1.status === 200 && r2.status === 200, `HTTP ${r1.status} / ${r2.status}`),
-        check(ids.length === 2 && ids[0] !== ids[1], `رقما الطلبين مختلفان: ${ids.join(" , ")}`),
-        check(after === before - 2, `المخزون ${before} → ${after} (خصم 2 — طلب واحد لكل ضغطة)`),
+        check(k1.status === 200 && k2.status === 200, `بمفتاح: HTTP ${k1.status} / ${k2.status}`),
+        check(
+          k1.json?.id != null && k1.json?.id === k2.json?.id,
+          `بمفتاح: نفس الطلب أُعيد (${k1.json?.id} = ${k2.json?.id})`
+        ),
+        check(
+          afterKeyed === beforeKeyed - 1,
+          `بمفتاح: المخزون ${beforeKeyed} → ${afterKeyed} (خصم واحد لا اثنان)`
+        ),
+        check(l1.status === 200 && l2.status === 200, `بلا مفتاح: HTTP ${l1.status} / ${l2.status}`),
+        check(
+          l1.json?.id && l2.json?.id && l1.json.id !== l2.json.id,
+          `بلا مفتاح: طلبان مختلفان (توافق رجعي) ${l1.json?.id} ≠ ${l2.json?.id}`
+        ),
+        check(
+          afterLegacy === beforeLegacy - 2,
+          `بلا مفتاح: المخزون ${beforeLegacy} → ${afterLegacy} (خصمان — السلوك القديم محفوظ)`
+        ),
         check(facts.negative_stock_rows === 0, `صفوف بمخزون سالب = ${facts.negative_stock_rows}`),
         check(facts.orphan_order_items === 0, `أصناف يتيمة = ${facts.orphan_order_items}`),
       ],
