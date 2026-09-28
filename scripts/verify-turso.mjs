@@ -14,6 +14,7 @@
  */
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
+import { describeDatabaseUrl, originForHttpProbe } from "./lib/db-url.mjs";
 
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
@@ -43,16 +44,73 @@ function record(id, label, ok, detail) {
   rows.push({ id, label, ok, detail });
 }
 
+/**
+ * وصف آمن لبنية الرابط عند فشل الاتصال — بلا قيمة الرابط وبلا رمزه.
+ * (نص خطأ @libsql/client نفسه، مثل `Unexpected token '<'`، يقول إن المضيف رد
+ * HTML لا JSON؛ وهذا عرض مختلف تمامًا عن «رمز غير صالح» أو «شبكة محجوبة».)
+ */
+async function diagnoseEndpoint() {
+  const shape = describeDatabaseUrl(url);
+  const parts = [
+    `بنية الرابط: ${shape.scheme} · ${shape.kind} · المضيف ${shape.hostMasked} · طول ${shape.length}` +
+      (shape.hasPlaceholder ? " · يحتوي علامة موضع (<…> أو ... أو xx) فهو قيمة موضعية لا رابط حقيقي" : ""),
+  ];
+  const origin = originForHttpProbe(url);
+  if (!origin) return parts;
+  const guard = [...secrets, origin];
+  try {
+    const res = await fetch(origin, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(10_000) });
+    const body = redact(String(await res.text()).slice(0, 160).replace(/\s+/g, " ").trim(), guard);
+    parts.push(`استجابة أصل الرابط: HTTP ${res.status} · content-type: ${res.headers.get("content-type") ?? "—"} · body: ${body || "—"}`);
+  } catch (e) {
+    parts.push(`تعذّر الوصول إلى أصل الرابط: ${redact(String(e?.message ?? e), guard)}`);
+  }
+  return parts;
+}
+
+/** يطبع الجدول (أو JSON) مرة واحدة — يستدعيه المسار العادي ومسار فشل الاتصال. */
+function render() {
+  const failed = rows.filter((r) => !r.ok);
+  if (asJson) {
+    console.log(JSON.stringify({ ok: failed.length === 0, local, rows }, null, 2));
+    return;
+  }
+  console.log(`# فحص Turso — ${local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}\n`);
+  console.log("| # | الفحص | النتيجة | التفصيل |");
+  console.log("|---|---|---|---|");
+  for (const row of rows) {
+    console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${row.detail.replace(/\|/g, "\\|")} |`);
+  }
+  console.log(
+    failed.length === 0
+      ? "\n✅ كل الفحوص خضراء: الاتصال يعمل، والهجرات متطابقة، وفهرس FTS5 متزامن مع الكتالوج."
+      : `\n❌ فشل ${failed.length} فحصًا — راجع DEPLOYMENT.md (الصفوف 7–9 وإصلاح P0) قبل إعلان الجاهزية.`
+  );
+  if (!local) {
+    console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. التطبيق نفسه يشغّل الهجرات عند أول طلب (`ensureSchema`).");
+  }
+}
+
 const db = createClient({ url, authToken });
 
 try {
   // 1) الاتصال — نفس مسار @libsql/client المستخدم في الإنتاج.
+  let connected = false;
   try {
     await db.execute("SELECT 1 AS ok");
-    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : "libsql متصل");
+    connected = true;
+    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : `libsql متصل (${describeDatabaseUrl(url).kind})`);
   } catch (error) {
-    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, redact(String(error?.message ?? error), secrets));
-    throw error; // لا معنى لباقي الفحوص بلا اتصال.
+    // الفشل هنا يوقف الفحوص التابعة (لا معنى لها بلا اتصال) لكنه **لا يمنع
+    // طباعة الجدول**: الجدول نفسه هو الدليل، فيُضاف إليه وصف بنية الرابط
+    // واستجابة أصله. لا يُطبع الرابط ولا الرمز — الوصف كله عبر `redact`.
+    const details = await diagnoseEndpoint();
+    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "));
+  }
+
+  if (!connected) {
+    render();
+    process.exit(1);
   }
 
   // 2) جدول الهجرات نفسه.
@@ -137,28 +195,8 @@ try {
   const missingEssentials = essentials.filter((t) => !names.includes(t));
   record("tables", "الجداول الأساسية للمتجر", missingEssentials.length === 0, missingEssentials.length ? `ناقصة: ${missingEssentials.join(", ")}` : `${essentials.length} جدولًا حاضرًا`);
 
-  const failed = rows.filter((r) => !r.ok);
-
-  if (asJson) {
-    console.log(JSON.stringify({ ok: failed.length === 0, local, rows }, null, 2));
-  } else {
-    console.log(`# فحص Turso — ${local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}\n`);
-    console.log("| # | الفحص | النتيجة | التفصيل |");
-    console.log("|---|---|---|---|");
-    for (const row of rows) {
-      console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${row.detail.replace(/\|/g, "\\|")} |`);
-    }
-    console.log(
-      failed.length === 0
-        ? "\n✅ كل الفحوص خضراء: الاتصال يعمل، والهجرات متطابقة، وفهرس FTS5 متزامن مع الكتالوج."
-        : `\n❌ فشل ${failed.length} فحصًا — راجع DEPLOYMENT.md (الصفوف 7–9 وإصلاح P0) قبل إعلان الجاهزية.`
-    );
-    if (!local) {
-      console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. التطبيق نفسه يشغّل الهجرات عند أول طلب (`ensureSchema`).");
-    }
-  }
-
-  process.exit(failed.length === 0 ? 0 : 1);
+  render();
+  process.exit(rows.filter((r) => !r.ok).length === 0 ? 0 : 1);
 } catch (error) {
   if (!asJson) console.error(`❌ توقف الفحص: ${redact(String(error?.message ?? error), secrets)}`);
   process.exit(1);

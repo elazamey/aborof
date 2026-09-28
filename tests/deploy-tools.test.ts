@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { runMigrations, MIGRATIONS } from "../src/lib/db/migrate";
 import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/migration-checksums.mjs";
+import { describeDatabaseUrl, originForHttpProbe } from "../scripts/lib/db-url.mjs";
 import {
   isSafeBaseUrl,
   classifySecurityHeaders,
@@ -63,6 +64,33 @@ describe("scripts/lib/migration-checksums", () => {
     const secret = "super-secret-token-value";
     assert.equal(redact(`فشل الاتصال بـ ${secret}`, [secret]), "فشل الاتصال بـ ***");
     assert.equal(redact("نص بلا أسرار", [secret]), "نص بلا أسرار");
+  });
+});
+
+describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كشف قيمته", () => {
+  test("يميّز نطاق Turso من نطاق تطبيق (الأخير يرد HTML فيظهر «Unexpected token '<'»)", () => {
+    assert.equal(describeDatabaseUrl("libsql://store-abc.turso.io").kind, "Turso");
+    assert.equal(describeDatabaseUrl("https://aborof.vercel.app").kind, "نطاق خارج Turso");
+  });
+
+  test("يرصد القيمة الموضعية من التوثيق ولا يعدّها رابطًا حقيقيًا", () => {
+    const placeholder = describeDatabaseUrl("libsql://<db>.turso.io");
+    assert.equal(placeholder.hasPlaceholder, true);
+    assert.equal(placeholder.kind, "قيمة موضعية غير مستبدلة");
+    assert.equal(describeDatabaseUrl("libsql://store-abc.turso.io").hasPlaceholder, false);
+  });
+
+  test("أصل الفحص يجرّد المسار والاستعلام — رمز مدسوس في الرابط لا يظهر في أي سجل", () => {
+    assert.equal(originForHttpProbe("libsql://store-abc.turso.io?authToken=SECRET-123"), "https://store-abc.turso.io");
+    assert.equal(originForHttpProbe("wss://store-abc.turso.io/v2"), "https://store-abc.turso.io");
+    assert.equal(originForHttpProbe("file:/tmp/local.db"), null);
+  });
+
+  test("المضيف يُقنَّع: لا يُطبع كاملًا مع أن آخره يكفي للتعرّف", () => {
+    const masked = describeDatabaseUrl("libsql://store-abc.turso.io").hostMasked;
+    assert.ok(!masked.includes("store-abc"));
+    assert.ok(masked.startsWith("sto"));
+    assert.ok(masked.endsWith("turso.io"));
   });
 });
 
