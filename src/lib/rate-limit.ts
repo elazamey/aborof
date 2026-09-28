@@ -108,15 +108,18 @@ let storePromise: Promise<RateLimitStore> | null = null;
 async function getStore(): Promise<RateLimitStore> {
   if (storePromise) return storePromise;
   storePromise = (async () => {
-    if (db()) {
-      try {
+    try {
+      // فحص الإعداد داخل الـ try عمدًا: `db()` يرمي على رابط معطوب، والرمي هنا
+      // كان يرفض وعد المخزن فيتعطل حد المعدل على كل المسارات — والسقوط للذاكرة
+      // هو السلوك الموثّق لكل أعطال القاعدة.
+      if (db()) {
         const distributed = new TursoRateLimitStore();
         // اختبار مبكر: فشل الهجرة/الاتصال يسقطنا للذاكرة بدل تعطيل المسارات.
         await distributed.hit("__warmup__", 10_000, 60_000);
         return distributed;
-      } catch (e) {
-        console.error("rate-limit: falling back to in-memory store:", String((e as Error)?.message ?? e));
       }
+    } catch (e) {
+      console.error("rate-limit: falling back to in-memory store:", String((e as Error)?.message ?? e));
     }
     return new InMemoryRateLimitStore();
   })();

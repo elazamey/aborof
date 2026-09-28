@@ -75,8 +75,33 @@ describe_token() {
 URL_VALUE="$(read_secret TURSO_DATABASE_URL)"
 TOKEN_VALUE="$(read_secret TURSO_AUTH_TOKEN)"
 
+# تشذيب آثار اللصق: مسافات/تاب/أسطر زائدة في الطرفين، وعلامتا اقتباس محيطتان.
+# (رابط بمسافة زائدة يجعل createClient يرمي Invalid URL في الإنتاج ⇒ 500 على كل
+# مسار منتجات — وهو عطل فحص 2026-09-28. التشذيب هنا يمنع تكراره من المنبع.)
+trim_secret() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  case "$value" in
+    \"*\"|\'*\' ) value="${value:1:${#value}-2}" ;;
+  esac
+  printf '%s' "$value"
+}
+
+URL_TRIMMED="$(trim_secret "$URL_VALUE")"
+TOKEN_TRIMMED="$(trim_secret "$TOKEN_VALUE")"
+[ "${#URL_TRIMMED}" -ne "${#URL_VALUE}" ] && echo "ℹ️  أُزيلت ${#URL_VALUE}→${#URL_TRIMMED} حرفًا زائدًا من طرفي قيمة الرابط الملصقة." >&2
+[ "${#TOKEN_TRIMMED}" -ne "${#TOKEN_VALUE}" ] && echo "ℹ️  أُزيلت ${#TOKEN_VALUE}→${#TOKEN_TRIMMED} حرفًا زائدًا من طرفي قيمة الرمز الملصقة." >&2
+URL_VALUE="$URL_TRIMMED"
+TOKEN_VALUE="$TOKEN_TRIMMED"
+
 [ -n "$URL_VALUE" ] || fail "TURSO_DATABASE_URL فارغ."
 [ -n "$TOKEN_VALUE" ] || fail "TURSO_AUTH_TOKEN فارغ."
+
+# مسافة داخلية لا تُشذَّب بل تُرفض: لا رابط صالح ولا JWT يحمل مسافة أبدًا،
+# وتمريرها كان سيُسقط الإنتاج بـ 500 (Invalid URL) أو 401 (رمز مكسور).
+case "$URL_VALUE" in *[[:space:]]*) fail "الرابط يحمل مسافة داخلية (طول ${#URL_VALUE}) — الصقه من زر Connect بلا تعديل." ;; esac
+case "$TOKEN_VALUE" in *[[:space:]]*) fail "الرمز يحمل مسافة داخلية (طول ${#TOKEN_VALUE}) — أنشئ توكنًا جديدًا والصقه كاملًا." ;; esac
 
 # 1) التحقق من الرابط: libsql/turso/https على نطاق Turso، وليس صفحة اللوحة.
 case "$URL_VALUE" in

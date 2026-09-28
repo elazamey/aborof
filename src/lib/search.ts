@@ -104,7 +104,14 @@ export async function searchProductsFts(query: string, limit = 3): Promise<Produ
   const products = await getProducts();
   if (products.length === 0) return [];
 
-  const c = db();
+  // `db()` داخل حماية: إعداد معطوب يجب أن يسقط للمطابقة المحلية (الموثّقة
+  // أعلاه) لا أن يرمي — تمامًا كفشل استعلام FTS5 نفسه أدناه.
+  let c: Client | null = null;
+  try {
+    c = db();
+  } catch {
+    c = null;
+  }
   const byId = new Map(products.map((p) => [String(p.id), p]));
   const order: string[] = [];
 

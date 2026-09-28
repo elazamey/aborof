@@ -1,7 +1,7 @@
 import { createClient, type Client } from "@libsql/client";
 import { SEED_PRODUCTS, type Product } from "@/lib/seed";
 import { runMigrations } from "@/lib/db/migrate";
-import { redactSecrets } from "@/lib/errors";
+import { Errors, redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 
 let _client: Client | null = null;
@@ -9,17 +9,27 @@ let _ready: Promise<void> | null = null;
 let _clientOverride: Client | null = null;
 
 export function hasDB() {
-  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL);
+  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL?.trim());
 }
 
 export function db(): Client | null {
   if (_clientOverride) return _clientOverride;
-  if (!hasDB()) return null;
+  // التشذيب هنا مقصود: لصق الرابط بمسافة/سطر زائد في متغيرات Vercel كان يجعل
+  // `createClient` يرمي `Invalid URL` خارج أي try في القرّاء، فيتحول كل مسار
+  // منتجات (API والصفحة والخريطة) إلى 500 بدل السقوط الآمن للبذرة (فحص 2026-09-28).
+  const databaseUrl = process.env.TURSO_DATABASE_URL?.trim();
+  if (!databaseUrl) return null;
   if (!_client) {
-    _client = createClient({
-      url: process.env.TURSO_DATABASE_URL as string,
-      authToken: process.env.TURSO_AUTH_TOKEN,
-    });
+    try {
+      _client = createClient({
+        url: databaseUrl,
+        authToken: process.env.TURSO_AUTH_TOKEN?.trim(),
+      });
+    } catch {
+      // إعداد معطوب (لا مخطّط صالح ولا مضيف): DomainError لا خام المزود، فيُترجم
+      // في API إلى 503 صريح بدل 500 داخلي، ويلتقطه القرّاء للسقوط الآمن أدناه.
+      throw Errors.serviceUnavailable("إعداد الاتصال بقاعدة البيانات غير صالح.");
+    }
   }
   return _client;
 }
@@ -104,7 +114,17 @@ function toPlain<T>(rows: unknown[]): T[] {
 }
 
 export async function getProducts(): Promise<Product[]> {
-  const c = db();
+  // `db()` داخل الـ try عمدًا: إعداد معطوب (رابط بلا مخطّط صالح) كان يرمي خارجها
+  // فيسقط المسار كله بـ 500؛ الآن يُعامَل كأي عطل قاعدة: سقوط آمن للبذرة مع سجل
+  // منقّح. (سياسة الإنتاج fail-closed مقابل البذرة قرار منفصل — انظر PR #17 —
+  // والبنية هنا تدعمه: يكفي تبديل السقوط برمي 503 في هذا الموضع وحده.)
+  let c: Client | null = null;
+  try {
+    c = db();
+  } catch (e) {
+    console.error("DB error, using seed:", redactSecrets(String((e as Error)?.message ?? e)));
+    return SEED_PRODUCTS;
+  }
   if (!c) return SEED_PRODUCTS;
   try {
     await ensureSchema();
@@ -129,12 +149,19 @@ export async function getProduct(id: string): Promise<Product | null> {
 }
 
 export async function getFaq(): Promise<{ question: string; answer: string }[]> {
-  const c = db();
   const fallback = [
     { question: "طرق الدفع", answer: "فودافون كاش على 01095032221 أو الدفع عند الاستلام." },
     { question: "الشحن", answer: "50 جنيه، ومجاني فوق 1000 جنيه. التوصيل خلال 1-3 أيام." },
     { question: "الجملة", answer: "أسعار خاصة للجملة — تواصل واتساب 01095032221." },
   ];
+  // `db()` داخل الـ try للسبب نفسه في getProducts: إعداد معطوب يجب أن يسقط
+  // للاحتياطي لا أن يُسقط الصفحة بـ 500.
+  let c: Client | null = null;
+  try {
+    c = db();
+  } catch {
+    return fallback;
+  }
   if (!c) return fallback;
   try {
     await ensureSchema();

@@ -15,6 +15,10 @@
  *                           لا رابط اتصال، تُشتق `<db>-<org>.turso.io` وتُجرَّب
  *                           فعلًا قبل استخدامها — بدل إسقاط كل الصفوف التابعة.
  *
+ * الصفوف: conn · conn-token-shape (صيغة الرمز دائمًا) · conn-cause (السبب الخام
+ * الموثّق عند فشل الاتصال: 401 رمز مرفوض مقابل 404 لا قاعدة) · ثم الهجرات
+ * والصفوف 7–9 عند نجاح الاتصال.
+ *
  * كود الخروج: 0 = كل الفحوص خضراء، 1 = فشل حاجب، 2 = تهيئة الفحص ناقصة.
  */
 import { createClient } from "@libsql/client";
@@ -121,7 +125,8 @@ async function probeHttpEndpoint(candidateUrl, token) {
     const body = await res.text().catch(() => "");
     return interpretProbeStatus(res.status, redact(body, [...secrets, candidateUrl]));
   } catch (error) {
-    return { ok: false, verdict: redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidateUrl]) };
+    const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidateUrl]);
+    return { ok: false, verdict: `تعذّر الوصول للخادم (شبكة/DNS) — ${raw}` };
   }
 }
 
@@ -196,7 +201,52 @@ function render() {
   }
 }
 
-let db = createClient({ url, authToken });
+/**
+ * صف صيغة الرمز — يُسجَّل **دائمًا** للقواعد غير المحلية (لا في وضع الترميم فقط):
+ * غيابه كان غموضًا (هل الرمز JWT سليم مرفوض الصلاحية، أم قيمة في غير محلها؟)،
+ * وحضوره بشكله الموجب ينفي الصيغة ويوجّه العلاج (رمز جديد لنفس القاعدة).
+ * الوصف شكلي فقط (النوع/الطول/الموضع) — لا يُطبع أي جزء من القيمة.
+ */
+function recordTokenShape() {
+  if (local) return;
+  const authParts = parseAuthValue(authToken);
+  if (authParts.shape.looksLikeJwt) {
+    record(
+      "conn-token-shape",
+      "صيغة قيمة TURSO_AUTH_TOKEN",
+      true,
+      `JWT بثلاثة مقاطع (طول ${authParts.shape.length}) — الصيغة سليمة؛ أي رفض بعده سببه الصلاحية/الانتهاء/القاعدة الخطأ لا الصيغة`
+    );
+  } else {
+    record(
+      "conn-token-shape",
+      "صيغة قيمة TURSO_AUTH_TOKEN",
+      false,
+      authParts.shape.scheme
+        ? `ليست رمز JWT بل قيمة تبدأ بـ ${authParts.shape.scheme}:// (النقطتان في الموضع ${authParts.shape.colonOffset} من ${authParts.shape.length} حرفًا) — رابط في حقل الرمز · **انقل الرابط إلى TURSO_DATABASE_URL ورمز JWT إلى TURSO_AUTH_TOKEN**`
+        : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا Full access**`
+    );
+  }
+}
+
+// تهيئة العميل داخل حماية: قيمة معطوبة (بلا مخطّط صالح) تجعل `createClient`
+// نفسه يرمي — وكان الرمي هنا يُسقط السكربت قبل طباعة الجدول، ورسالة الخطأ تحمل
+// القيمة المضبوطة حرفيًا. الآن تُسجَّل منقّحة في صف conn مع وصف البنية.
+let db = null;
+try {
+  db = createClient({ url, authToken });
+} catch (error) {
+  const details = await diagnoseEndpoint();
+  recordTokenShape();
+  record(
+    "conn",
+    "الاتصال بقاعدة البيانات (SELECT 1)",
+    false,
+    [`تعذّرت تهيئة عميل libsql من القيمة المضبوطة: ${redact(String(error?.message ?? error), secrets)}`, ...details].join(" · ")
+  );
+  render();
+  process.exit(1);
+}
 
 try {
   // 1) الاتصال — نفس مسار @libsql/client المستخدم في الإنتاج.
@@ -205,26 +255,17 @@ try {
     await db.execute("SELECT 1 AS ok");
     connected = true;
     record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : `libsql متصل (${describeDatabaseUrl(effectiveUrl).kind})`);
+    recordTokenShape();
   } catch (error) {
     // الفشل هنا يوقف الفحوص التابعة (لا معنى لها بلا اتصال) لكنه **لا يمنع
     // طباعة الجدول**: الجدول نفسه هو الدليل، فيُضاف إليه وصف بنية الرابط
     // واستجابة أصله. لا يُطبع الرابط ولا الرمز — الوصف كله عبر `redact`.
     const details = await diagnoseEndpoint();
+    recordTokenShape();
 
     // ترميم مُعلَن (بعلم صريح): قيمة لوحة تحكم بدل رابط اتصال.
     if (allowDashboardUrl) {
       const derived = await attemptDerivedConnection();
-      const authParts = parseAuthValue(authToken);
-      if (!authParts.shape.looksLikeJwt) {
-        record(
-          "conn-token-shape",
-          "صيغة قيمة TURSO_AUTH_TOKEN",
-          false,
-          authParts.shape.scheme
-            ? `ليست رمز JWT بل قيمة تبدأ بـ ${authParts.shape.scheme}:// (النقطتان في الموضع ${authParts.shape.colonOffset} من ${authParts.shape.length} حرفًا) — رابط في حقل الرمز · **انقل الرابط إلى TURSO_DATABASE_URL ورمز JWT إلى TURSO_AUTH_TOKEN**`
-            : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا Full access**`
-        );
-      }
       if (derived.client) {
         db.close();
         db = derived.client;
@@ -244,6 +285,22 @@ try {
 
     if (!connected) {
       record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "));
+      // السبب الخام **الموثّق**: عميل libsql يغلّف 401 و404 و400 في SERVER_ERROR
+      // واحدة بلا حكم، وفحص الأصل أعلاه بلا ترويسة مصادقة (401 متوقعة منه دائمًا).
+      // هذا الصف يرسل الطلب نفسه **مع الرمز المضبوط** فيميّز «رمز مرفوض (401 —
+      // جدّد الرمز)» من «لا قاعدة بهذا الاسم (404 — تحقق من الاسم)» — وهما
+      // علاجان مختلفان تمامًا. (فحص 2026-09-28: 401 برمز JWT سليم الشكل.)
+      if (!local) {
+        const cause = await probeHttpEndpoint(url, authToken);
+        record(
+          "conn-cause",
+          "السبب الخام من الخادم (طلب موثّق بالرمز المضبوط)",
+          cause.ok,
+          cause.ok
+            ? `${cause.verdict} — لكن عميل libsql فشل على الزوج نفسه؛ راجع نص خطأ صف conn`
+            : cause.verdict
+        );
+      }
     }
   }
 
@@ -340,5 +397,5 @@ try {
   if (!asJson) console.error(`❌ توقف الفحص: ${redact(String(error?.message ?? error), secrets)}`);
   process.exit(1);
 } finally {
-  db.close();
+  if (db) db.close();
 }

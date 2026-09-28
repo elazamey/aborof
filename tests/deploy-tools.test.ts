@@ -1,4 +1,4 @@
-import { test, describe } from "node:test";
+import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -20,10 +20,11 @@ import {
   classifySecurityHeaders,
   looksLikeSeedFallback,
   frontPageFindings,
+  extractErrorDigest,
   BASELINE_SECURITY_HEADERS,
 } from "../scripts/smoke-production.mjs";
 import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
-import { setDbClientForTest } from "../src/lib/db";
+import { setDbClientForTest, db, hasDB } from "../src/lib/db";
 import { SEED_PRODUCTS } from "../src/lib/seed";
 
 /**
@@ -166,6 +167,40 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
     assert.doesNotMatch(res.stdout + res.stderr, /is not defined/);
     assert.doesNotMatch(res.stdout, /example-db-example/, "لا يُطبع الرابط ولا الرمز");
   });
+
+  test("صفّا الصيغة والسبب يُسجَّلان دائمًا (بلا علم ترميم) ولا تُطبع أي قيمة", () => {
+    // حالة فحص 2026-09-28: رابط سليم الشكل + رمز JWT سليم الشكل مرفوض (401).
+    // بلا هذين الصفين كان التقرير يقول «401» فقط بلا تمييز رمز/قاعدة.
+    const env = {
+      ...process.env,
+      TURSO_DATABASE_URL: "libsql://no-such-db-xyz123.turso.io",
+      TURSO_AUTH_TOKEN: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.c2lnbmF0dXJl",
+    };
+    const res = spawnSync("node", ["scripts/verify-turso.mjs"], { encoding: "utf8", env });
+    assert.equal(res.status, 1, "صفوف حمراء تعني 1");
+    assert.match(res.stdout, /\| conn-token-shape \|/);
+    assert.match(res.stdout, /الصيغة سليمة/);
+    assert.match(res.stdout, /\| conn-cause \|/);
+    assert.doesNotMatch(res.stdout + res.stderr, /is not defined/);
+    assert.doesNotMatch(res.stdout + res.stderr, /no-such-db-xyz123/, "لا يُطبع المضيف كاملًا");
+    assert.doesNotMatch(res.stdout + res.stderr, /c2lnbmF0dXJl/, "لا يُطبع أي جزء من الرمز");
+  });
+
+  test("رابط معطوب (بلا مخطّط صالح) يطبع الجدول منقّحًا بدل إسقاط السكربت", () => {
+    // `createClient` نفسه يرمي على هذه القيمة؛ كان الرمي يُسقط السكربت قبل
+    // الجدول برسالة تحمل القيمة حرفيًا — الآن صف conn منقّح بدل السقوط.
+    const env = {
+      ...process.env,
+      TURSO_DATABASE_URL: "not-a-real-url-xyz789",
+      TURSO_AUTH_TOKEN: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.c2lnbmF0dXJl",
+    };
+    const res = spawnSync("node", ["scripts/verify-turso.mjs"], { encoding: "utf8", env });
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /\| conn \|/);
+    assert.match(res.stdout, /تعذّرت تهيئة عميل libsql/);
+    assert.doesNotMatch(res.stdout + res.stderr, /not-a-real-url-xyz789/, "رسالة الخطأ يجب أن تُنقّح");
+    assert.doesNotMatch(res.stdout + res.stderr, /c2lnbmF0dXJl/, "لا يُطبع أي جزء من الرمز");
+  });
 });
 
 describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان", () => {
@@ -207,6 +242,32 @@ describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان",
     // بلا قيمة في البيئة يحاول القراءة من المدخل؛ stdin مغلق في الاختبار فيفشل برسالة واضحة.
     assert.equal(res.status, 1);
     assert.match(res.stderr, /فارغ/);
+  });
+
+  test("يقبل قيمًا بهوامش لصق (مسافات/سطر/اقتباس) بعد تشذيبها ويُعلن الفرق", () => {
+    const res = run({
+      TURSO_DATABASE_URL: `  ${GOOD_URL}\n`,
+      TURSO_AUTH_TOKEN: `"${GOOD_TOKEN}"`,
+    });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /التحقق الشكلي نجح/);
+    assert.match(res.stderr, /حرفًا زائدًا/);
+    assert.doesNotMatch(res.stdout + res.stderr, new RegExp(GOOD_TOKEN));
+  });
+
+  test("يرفض مسافة داخلية في الرابط أو الرمز بدل تمرير قيمة مكسورة تُسقط الإنتاج", () => {
+    const badUrl = run({
+      TURSO_DATABASE_URL: "libsql://aborof elazamey.turso.io",
+      TURSO_AUTH_TOKEN: GOOD_TOKEN,
+    });
+    assert.equal(badUrl.status, 1);
+    assert.match(badUrl.stderr, /مسافة داخلية/);
+    const badToken = run({
+      TURSO_DATABASE_URL: GOOD_URL,
+      TURSO_AUTH_TOKEN: "eyJhbGciOiJIUzI1NiJ9.abc def",
+    });
+    assert.equal(badToken.status, 1);
+    assert.match(badToken.stderr, /مسافة داخلية/);
   });
 });
 
@@ -337,6 +398,71 @@ describe("scripts/smoke-production — قرينة ربط قاعدة البيان
       setDbClientForTest(null);
       client.close();
     }
+  });
+});
+
+describe("src/lib/db — إعداد معطوب لا يُسقط المسار بـ 500 (عطل فحص 2026-09-28)", () => {
+  // عطل الإنتاج: `createClient` يرمي `Invalid URL` على رابط بهامش لصق/بلا مخطط،
+  // وكان الرمي خارج أي try في القرّاء ⇒ 500 على /api/products والصفحة والخريطة.
+  // العقد الجديد: تشذيب القيم، وخطأ إعداد صريح (503) بدل الخام، والتقاطه في
+  // القرّاء للسقوط الآمن — فأسوأ حالة ممكنة هي البذرة لا صفحة خطأ.
+  const URL_KEY = "TURSO_DATABASE_URL";
+  const TOKEN_KEY = "TURSO_AUTH_TOKEN";
+  let savedUrl: string | undefined;
+  let savedToken: string | undefined;
+
+  beforeEach(() => {
+    savedUrl = process.env[URL_KEY];
+    savedToken = process.env[TOKEN_KEY];
+    setDbClientForTest(null);
+  });
+  afterEach(() => {
+    if (savedUrl === undefined) delete process.env[URL_KEY];
+    else process.env[URL_KEY] = savedUrl;
+    if (savedToken === undefined) delete process.env[TOKEN_KEY];
+    else process.env[TOKEN_KEY] = savedToken;
+    setDbClientForTest(null);
+  });
+
+  test("قيمة بمسافات فقط تُعامَل كغياب: بلا عميل وبلا رمي", () => {
+    process.env[URL_KEY] = "   ";
+    assert.equal(hasDB(), false);
+    assert.equal(db(), null);
+  });
+
+  test("رابط بلا مخطّط صالح يرمي خطأ إعداد صريحًا (503) لا خام المزود", () => {
+    process.env[URL_KEY] = "not-a-url";
+    assert.throws(() => db(), /إعداد الاتصال بقاعدة البيانات غير صالح/);
+  });
+
+  test("رمز JWT في حقل الرابط (خطأ لصق) يُعامَل كإعداد معطوب لا كعطل داخلي", () => {
+    process.env[URL_KEY] = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.c2lnbmF0dXJl";
+    assert.throws(() => db(), /إعداد الاتصال بقاعدة البيانات غير صالح/);
+  });
+
+  test("getProducts مع رابط معطوب يسقط للبذرة بدل الرمي (عقد الـ 200)", async () => {
+    process.env[URL_KEY] = "not-a-url";
+    const { getProducts } = await import("../src/lib/db");
+    const products = await getProducts();
+    assert.deepEqual(products, SEED_PRODUCTS);
+  });
+
+  test("getFaq مع رابط معطوب يسقط للاحتياطي بدل الرمي", async () => {
+    process.env[URL_KEY] = "not-a-url";
+    const { getFaq } = await import("../src/lib/db");
+    const faq = await getFaq();
+    assert.ok(Array.isArray(faq) && faq.length > 0);
+  });
+
+  // هذا الاختبار آخر المجموعة عمدًا: `db()` يخزّن العميل على مستوى الوحدة،
+  // ولا اختبار بعده في هذا الملف يعتمد على قاعدة مدخل البيئة.
+  test("رابط صالح بهامش لصق (مسافات/سطر) يُشذَّب ويُبنى عميله بلا رمي", () => {
+    process.env[URL_KEY] = "  libsql://127.0.0.1:9  \n";
+    process.env[TOKEN_KEY] = "tok";
+    assert.equal(hasDB(), true);
+    const client = db();
+    assert.ok(client, "التشذيب يجب أن يجعل القيمة صالحة للبناء");
+    client.close();
   });
 });
 
@@ -590,5 +716,18 @@ describe("smoke — الواجهة المنشورة (الصفوف 15–17)", () 
     const row17 = findings.find((f) => f.id === "17");
     assert.equal(row17?.ok, false);
     assert.match(String(row17?.actual), /500/);
+  });
+
+  test("يستخرج digest حدّ الخطأ من HTML ويرجع null عند غيابه", () => {
+    assert.equal(extractErrorDigest('<p class="state-code">رقم المرجع: 3763750452</p>'), "3763750452");
+    assert.equal(extractErrorDigest("<title>منتج سليم</title>"), null);
+    assert.equal(extractErrorDigest(null), null);
+  });
+
+  test("الصف 15 عند 500 يُلحق الـ digest لربطه بسجل Vercel (بلاغ 2026-09-28)", () => {
+    const findings = frontPageFindings({ ...healthy, productPage: ok("<p>رقم المرجع: 3763750452</p>", 500) });
+    const row15 = findings.find((f) => f.id === "15");
+    assert.equal(row15?.ok, false);
+    assert.match(String(row15?.actual), /3763750452/);
   });
 });

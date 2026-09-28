@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Client } from "@libsql/client";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { db } from "@/lib/db";
 import { trackOrder } from "@/lib/orders";
@@ -17,7 +18,14 @@ export function isOrderTrackingEnabled(): boolean {
 }
 
 async function recordFailedAttempt(orderId: string): Promise<void> {
-  const c = db();
+  // تدقيق بأفضل جهد: رمي `db()` هنا (إعداد معطوب) كان يقنّع رسالة 404 الموحّدة
+  // بـ 500 — فيُكسر عقد «لا كشف لوجود الطلب». أي عطل هنا = تخطٍّ صامت.
+  let c: Client | null = null;
+  try {
+    c = db();
+  } catch {
+    return;
+  }
   if (!c) return;
   try {
     await c.execute({

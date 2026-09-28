@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Client } from "@libsql/client";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { getProducts, getFaq, db, ensureSchema } from "@/lib/db";
 import { STORE } from "@/lib/seed";
@@ -216,7 +217,14 @@ export const POST = apiHandler("/api/chat", async (req) => {
     if (!reply) reply = await localAnswer(last);
   }
 
-  const c = db();
+  // تسجيل الدردشة بأفضل جهد: `db()` قد يرمي على إعداد معطوب، والرد نفسه يجب
+  // ألا يتأثر — السقوط هنا مقصود كما في بقية مسارات القراءة.
+  let c: Client | null = null;
+  try {
+    c = db();
+  } catch {
+    c = null;
+  }
   if (c) {
     try {
       await ensureSchema();

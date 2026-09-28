@@ -86,6 +86,21 @@ describe("products route", () => {
     const body = await res.json();
     assert.ok(Array.isArray(body.products));
   });
+
+  test("GET with malformed TURSO_DATABASE_URL falls back to seed (200) instead of 500", async () => {
+    // انحدار عطل فحص 2026-09-28: رابط معطوب في بيئة الإنتاج أسقط المسار بـ 500.
+    process.env.TURSO_DATABASE_URL = "not-a-url";
+    try {
+      const { GET } = await import("../src/app/api/products/route");
+      const res = await GET(new Request("http://x/api/products"));
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body.products));
+      assert.ok(body.products.length > 0);
+    } finally {
+      delete process.env.TURSO_DATABASE_URL;
+    }
+  });
 });
 
 describe("chat route", () => {

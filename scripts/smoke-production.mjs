@@ -115,6 +115,17 @@ export function looksLikeSeedFallback(products) {
 }
 
 /**
+ * يستخرج digest حدّ الخطأ من HTML — «رقم المرجع» الذي يعرضه `src/app/error.tsx`
+ * (مثل `3763750452` في بلاغ 2026-09-28). الرقم وحده لا يكشف الاستثناء، لكن
+ * التقاطه في مخرجات الفحص يربط الصف الأحمر بالسجل الخادمي (Vercel logs) بلا
+ * حاجة لبلاغ يدوي من الزائر. مُصدَّرة للاختبار في tests/deploy-tools.test.ts.
+ */
+export function extractErrorDigest(html) {
+  const m = /رقم المرجع:\s*([A-Za-z0-9_-]{1,40})/.exec(String(html ?? ""));
+  return m?.[1] ?? null;
+}
+
+/**
  * منطق الصفوف 15–17 (الواجهة المنشورة) كدالة **نقية** مُصدَّرة:
  * الحالات الثلاث المهمة — عودة صفحات المنتجات 404 («params غير مُنتظر»)، تحوّل
  * المنتج غير الموجود إلى «404 ناعم» (200)، وتعارض وسمَي robots في صفحات 404 —
@@ -138,6 +149,7 @@ export function frontPageFindings({
   const pageTitle = /<title[^>]*>([^<]*)<\/title>/i.exec(productPage?.text ?? "")?.[1]?.trim() ?? "";
   const hasCanonical = /rel="canonical"/.test(productPage?.text ?? "");
   const titleOk = sampleName ? pageTitle.includes(sampleName) : pageTitle.length > 0;
+  const pageDigest = productPage?.status === 500 ? extractErrorDigest(productPage?.text) : null;
   findings.push({
     id: "15",
     label: `GET /product/${sampleId} (صفحة منتج حقيقية)`,
@@ -146,11 +158,13 @@ export function frontPageFindings({
     actual:
       productPage?.status === 404
         ? "404 — عطل «params غير مُنتظر» عاد إلى البناء المنشور (راجع npm run front:check)"
-        : `${productPage?.status} — العنوان: «${pageTitle.slice(0, 60)}»${hasCanonical ? " + canonical" : " — بلا canonical"}`,
+        : `${productPage?.status} — العنوان: «${pageTitle.slice(0, 60)}»${hasCanonical ? " + canonical" : " — بلا canonical"}` +
+          (pageDigest ? ` — رقم المرجع (digest): ${pageDigest} — قارنه بسجل Vercel لنفس الدقيقة` : ""),
   });
 
   const missingNoindex = /<meta name="robots" content="noindex"/.test(missing?.text ?? "");
   const conflictingRobots = /content="index,\s*follow"/.test(missing?.text ?? "");
+  const missingDigest = missing?.status === 500 ? extractErrorDigest(missing?.text) : null;
   findings.push({
     id: "16",
     label: "GET /product/<معرف غير موجود> (منع 404 الناعم)",
@@ -159,7 +173,8 @@ export function frontPageFindings({
     actual:
       `${missing?.status}${missing?.status === 200 ? " — «404 ناعم»: يسبّبه حدّ تحميل في جذر src/app/" : ""}` +
       `${missingNoindex ? " + noindex" : " — بلا noindex"}` +
-      `${conflictingRobots ? " + وسم robots متعارض (index, follow)" : ""}`,
+      `${conflictingRobots ? " + وسم robots متعارض (index, follow)" : ""}` +
+      (missingDigest ? ` — رقم المرجع (digest): ${missingDigest}` : ""),
   });
 
   findings.push({
@@ -289,7 +304,13 @@ async function readOnlyChecks() {
   } catch {
     productOk = false;
   }
-  record("extra-products", "GET /api/products", productOk, "200 + قائمة منتجات", `${products.status} — ${productCount} منتجًا`);
+  // عند الفشل يُلحق مقتطف آمن من الجسم (160 حرفًا بلا أسطر): جواب الخطأ الموحّد
+  // `{error, code, request_id}` بلا PII، ويميز 500-INTERNAL_ERROR (عطل إعداد —
+  // راجع متغيرات Vercel ثم Redeploy) من 503-SERVICE_UNAVAILABLE.
+  const productsSnippet = productOk
+    ? ""
+    : ` — ${products.text.slice(0, 160).replace(/\s+/g, " ").trim() || "بلا جسم"}`;
+  record("extra-products", "GET /api/products", productOk, "200 + قائمة منتجات", `${products.status} — ${productCount} منتجًا${productsSnippet}`);
 
   // قرينة ربط قاعدة البيانات — لا تُثبت الاتصال (إثباته الصفوف 7–9)، لكنها ترصد
   // الحالة الأخطر: نشر يخدم البذرة المحلية، فتظهر المنتجات ويتعذّر حفظ أي طلب
