@@ -230,6 +230,7 @@ button, input, textarea, select { font-family: inherit; font-size: 1rem; }
 .chat-quick-alt { font-size: .78rem; padding: 6px 11px; border-radius: 999px; border: 1px dashed #bfe3d3; background: #f2fbf6; color: var(--green-d); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .chat-cards { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .chat-cards-tag { font-size: .72rem; color: var(--muted); }
+.chat-agent-tag { font-size: .72rem; color: var(--muted); margin-bottom: .25rem; }
 .chat-card { display: flex; align-items: center; gap: 8px; border: 1px solid #ece7f8; border-radius: 12px; padding: 8px; background: #fdfcff; }
 .chat-card-img { width: 38px; height: 38px; border-radius: 10px; background: #f3eefe; display: grid; place-items: center; font-size: 1.2rem; flex: none; }
 .chat-card-info { flex: 1; min-width: 0; }

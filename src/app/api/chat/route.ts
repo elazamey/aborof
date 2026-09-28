@@ -6,8 +6,16 @@ import { rateLimit } from "@/lib/rate-limit";
 import { redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 import { chatRequestContract, firstZodIssue } from "@/lib/validation/contracts";
-import { getSmartAgentEngine, isMcpToolsEnabled } from "@/lib/ai";
-import type { AgentMessage } from "@/lib/ai";
+import {
+  fleetPromptSection,
+  fleetResponseMeta,
+  fleetToolAllowlist,
+  getSmartAgentEngine,
+  isAgentFleetActive,
+  isMcpToolsEnabled,
+  selectAgents,
+} from "@/lib/ai";
+import type { AgentMessage, FleetResponseMeta } from "@/lib/ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -143,18 +151,34 @@ export const POST = apiHandler("/api/chat", async (req) => {
   let source = "local";
   // بطاقات المنتجات اختيارية تمامًا: تُضاف للاستجابة فقط إن أنتجتها أداة محكومة.
   let products: unknown[] | undefined;
+  // هوية الوكيل المناوب — تُضاف فقط حين يكون الأسطول مفعّلًا فعلًا (علمان معًا).
+  let fleet: FleetResponseMeta | undefined;
 
   if (process.env.ENABLE_AI_AGENT === "true") {
     // المحرك النمطي الموحّد (المرحلة الأولى) — نفس السلسلة التراجعية
     // خلف علم الميزة؛ غياب العلم يُبقي المسار القديم المستقر كما هو حرفيًا.
+    let engineSy = sys;
+    let agentAllowlist: string[] | undefined;
+
+    // المرحلة الرابعة: أسطول الوكلاء — يرتكز على المحرك النمطي، ويُوجَّه حتميًا
+    // بلا موديل. تضييق الأدوات تقاطعٌ مع طبقة MCP لا توسيع لها، وتعطيل العلم
+    // يُبقي كل ما سبق حرفيًا كما هو.
+    if (isAgentFleetActive()) {
+      const selection = selectAgents(last);
+      engineSy = `${sys}\n\n${fleetPromptSection(selection)}`;
+      agentAllowlist = fleetToolAllowlist(selection);
+      fleet = fleetResponseMeta(selection);
+    }
+
     const agentMessages: AgentMessage[] = [
-      { role: "system", content: sys },
+      { role: "system", content: engineSy },
       ...clean.map((m) => ({ role: m.role, content: m.content })),
     ];
     // بوابة ثانية عند نقطة الاستدعاء لطبقة MCP (المرحلة الثانية)؛ الطبقة
     // تعيد الفحص داخليًا. تعطيلها يُبقي المسار نصيًا مطابقًا للمرحلة الأولى.
     const result = await getSmartAgentEngine().processRequestDetailed(agentMessages, {
       enableTools: isMcpToolsEnabled(),
+      ...(agentAllowlist ? { allowedTools: agentAllowlist } : {}),
     });
     reply = result.reply;
     source = result.provider;
@@ -192,6 +216,10 @@ export const POST = apiHandler("/api/chat", async (req) => {
   }
 
   // النجاح فقط هو ما يعيد 200؛ أي فشل غير متوقع يمر عبر الغلاف المركزي.
-  // شكل الاستجابة القديم `{ reply, source }` كما هو؛ `products` حقل إضافي فقط.
-  return NextResponse.json(products ? { reply, source, products } : { reply, source });
+  // شكل الاستجابة القديم `{ reply, source }` كما هو؛ `products` و`fleet` حقلان
+  // إضافيان يظهران فقط عند تفعيل ميزتيهما، فلا ينكسر أي عميل قديم.
+  const payload: Record<string, unknown> = { reply, source };
+  if (products) payload.products = products;
+  if (fleet) payload.fleet = fleet;
+  return NextResponse.json(payload);
 });

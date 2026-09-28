@@ -17,6 +17,8 @@ type Msg = {
   role: "user" | "assistant";
   content: string;
   products?: ProductCard[];
+  /** اسم الوكيل المناوب من أسطول الوكلاء — يظهر فقط عندما يرسله الخادم. */
+  agent?: string;
   /** رسالة فشل قابلة لإعادة الإرسال بدل الرسالة التقنية الجافة. */
   failed?: boolean;
   /** نص رسالة المستخدم التي نُعيد إرسالها عند الضغط على «إعادة المحاولة». */
@@ -106,12 +108,21 @@ export default function ChatWidget() {
         body: JSON.stringify({ messages: wire }),
       });
       if (!r.ok) throw new Error(`status ${r.status}`);
-      const j = (await r.json()) as { reply?: string; products?: ProductCard[] };
+      const j = (await r.json()) as {
+        reply?: string;
+        products?: ProductCard[];
+        fleet?: { primary?: { name?: string } };
+      };
       const reply = (j.reply ?? "").trim();
       if (!reply) throw new Error("empty reply");
       setMsgs((m) => [
         ...m,
-        { role: "assistant", content: reply, products: j.products?.length ? j.products : undefined },
+        {
+          role: "assistant",
+          content: reply,
+          products: j.products?.length ? j.products : undefined,
+          agent: j.fleet?.primary?.name || undefined,
+        },
       ]);
     } catch {
       setMsgs((m) => [...m, { role: "assistant", content: FRIENDLY_ERROR, failed: true, retryText: content }]);
@@ -196,6 +207,7 @@ export default function ChatWidget() {
           <div className="chat-body">
             {msgs.map((m, i) => (
               <div key={i} className={"bubble " + (m.role === "user" ? "me" : "bot") + (m.failed ? " bot-error" : "")}>
+                {m.agent && <div className="chat-agent-tag">🤖 {m.agent}</div>}
                 <span className="bubble-text">{m.content}</span>
 
                 {m.products && (
