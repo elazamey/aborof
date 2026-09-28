@@ -14,6 +14,8 @@ const KEYS = [
   "DIAGNOSTICS_KEY",
   "DIAGNOSTICS_ENABLED",
   "NODE_ENV",
+  "TURSO_DATABASE_URL",
+  "TURSO_AUTH_TOKEN",
 ];
 
 function resetEnv() {
@@ -71,6 +73,8 @@ describe("secrets separation", () => {
     process.env.ADMIN_PASSWORD = "a-strong-admin-password-123";
     process.env.DIAGNOSTICS_ENABLED = "true";
     process.env.DIAGNOSTICS_KEY = "diag-key-".padEnd(36, "d");
+    process.env.TURSO_DATABASE_URL = "libsql://my-db-my-org.turso.io";
+    process.env.TURSO_AUTH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     const warnings = auditSecretConfiguration();
     assert.deepEqual(warnings, []);
   });

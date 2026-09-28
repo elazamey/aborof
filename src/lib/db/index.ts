@@ -8,17 +8,153 @@ let _client: Client | null = null;
 let _ready: Promise<void> | null = null;
 let _clientOverride: Client | null = null;
 
+/**
+ * تحقق Turso حسب توثيق https://docs.turso.tech/sdk/authentication
+ * - رابط الاتصال: `libsql://[DB-NAME]-[ORG-NAME].turso.io` أو `turso://` أو `https://`
+ * - رمز المصادقة: JWT يبدأ بـ `eyJ` بثلاثة مقاطع — ينشأ عبر `turso db tokens create <db>`
+ * - الأخطاء الشائعة المكتشفة في الإنتاج (انظر handoff/turso-probe-report.md):
+ *   TURSO_DATABASE_URL = صفحة لوحة تحكم `app.turso.tech/...` بدل رابط الاتصال
+ *   TURSO_AUTH_TOKEN = رابط `libsql://` بدل JWT (الخادم يرد `JWT error: Base64 error: Invalid symbol 58, offset 6`)
+ */
+
+function isDashboardUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return lower.includes("app.turso.tech") || lower.includes("www.turso.tech") || /^https?:\/\/turso\.tech(\/|$)/.test(lower);
+}
+
+function extractHost(url: string): string | null {
+  const normalized = url
+    .replace(/^libsql:\/\//i, "https://")
+    .replace(/^turso:\/\//i, "https://")
+    .replace(/^wss:\/\//i, "https://")
+    .replace(/^ws:\/\//i, "http://");
+  try {
+    return new URL(normalized).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isLocalFileUrl(url: string): boolean {
+  const t = url.trim();
+  return t.startsWith("file:") || t === ":memory:" || t.startsWith(":memory:") || t.startsWith("file::memory:");
+}
+
+export function isValidTursoConnectionUrl(url: string | undefined | null): boolean {
+  if (!url) return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (isLocalFileUrl(trimmed)) return true;
+  // قيمة موضعية لم تُستبدل من .env.example
+  if (/[<>]/.test(trimmed) || /\bYOUR_DB\b/i.test(trimmed) || /your-db-name/i.test(trimmed) || /\bxx+\b/i.test(trimmed)) return false;
+  if (isDashboardUrl(trimmed)) return false;
+  if (!/^(libsql|turso|https|wss|ws):\/\//i.test(trimmed)) return false;
+  const host = extractHost(trimmed);
+  if (!host) return false;
+  // لوحة التحكم ليست رابط اتصال
+  if (host === "app.turso.tech" || host === "www.turso.tech" || host === "turso.tech") return false;
+  return true;
+}
+
+export function isJwtFormat(token: string | undefined | null): boolean {
+  if (!token) return false;
+  return /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/.test(token.trim());
+}
+
+export function isUrlInTokenField(token: string | undefined | null): boolean {
+  if (!token) return false;
+  return token.includes("://");
+}
+
+export interface TursoConfigDiagnosis {
+  urlPresent: boolean;
+  urlValid: boolean;
+  urlIsDashboard: boolean;
+  urlHost: string | null;
+  tokenPresent: boolean;
+  tokenIsUrl: boolean;
+  tokenIsJwt: boolean;
+  overallValid: boolean;
+}
+
+export function diagnoseTursoConfig(
+  url = process.env.TURSO_DATABASE_URL,
+  token = process.env.TURSO_AUTH_TOKEN
+): TursoConfigDiagnosis {
+  const urlPresent = Boolean(url && url.trim());
+  const urlIsDashboard = urlPresent ? isDashboardUrl(url!) : false;
+  const urlValid = isValidTursoConnectionUrl(url);
+  const urlHost = urlPresent ? extractHost(url!) : null;
+  const tokenPresent = Boolean(token && token.trim());
+  const tokenIsUrl = isUrlInTokenField(token);
+  const tokenIsJwt = isJwtFormat(token);
+  const isLocal = url ? isLocalFileUrl(url) : false;
+  const overallValid = isLocal ? urlValid : urlValid && !urlIsDashboard && tokenPresent && !tokenIsUrl && tokenIsJwt;
+  return {
+    urlPresent,
+    urlValid: isLocal ? true : urlValid,
+    urlIsDashboard,
+    urlHost,
+    tokenPresent: isLocal ? true : tokenPresent,
+    tokenIsUrl,
+    tokenIsJwt: isLocal ? true : tokenIsJwt,
+    overallValid: isLocal ? urlValid : overallValid,
+  };
+}
+
 export function hasDB() {
-  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL);
+  if (_clientOverride) return true;
+  const url = process.env.TURSO_DATABASE_URL;
+  if (url && isLocalFileUrl(url)) return true;
+  const diag = diagnoseTursoConfig();
+  return diag.urlPresent && diag.urlValid && !diag.urlIsDashboard;
 }
 
 export function db(): Client | null {
   if (_clientOverride) return _clientOverride;
-  if (!hasDB()) return null;
+  const rawUrl = process.env.TURSO_DATABASE_URL;
+  const rawToken = process.env.TURSO_AUTH_TOKEN;
+
+  if (!rawUrl) return null;
+
+  // كشف الأخطاء الشائعة قبل إنشاء العميل — مع رسائل واضحة بلا كشف أسرار
+  if (isDashboardUrl(rawUrl)) {
+    console.error(
+      `db: TURSO_DATABASE_URL يحمل رابط لوحة تحكم (${redactSecrets(
+        extractHost(rawUrl) ?? "app.turso.tech"
+      )}) وليس رابط اتصال. انسخ الرابط من زر Connect في اللوحة: libsql://[DB]-[ORG].turso.io — انظر https://docs.turso.tech/sdk/authentication`
+    );
+    return null;
+  }
+
+  if (!isValidTursoConnectionUrl(rawUrl)) {
+    // لا نطبع القيمة، فقط الشكل
+    console.error(
+      `db: TURSO_DATABASE_URL غير صالح — يجب أن يبدأ بـ libsql:// أو turso:// أو https:// وينتهي بـ .turso.io. تحقق من https://docs.turso.tech/sdk/authentication`
+    );
+    return null;
+  }
+
+  if (rawToken && isUrlInTokenField(rawToken)) {
+    console.error(
+      `db: TURSO_AUTH_TOKEN يحمل رابط اتصال (يبدأ بـ ${redactSecrets(
+        rawToken.split("://")[0]
+      )}://) بدل رمز JWT. السبب الجذري الذي رصده الخادم: JWT error: Base64 error: Invalid symbol 58 (النقطتان : في libsql://). انقل الرابط إلى TURSO_DATABASE_URL والرمز eyJ... إلى TURSO_AUTH_TOKEN — انظر https://docs.turso.tech/sdk/authorization`
+    );
+    return null;
+  }
+
+  if (rawToken && !isJwtFormat(rawToken) && !isLocalFileUrl(rawUrl)) {
+    console.error(
+      `db: TURSO_AUTH_TOKEN لا يبدو JWT (يجب أن يبدأ بـ eyJ بثلاثة مقاطع). أنشئ رمزًا جديدًا عبر: turso db tokens create <db> --expiration never — انظر https://docs.turso.tech/sdk/authorization`
+    );
+    // نسمح بالمحاولة لكن مع التحذير — قد يكون رمز مستقبلي بصيغة أخرى
+  }
+
   if (!_client) {
     _client = createClient({
-      url: process.env.TURSO_DATABASE_URL as string,
-      authToken: process.env.TURSO_AUTH_TOKEN,
+      url: rawUrl as string,
+      authToken: rawToken,
     });
   }
   return _client;

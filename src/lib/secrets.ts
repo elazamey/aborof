@@ -20,7 +20,13 @@ export interface SecretWarning {
     | "ADMIN_PASSWORD_WEAK"
     | "DIAGNOSTICS_KEY_MISSING"
     | "DIAGNOSTICS_ENABLED_WITHOUT_KEY"
-    | "DIAGNOSTICS_SHARED_WITH_SESSION";
+    | "DIAGNOSTICS_SHARED_WITH_SESSION"
+    | "TURSO_URL_MISSING"
+    | "TURSO_URL_DASHBOARD"
+    | "TURSO_URL_INVALID"
+    | "TURSO_TOKEN_MISSING"
+    | "TURSO_TOKEN_IS_URL"
+    | "TURSO_TOKEN_INVALID";
   message: string;
 }
 
@@ -75,9 +81,24 @@ export function sessionSecretConfigured(): boolean {
   return Boolean(v && v.length >= MIN_SECRET_LENGTH);
 }
 
+function isDashboardUrlLoose(url: string): boolean {
+  const lower = url.toLowerCase();
+  return lower.includes("app.turso.tech") || lower.includes("www.turso.tech");
+}
+
+function isLocalUrlLoose(url: string): boolean {
+  const t = url.trim();
+  return t.startsWith("file:") || t === ":memory:" || t.startsWith(":memory:") || t.startsWith("file::memory:");
+}
+
+function looksLikeJwt(token: string): boolean {
+  return /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/.test(token.trim());
+}
+
 /**
  * فحص تهيئة الأسرار دون كشف أي قيمة — يُستخدم في بداية التشغيل وفي التشخيص.
  * التحذيرات تُسجَّل محليًا فقط ولا تتضمن القيم.
+ * يتضمن الآن فحص Turso حسب توثيق https://docs.turso.tech/sdk/authentication
  */
 export function auditSecretConfiguration(): SecretWarning[] {
   const warnings: SecretWarning[] = [];
@@ -85,6 +106,8 @@ export function auditSecretConfiguration(): SecretWarning[] {
   const adminPassword = process.env.ADMIN_PASSWORD;
   const diagnosticsKey = process.env.DIAGNOSTICS_KEY;
   const diagnosticsEnabled = process.env.DIAGNOSTICS_ENABLED === "true";
+  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
   if (!sessionSecret) warnings.push({ code: "SESSION_SECRET_MISSING", message: "ADMIN_SESSION_SECRET غير معين." });
   else if (sessionSecret.length < MIN_SECRET_LENGTH)
@@ -103,5 +126,40 @@ export function auditSecretConfiguration(): SecretWarning[] {
     else if (sessionSecret && diagnosticsKey === sessionSecret)
       warnings.push({ code: "DIAGNOSTICS_SHARED_WITH_SESSION", message: "DIAGNOSTICS_KEY يساوي ADMIN_SESSION_SECRET — افصل بين المفتاحين." });
   }
+
+  // فحص Turso — لا يمنع التشغيل لكنه يوضح سبب عمل الموقع من البذرة المحلية
+  if (!tursoUrl) {
+    warnings.push({
+      code: "TURSO_URL_MISSING",
+      message: "TURSO_DATABASE_URL غير معين — الموقع يعمل من البذرة المحلية ويفشل إنشاء الطلبات بـ 503.",
+    });
+  } else if (isDashboardUrlLoose(tursoUrl)) {
+    warnings.push({
+      code: "TURSO_URL_DASHBOARD",
+      message: "TURSO_DATABASE_URL يحمل رابط لوحة تحكم (app.turso.tech) وليس رابط اتصال libsql://[DB]-[ORG].turso.io — انسخه من زر Connect.",
+    });
+  } else if (!isLocalUrlLoose(tursoUrl) && !/^(libsql|turso|https|wss|ws):\/\//i.test(tursoUrl)) {
+    warnings.push({
+      code: "TURSO_URL_INVALID",
+      message: "TURSO_DATABASE_URL يجب أن يبدأ بـ libsql:// أو turso:// أو https:// حسب https://docs.turso.tech/sdk/authentication",
+    });
+  }
+
+  if (tursoUrl && !isLocalUrlLoose(tursoUrl)) {
+    if (!tursoToken) {
+      warnings.push({ code: "TURSO_TOKEN_MISSING", message: "TURSO_AUTH_TOKEN غير معين — مطلوب مع أي رابط غير محلي." });
+    } else if (tursoToken.includes("://")) {
+      warnings.push({
+        code: "TURSO_TOKEN_IS_URL",
+        message: "TURSO_AUTH_TOKEN يحمل رابط اتصال (libsql://) بدل رمز JWT — انقل الرابط إلى TURSO_DATABASE_URL والرمز eyJ... إلى TURSO_AUTH_TOKEN.",
+      });
+    } else if (!looksLikeJwt(tursoToken)) {
+      warnings.push({
+        code: "TURSO_TOKEN_INVALID",
+        message: "TURSO_AUTH_TOKEN لا يبدو JWT (يجب أن يبدأ بـ eyJ). أنشئ رمزًا عبر turso db tokens create <db> --expiration never",
+      });
+    }
+  }
+
   return warnings;
 }
