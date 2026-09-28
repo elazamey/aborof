@@ -10,14 +10,29 @@
  * الفحص **للقراءة فقط**: لا ينفّذ أي هجرة ولا أي كتابة. أي ❌ يعني تهيئة ناقصة
  * على البيئة الحيّة، وليس خللًا في قاعدة البيانات نفسها.
  *
+ * علم اختياري (يستخدمه CI فقط، والترميم مُعلَن في التقرير نفسه):
+ *   --allow-dashboard-url   إذا كانت القيمة رابط لوحة تحكم (`app.turso.tech`)
+ *                           لا رابط اتصال، تُشتق `<db>-<org>.turso.io` وتُجرَّب
+ *                           فعلًا قبل استخدامها — بدل إسقاط كل الصفوف التابعة.
+ *
  * كود الخروج: 0 = كل الفحوص خضراء، 1 = فشل حاجب، 2 = تهيئة الفحص ناقصة.
  */
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
+import {
+  dashboardUrlToConnectionCandidates,
+  describeDatabaseUrl,
+  interpretProbeStatus,
+  originForHttpProbe,
+  parseAuthValue,
+} from "./lib/db-url.mjs";
 
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 const asJson = process.argv.includes("--json");
+// ترميم الإعدادات (رابط لوحة تحكم بدل رابط اتصال، أو رابط في حقل الرمز) — بعلم صريح.
+const allowDashboardUrl =
+  process.argv.includes("--allow-dashboard-url") || process.argv.includes("--allow-secret-repair");
 
 if (!url) {
   console.error(
@@ -33,6 +48,7 @@ if (!url) {
 
 const secrets = [url, authToken];
 const local = url.startsWith("file:");
+let effectiveUrl = url;
 if (!local && !authToken) {
   console.error("❌ TURSO_AUTH_TOKEN مطلوب لأي رابط غير محلي (libsql:// أو https://).");
   process.exit(2);
@@ -43,16 +59,197 @@ function record(id, label, ok, detail) {
   rows.push({ id, label, ok, detail });
 }
 
-const db = createClient({ url, authToken });
+/** تصنيف خطأ محاولة اتصال — تصنيف فقط، بلا طباعة قيمة الرابط ولا الرمز. */
+function classifyConnectionError(error) {
+  const text = String(error?.message ?? error);
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|fetch failed|dns/i.test(text)) return "المضيف غير موجود (DNS)";
+  if (/\b40[13]\b|unauthor|forbidden|token|auth/i.test(text)) return "الرمز مرفوض أو غير كافٍ";
+  if (/\b404\b|not found/i.test(text)) return "المضيف موجود ولا قاعدة بهذا الاسم";
+  return "خطأ اتصال آخر";
+}
+
+/**
+ * ترميم محدود ومعلن: إذا كانت القيمة المضبوطة رابط لوحة تحكم لا رابط اتصال،
+ * نجرّب الروابط المرشّحة واحدة واحدة (اتصال `SELECT 1` فعلي) ونعيد أول عميل
+ * ينجح. لا تُطبع أي قيمة مشتقة؛ التقرير يذكر النمط وتصنيف الفشل فقط.
+ */
+/**
+ * نداء HTTP خام (نقطة hrana `POST /v2/pipeline`) بطلب `SELECT 1` — الأخطر أن
+ * الفرق بين 404 و401 هو الفرق بين «أنشئ القاعدة» و«جدّد الرمز»، وهما علاجان
+ * مختلفان تمامًا يخفي `@libsql/client` كليهما وراء رسالة SERVER_ERROR واحدة.
+ * لا يُطبع الرد؛ فقط رمز الحالة والحكم المُترجَم منه.
+ */
+/**
+ * وصف آمن لبنية الرابط عند فشل الاتصال — بلا قيمة الرابط وبلا رمزه.
+ * (نص خطأ @libsql/client نفسه، مثل `Unexpected token '<'`، يقول إن المضيف رد
+ * HTML لا JSON؛ وهذا عرض مختلف تمامًا عن «رمز غير صالح» أو «شبكة محجوبة».)
+ */
+async function diagnoseEndpoint() {
+  const shape = describeDatabaseUrl(url);
+  const parts = [
+    `بنية الرابط: ${shape.scheme} · ${shape.kind} · المضيف ${shape.hostMasked} (طول ${shape.hostLength}) · مقاطع المسار ${shape.pathShape} · طول الرابط ${shape.length}` +
+      (shape.hasPlaceholder ? " · يحتوي علامة موضع (<…> أو ... أو xx) فهو قيمة موضعية لا رابط حقيقي" : ""),
+  ];
+  const origin = originForHttpProbe(url);
+  if (!origin) return parts;
+  const guard = [...secrets, origin];
+  try {
+    const res = await fetch(origin, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(8_000) });
+    const body = redact(String(await res.text()).slice(0, 160).replace(/\s+/g, " ").trim(), guard);
+    parts.push(`استجابة أصل الرابط: HTTP ${res.status} · content-type: ${res.headers.get("content-type") ?? "—"} · body: ${body || "—"}`);
+  } catch (e) {
+    parts.push(`تعذّر الوصول إلى أصل الرابط: ${redact(String(e?.message ?? e), guard)}`);
+  }
+  return parts;
+}
+
+async function probeHttpEndpoint(candidateUrl, token) {
+  const origin = originForHttpProbe(candidateUrl);
+  if (!origin) return { ok: false, verdict: "رابط غير قابل للفحص عبر HTTP" };
+  try {
+    const res = await fetch(`${origin}/v2/pipeline`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        requests: [{ type: "execute", stmt: { sql: "SELECT 1 AS ok" } }, { type: "close" }],
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const body = await res.text().catch(() => "");
+    return interpretProbeStatus(res.status, redact(body, [...secrets, candidateUrl]));
+  } catch (error) {
+    return { ok: false, verdict: redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidateUrl]) };
+  }
+}
+
+async function attemptDerivedConnection() {
+  const authParts = parseAuthValue(authToken);
+
+  // أزواج (رابط، رمز) مرتّبة من الأرجح إلى الأقل: الزوج المتسق المستخرج من قيمة
+  // حقل الرمز أولًا (فهو خطأ اللصق الأكثر شيوعًا)، ثم اشتقاق مسار اللوحة مع كل رمز.
+  const pairs = [];
+  const add = (candidateUrl, token, label) => {
+    if (!candidateUrl) return;
+    const key = `${candidateUrl}\u0000${token ?? ""}`;
+    if (pairs.some((p) => p.key === key)) return;
+    pairs.push({ key, candidateUrl, token, label });
+  };
+  if (authParts.url && authParts.token) add(authParts.url, authParts.token, "زوج مستخرج من قيمة حقل الرمز");
+  for (const candidateUrl of dashboardUrlToConnectionCandidates(url)) {
+    if (authParts.token) add(candidateUrl, authParts.token, "رابط مشتق من مسار اللوحة + رمز مستخرج من حقل الرمز");
+    add(candidateUrl, authToken, "رابط مشتق من مسار اللوحة + الرمز المضبوط");
+  }
+  if (authParts.url) add(authParts.url, authToken, "رابط مستخرج من حقل الرمز + الرمز المضبوط");
+
+  if (pairs.length === 0) {
+    return { client: null, note: "لا يمكن اشتقاق رابط اتصال من هذه القيمة (بنية مسار غير معروفة) — انسخ الرابط من زر Connect في لوحة Turso" };
+  }
+
+  const failures = [];
+  for (const pair of pairs) {
+    // 1) الفحص الخام أولًا ليُعرف السبب (لا قاعدة / رمز) لا مجرد «فشل اتصال».
+    const verdict = await probeHttpEndpoint(pair.candidateUrl, pair.token);
+    if (!verdict.ok) {
+      failures.push(`${pair.label}: ${verdict.verdict}`);
+      continue;
+    }
+    // 2) ثم المسار الحقيقي: نفس عميل التطبيق على نفس الزوج.
+    const client = createClient({ url: pair.candidateUrl, authToken: pair.token });
+    try {
+      await client.execute("SELECT 1 AS ok");
+      return { client, candidateUrl: pair.candidateUrl, token: pair.token, label: pair.label, note: "" };
+    } catch (error) {
+      const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, pair.candidateUrl, pair.token]);
+      failures.push(`${pair.label}: المسار الخام نجح وعميل libsql فشل — ${raw}`);
+      client.close();
+    }
+  }
+  return {
+    client: null,
+    note: `جُرّبت ${pairs.length} تركيبة على نمط <db>-<org>.turso.io: ${failures.map((f, i) => `${i + 1}) ${f}`).join(" · ")}`,
+  };
+}
+
+/** يطبع الجدول (أو JSON) مرة واحدة — يستدعيه المسار العادي ومسار فشل الاتصال. */
+function render() {
+  const failed = rows.filter((r) => !r.ok);
+  if (asJson) {
+    console.log(JSON.stringify({ ok: failed.length === 0, local, rows }, null, 2));
+    return;
+  }
+  console.log(`# فحص Turso — ${local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}\n`);
+  console.log("| # | الفحص | النتيجة | التفصيل |");
+  console.log("|---|---|---|---|");
+  for (const row of rows) {
+    console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${row.detail.replace(/\|/g, "\\|")} |`);
+  }
+  console.log(
+    failed.length === 0
+      ? "\n✅ كل الفحوص خضراء: الاتصال يعمل، والهجرات متطابقة، وفهرس FTS5 متزامن مع الكتالوج."
+      : `\n❌ فشل ${failed.length} فحصًا — راجع DEPLOYMENT.md (الصفوف 7–9 وإصلاح P0) قبل إعلان الجاهزية.`
+  );
+  if (!local) {
+    console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. التطبيق نفسه يشغّل الهجرات عند أول طلب (`ensureSchema`).");
+  }
+}
+
+let db = createClient({ url, authToken });
 
 try {
   // 1) الاتصال — نفس مسار @libsql/client المستخدم في الإنتاج.
+  let connected = false;
   try {
     await db.execute("SELECT 1 AS ok");
-    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : "libsql متصل");
+    connected = true;
+    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : `libsql متصل (${describeDatabaseUrl(effectiveUrl).kind})`);
   } catch (error) {
-    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, redact(String(error?.message ?? error), secrets));
-    throw error; // لا معنى لباقي الفحوص بلا اتصال.
+    // الفشل هنا يوقف الفحوص التابعة (لا معنى لها بلا اتصال) لكنه **لا يمنع
+    // طباعة الجدول**: الجدول نفسه هو الدليل، فيُضاف إليه وصف بنية الرابط
+    // واستجابة أصله. لا يُطبع الرابط ولا الرمز — الوصف كله عبر `redact`.
+    const details = await diagnoseEndpoint();
+
+    // ترميم مُعلَن (بعلم صريح): قيمة لوحة تحكم بدل رابط اتصال.
+    if (allowDashboardUrl) {
+      const derived = await attemptDerivedConnection();
+      const authParts = parseAuthValue(authToken);
+      if (!authParts.shape.looksLikeJwt) {
+        record(
+          "conn-token-shape",
+          "صيغة قيمة TURSO_AUTH_TOKEN",
+          false,
+          authParts.shape.scheme
+            ? `ليست رمز JWT بل قيمة تبدأ بـ ${authParts.shape.scheme}:// (النقطتان في الموضع ${authParts.shape.colonOffset} من ${authParts.shape.length} حرفًا) — رابط في حقل الرمز · **انقل الرابط إلى TURSO_DATABASE_URL ورمز JWT إلى TURSO_AUTH_TOKEN**`
+            : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا Full access**`
+        );
+      }
+      if (derived.client) {
+        db.close();
+        db = derived.client;
+        effectiveUrl = derived.candidateUrl;
+        secrets.push(derived.candidateUrl, derived.token);
+        connected = true;
+        record(
+          "conn",
+          "الاتصال بقاعدة البيانات (SELECT 1)",
+          true,
+          `متصل عبر ترميم مؤقت (${derived.label}) ⇒ القاعدة والرمز **سليمان**؛ المشكلة في مكان القيم لا في القاعدة · **صحّح TURSO_DATABASE_URL/TURSO_AUTH_TOKEN في الإعدادات لإزالة الترميم**`
+        );
+      } else {
+        record("conn-derived", "اشتقاق رابط الاتصال من قيمة لوحة التحكم", false, derived.note);
+      }
+    }
+
+    if (!connected) {
+      record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "));
+    }
+  }
+
+  if (!connected) {
+    render();
+    process.exit(1);
   }
 
   // 2) جدول الهجرات نفسه.
@@ -137,28 +334,8 @@ try {
   const missingEssentials = essentials.filter((t) => !names.includes(t));
   record("tables", "الجداول الأساسية للمتجر", missingEssentials.length === 0, missingEssentials.length ? `ناقصة: ${missingEssentials.join(", ")}` : `${essentials.length} جدولًا حاضرًا`);
 
-  const failed = rows.filter((r) => !r.ok);
-
-  if (asJson) {
-    console.log(JSON.stringify({ ok: failed.length === 0, local, rows }, null, 2));
-  } else {
-    console.log(`# فحص Turso — ${local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}\n`);
-    console.log("| # | الفحص | النتيجة | التفصيل |");
-    console.log("|---|---|---|---|");
-    for (const row of rows) {
-      console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${row.detail.replace(/\|/g, "\\|")} |`);
-    }
-    console.log(
-      failed.length === 0
-        ? "\n✅ كل الفحوص خضراء: الاتصال يعمل، والهجرات متطابقة، وفهرس FTS5 متزامن مع الكتالوج."
-        : `\n❌ فشل ${failed.length} فحصًا — راجع DEPLOYMENT.md (الصفوف 7–9 وإصلاح P0) قبل إعلان الجاهزية.`
-    );
-    if (!local) {
-      console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. التطبيق نفسه يشغّل الهجرات عند أول طلب (`ensureSchema`).");
-    }
-  }
-
-  process.exit(failed.length === 0 ? 0 : 1);
+  render();
+  process.exit(rows.filter((r) => !r.ok).length === 0 ? 0 : 1);
 } catch (error) {
   if (!asJson) console.error(`❌ توقف الفحص: ${redact(String(error?.message ?? error), secrets)}`);
   process.exit(1);

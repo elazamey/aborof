@@ -94,7 +94,7 @@
 | 6 | `GET /api/admin/mcp/tools` | `404` بدون `ENABLE_MCP_TOOLS`، و`401` بدونه مع التفعيل | 404 = الطبقة مغلقة (السلوك الافتراضي)؛ 401 = الطبقة مفتوحة فعليًا وجلسة الإدارة مطلوبة |
 | 7 | على قاعدة Turso: `SELECT COUNT(*) FROM order_items;` | استعلام ناجح بلا خطأ «no such table» | إصلاح P0 لم يُفعَّل (راجع «إصلاح قاعدة البيانات P0» في نهاية الملف) |
 | 8 | على قاعدة Turso: `SELECT name FROM sqlite_master WHERE type='table' AND name='product_search';` | يظهر الصف `product_search` | هجرة `0002` (FTS5) لم تُطبَّق على البيئة الحيّة |
-| 9 | على قاعدة Turso: `SELECT COUNT(*) FROM product_search;` | يساوي `SELECT COUNT(*) FROM products;` | الفهرس غير متزامن مع الكتالوج؛ أعد نشرًا لتشغيل مزامنة التجهيز |
+| 9 | على قاعدة Turso: `SELECT COUNT(*) FROM product_search;` | يساوي `SELECT COUNT(*) FROM products;` | الفهرس غير متزامن مع الكتالوج؛ يكفي أول عملية/طلب بعد التجهيز لأن المزامنة في نهاية `runMigrations` (وأعد النشر إن بقيت الفجوة) |
 | 10 | `POST /api/orders` بطلي مستخدِم تجريبي | `200 {ok:true,...}` وخفض المخزون وظهور `order_items` | فشل كتابة الطلب: راجع الربط `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` |
 | 11 | `POST /api/orders` ثانية بعد الخطوة 10 | `200` بلا أخطاء تكرار معرف أو فقدان أصناف | مشكلة في المعاملة المركّبة (خصم + طلب + أصناف) |
 | 12 | `POST /api/chat` بسؤال «منظف أرضيات» مع تفعيل `ENABLE_AI_AGENT` و`ENABLE_MCP_TOOLS` | رد يحمل بطاقات منتجات مطابقة | FTS5 أو طبقة الأدوات عاطلة؛ راجع سجل النشر |
@@ -147,6 +147,7 @@ npm run front:check     # 22 فحصًا: الحدود الأربعة، ميتا�
 | الأمر | ما يفحصه | ملاحظة |
 |---|---|---|
 | `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
+| `bash scripts/apply-turso-secrets.sh` | يضبط `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` في المكانين معًا (GitHub بيئة `production` + Vercel Production) بعد تحقق شكلي: يرفض رابط لوحة التحكم ويرفض رابطًا في حقل الرمز | القيم من متغيرات البيئة أو مدخل مخفي، **ولا تُطبع أبدًا** وتُمرَّر عبر `stdin`؛ `--dry-run` يعرض ما سيُفعل بلا تنفيذ |
 | `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
 | `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 و**15 و16 و16b و17** (صفحة منتج حقيقية، منع 404 الناعم، مسار غير موجود، ملفات robots/sitemap/manifest/icon) + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--chat-probe` للصف 12، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط (لا يعمل على localhost عن قصد) |
 | `npm run security:bundle` | فحص ما ينزّله المتصفح فعلاً (`.next/static`): أسماء وقيم أسرار الخادم | يُشغَّل آليًا بعد `npm run build` في `quality.yml` و`deploy.yml` |

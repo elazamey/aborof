@@ -1,13 +1,20 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createClient, type Client } from "@libsql/client";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runMigrations, MIGRATIONS } from "../src/lib/db/migrate";
 import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/migration-checksums.mjs";
+import {
+  dashboardUrlToConnectionCandidates,
+  describeDatabaseUrl,
+  interpretProbeStatus,
+  originForHttpProbe,
+  parseAuthValue,
+} from "../scripts/lib/db-url.mjs";
 import {
   isSafeBaseUrl,
   classifySecurityHeaders,
@@ -63,6 +70,143 @@ describe("scripts/lib/migration-checksums", () => {
     const secret = "super-secret-token-value";
     assert.equal(redact(`فشل الاتصال بـ ${secret}`, [secret]), "فشل الاتصال بـ ***");
     assert.equal(redact("نص بلا أسرار", [secret]), "نص بلا أسرار");
+  });
+});
+
+describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كشف قيمته", () => {
+  test("يميّز نطاق Turso من نطاق تطبيق (الأخير يرد HTML فيظهر «Unexpected token '<'»)", () => {
+    assert.equal(describeDatabaseUrl("libsql://store-abc.turso.io").kind, "Turso");
+    assert.equal(describeDatabaseUrl("https://aborof.vercel.app").kind, "نطاق خارج Turso");
+  });
+
+  test("يرصد القيمة الموضعية من التوثيق ولا يعدّها رابطًا حقيقيًا", () => {
+    const placeholder = describeDatabaseUrl("libsql://<db>.turso.io");
+    assert.equal(placeholder.hasPlaceholder, true);
+    assert.equal(placeholder.kind, "قيمة موضعية غير مستبدلة");
+    assert.equal(describeDatabaseUrl("libsql://store-abc.turso.io").hasPlaceholder, false);
+  });
+
+  test("أصل الفحص يجرّد المسار والاستعلام — رمز مدسوس في الرابط لا يظهر في أي سجل", () => {
+    assert.equal(originForHttpProbe("libsql://store-abc.turso.io?authToken=SECRET-123"), "https://store-abc.turso.io");
+    assert.equal(originForHttpProbe("wss://store-abc.turso.io/v2"), "https://store-abc.turso.io");
+    assert.equal(originForHttpProbe("file:/tmp/local.db"), null);
+  });
+
+  test("اشتقاق رابط الاتصال من رابط لوحة التحكم (libsql://<db>-<org>.turso.io)", () => {
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/databases/aborof"), [
+      "libsql://aborof-elazamey.turso.io",
+      "libsql://elazamey-aborof.turso.io",
+    ]);
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/db/store"), [
+      "libsql://store-elazamey.turso.io",
+      "libsql://elazamey-store.turso.io",
+    ]);
+  });
+
+  test("الاشتقاق لا يعمل إلا على نطاق اللوحة — رابط اتصال سليم أو نطاق آخر لا يُمس", () => {
+    assert.deepEqual(dashboardUrlToConnectionCandidates("libsql://aborof-elazamey.turso.io"), []);
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://aborof.vercel.app/elazamey/databases/aborof"), []);
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/databases"), []);
+  });
+
+  test("قيمة حقل الرمز: JWT سليم، أم رابط اتصال لُصق في مكان الرمز (خطأ اللصق الشائع)", () => {
+    const pasted = parseAuthValue("libsql://aborof-elazamey.turso.io?authToken=eyJhbGciOiJIUzI1NiJ9.abc.def");
+    assert.equal(pasted.shape.scheme, "libsql");
+    assert.equal(pasted.shape.colonOffset, 6); // 58 = ':' ⇒ نفس ما يشرح رسالة الخادم
+    assert.equal(pasted.url, "libsql://aborof-elazamey.turso.io");
+    assert.equal(pasted.token, "eyJhbGciOiJIUzI1NiJ9.abc.def");
+
+    const jwt = parseAuthValue("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.sig");
+    assert.equal(jwt.shape.looksLikeJwt, true);
+    assert.equal(jwt.token, jwt.shape.looksLikeJwt ? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.sig" : null);
+
+    const bare = parseAuthValue("libsql://aborof-elazamey.turso.io");
+    assert.equal(bare.url, "libsql://aborof-elazamey.turso.io");
+    assert.equal(bare.token, null);
+  });
+
+  test("ترجمة رمز الحالة تفصل بين «لا قاعدة» و«رمز مرفوض» — وهما علاجان مختلفان", () => {
+    assert.equal(interpretProbeStatus(200).ok, true);
+    assert.match(interpretProbeStatus(401).verdict, /الرمز مرفوض/);
+    assert.match(interpretProbeStatus(403).verdict, /الرمز مرفوض/);
+    assert.match(interpretProbeStatus(404).verdict, /لا قاعدة بهذا الاسم/);
+    assert.match(interpretProbeStatus(400, "<html>").verdict, /صيغة الرابط/);
+    assert.match(interpretProbeStatus(500).verdict, /استجابة غير متوقعة/);
+  });
+
+  test("التشخيص يذكر طول المضيف وشكل المقاطع بالأطوال فقط — لا أسماء ولا قيم", () => {
+    const shape = describeDatabaseUrl("https://app.turso.tech/elazamey/databases/aborof");
+    assert.equal(shape.hostLength, 14);
+    assert.equal(shape.pathShape, "8/9/6");
+    assert.ok(!JSON.stringify(shape).includes("elazamey"));
+  });
+
+  test("المضيف يُقنَّع: لا يُطبع كاملًا مع أن آخره يكفي للتعرّف", () => {
+    const masked = describeDatabaseUrl("libsql://store-abc.turso.io").hostMasked;
+    assert.ok(!masked.includes("store-abc"));
+    assert.ok(masked.startsWith("sto"));
+    assert.ok(masked.endsWith("turso.io"));
+  });
+});
+
+describe("scripts/verify-turso — مسار فشل الاتصال", () => {
+  test("يطبع الجدول ولا يسقط بخطأ مرجعي، ويرصد رابطًا لُصق في حقل الرمز", () => {
+    // هذا الاختبار يغطي بالضبط ما لا يُكتشف محليًا: فرع فشل الاتصال على قاعدة
+    // غير محلية. بلا تغطية، دالة مساعدة غير معرّفة فيه تمر في CI كـ«توقف الفحص».
+    const env = {
+      ...process.env,
+      TURSO_DATABASE_URL: "libsql://example-db-example.turso.io",
+      TURSO_AUTH_TOKEN: "libsql://example-db-example.turso.io?authToken=eyJhbGciOiJIUzI1NiJ9.a.b",
+    };
+    const res = spawnSync("node", ["scripts/verify-turso.mjs", "--allow-secret-repair"], { encoding: "utf8", env });
+    assert.equal(res.status, 1, "صفوف حمراء تعني 1؛ أما خطأ في السكربت نفسه فهو فشل آخر");
+    assert.match(res.stdout, /\| conn \|/);
+    assert.match(res.stdout, /conn-token-shape/);
+    assert.match(res.stdout, /رابط في حقل الرمز/);
+    assert.doesNotMatch(res.stdout + res.stderr, /is not defined/);
+    assert.doesNotMatch(res.stdout, /example-db-example/, "لا يُطبع الرابط ولا الرمز");
+  });
+});
+
+describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان", () => {
+  const run = (env: Record<string, string>, args: string[] = ["--dry-run"]) =>
+    spawnSync("bash", ["scripts/apply-turso-secrets.sh", ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+  const GOOD_URL = "libsql://aborof-elazamey.turso.io";
+  const GOOD_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.c2lnbmF0dXJl";
+
+  test("يقبل الزوج الصحيح ويعرض وصفًا شكليًا فقط — بلا أي قيمة سرية", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: GOOD_TOKEN });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /التحقق الشكلي نجح/);
+    assert.match(res.stdout, /JWT \(طول/);
+    assert.doesNotMatch(res.stdout + res.stderr, new RegExp(GOOD_TOKEN));
+    assert.doesNotMatch(res.stdout, /aborof-elazamey/, "لا يُطبع المضيف كاملًا");
+  });
+
+  test("يرفض رابط لوحة التحكم ويرشد إلى زر Connect", () => {
+    const res = run({
+      TURSO_DATABASE_URL: "https://app.turso.tech/elazamey/databases/aborof",
+      TURSO_AUTH_TOKEN: GOOD_TOKEN,
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /رابط لوحة تحكم/);
+  });
+
+  test("يرفض رابطًا لُصق في حقل الرمز (نفس خطأ الإنتاج الحالي) ويطلب توكنًا جديدًا", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: GOOD_URL });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /الرمز ليس JWT/);
+    assert.match(res.stderr, /أنشئ توكنًا جديدًا/);
+  });
+
+  test("يرفض القيم الفارغة بدل ضبط سرّ فارغ على البيئات", () => {
+    const res = run({ TURSO_DATABASE_URL: "", TURSO_AUTH_TOKEN: GOOD_TOKEN }, ["--dry-run"]);
+    // بلا قيمة في البيئة يحاول القراءة من المدخل؛ stdin مغلق في الاختبار فيفشل برسالة واضحة.
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /فارغ/);
   });
 });
 
