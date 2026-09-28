@@ -49,6 +49,7 @@
 |---|---|
 | `.github/workflows/turso-evidence.yml` | مجسّ **قراءة فقط** على `pull_request` و`workflow_dispatch`: وظيفة لأسرار نطاق المستودع، وأخرى تعمل **فقط عند غيابها** لجرّب بيئة `production` (النتيجة: الأسرار على **بيئة production** لا على نطاق المستودع) |
 | `scripts/probe-turso-ci.sh` | يشغّل الفحص، يطبع الجدول في السجل والملخّص، **وينشره تعليقًا على الـ PR** (يُحدَّث لا يتكدّس)، ويلحق قراءة سطح الإنتاج الحيّ |
+| `scripts/apply-turso-secrets.sh` | يضبط السرّين في GitHub (بيئة `production`) و Vercel (Production) بأمر واحد، بتحقق شكلي وبلا طباعة أي قيمة (تُمرَّر عبر `stdin` فقط) |
 | `scripts/lib/db-url.mjs` | تشخيص آمن: نوع المضيف وطوله، **شكل مقاطع المسار بالأطوال** (`8/9/5`)، تمييز «قيمة موضعية»، ترجمة رمز الحالة إلى حكم (`404` ⇒ أنشئ القاعدة · `401` ⇒ جدّد الرمز)، وتحليل قيمة حقل الرمز (JWT أم رابط) |
 | `scripts/verify-turso.mjs` | يطبع الجدول **دائمًا** (حتى فشل الاتصال)، ويصف بنية القيم، ويجرّب أزواج (رابط، رمز) بعلم `--allow-secret-repair` ويُعلن أي زوج نجح |
 
@@ -75,6 +76,27 @@
    gh secret set TURSO_AUTH_TOKEN   --env production --body "eyJ…"
    ```
 </div>
+
+### المسار الأسرع: أمران على جهازك ثم أمر واحد في المستودع
+
+```bash
+# (1) على جهازك — بحسابك في Turso، مرة واحدة لكل قيمة (لا تلصق أي قيمة في محادثة)
+turso auth login                                  # أو: export TURSO_API_TOKEN=... (توكن المنصّة)
+turso db list                                     # اسم القاعدة: 5 أحرف
+
+# (2) القيم تُلتقط في متغيرات بيئة بلا ظهور على الشاشة ولا في سجل الأوامر
+export TURSO_DATABASE_URL="$(turso db show <db> --url)"                       # يبدأ بـ libsql://
+export TURSO_AUTH_TOKEN="$(turso db tokens create <db> --expiration never)"   # JWT يبدأ بـ eyJ…
+
+# (3) من داخل المستودع — أمر واحد يضبط GitHub (بيئة production) و Vercel (Production) معًا
+bash scripts/apply-turso-secrets.sh --dry-run     # عرض ما سيحدث أولًا
+bash scripts/apply-turso-secrets.sh               # التنفيذ الفعلي
+vercel deploy --prod                              # أو Redeploy من اللوحة — المتغيرات تُقرأ في نشر جديد
+```
+
+> `--expiration never` هو الصيغة الموثّقة لدوام التوكن (اقبل `never` أو مدة مثل `7d`، توثيق Turso: `db tokens create`).
+> بديل بلا CLI — Platform API على جهازك (لا من هذه البيئة): `POST https://api.turso.tech/v1/organizations/elazamey/databases/<db>/auth/tokens?expiration=never&authorization=full-access` بترويسة `Authorization: Bearer <platform-token>`.
+> وهذا السكربت **يرفض** مسبقًا كلا الخطأين المكتشفين في الإنتاج: رابط لوحة التحكم في حقل الرابط، ورابط اتصال في حقل الرمز.
 
 **كيف يُشغَّل المجسّ بعد الإصلاح؟** لاحظ أن `probe-production.yml` و`service-health.yml` فقط هما من يستمع لـ`workflow_dispatch`، أما هذا المجسّ فيعمل أيضًا **تلقائيًا على أي دفع إلى الفرع**:
 

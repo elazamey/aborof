@@ -168,6 +168,48 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
   });
 });
 
+describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان", () => {
+  const run = (env: Record<string, string>, args: string[] = ["--dry-run"]) =>
+    spawnSync("bash", ["scripts/apply-turso-secrets.sh", ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+  const GOOD_URL = "libsql://aborof-elazamey.turso.io";
+  const GOOD_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.c2lnbmF0dXJl";
+
+  test("يقبل الزوج الصحيح ويعرض وصفًا شكليًا فقط — بلا أي قيمة سرية", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: GOOD_TOKEN });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /التحقق الشكلي نجح/);
+    assert.match(res.stdout, /JWT \(طول/);
+    assert.doesNotMatch(res.stdout + res.stderr, new RegExp(GOOD_TOKEN));
+    assert.doesNotMatch(res.stdout, /aborof-elazamey/, "لا يُطبع المضيف كاملًا");
+  });
+
+  test("يرفض رابط لوحة التحكم ويرشد إلى زر Connect", () => {
+    const res = run({
+      TURSO_DATABASE_URL: "https://app.turso.tech/elazamey/databases/aborof",
+      TURSO_AUTH_TOKEN: GOOD_TOKEN,
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /رابط لوحة تحكم/);
+  });
+
+  test("يرفض رابطًا لُصق في حقل الرمز (نفس خطأ الإنتاج الحالي) ويطلب توكنًا جديدًا", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: GOOD_URL });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /الرمز ليس JWT/);
+    assert.match(res.stderr, /أنشئ توكنًا جديدًا/);
+  });
+
+  test("يرفض القيم الفارغة بدل ضبط سرّ فارغ على البيئات", () => {
+    const res = run({ TURSO_DATABASE_URL: "", TURSO_AUTH_TOKEN: GOOD_TOKEN }, ["--dry-run"]);
+    // بلا قيمة في البيئة يحاول القراءة من المدخل؛ stdin مغلق في الاختبار فيفشل برسالة واضحة.
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /فارغ/);
+  });
+});
+
 describe("scripts/smoke-production — حاجز النطاقات (SSRF)", () => {
   test("يسمح بروابط https العامة فقط", () => {
     assert.equal(isSafeBaseUrl("https://aborof.vercel.app"), true);
