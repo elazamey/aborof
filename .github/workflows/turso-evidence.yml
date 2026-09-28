@@ -2,16 +2,16 @@ name: Turso evidence probe
 
 # ‏أداة قياس لا أداة نشر: تفتح اتصالًا **للقراءة فقط** بقاعدة الإنتاج وتطبع جدول
 # الصفوف (conn · mig-table · mig-parity · row-7 · row-8 · row-9 · tables) في
-# ملخّص التشغيل وسجلّه — بلا أي كتابة وبلا أي سرّ في المخرجات (السكربت ينقّي
-# الرابط والرمز قبل الطباعة).
+# ملخّص التشغيل وسجلّه وفي تعليق على طلب الدمج — بلا أي كتابة وبلا أي سرّ في
+# المخرجات (السكربت ينقّي الرابط والرمز قبل الطباعة).
 #
 # المشغّلات:
 #  - `pull_request`: السؤال «هل القاعدة مطابقة للكود؟» سؤال ما قبل الدمج، فيُطرح
 #    في مكانه الطبيعي بدل انتظار تشغيل يدوي بعد النشر.
-#  - `workflow_dispatch`: التشغيل اليدوي متى شئت (نفس مدخل `service-health.yml`).
+#  - `workflow_dispatch`: التشغيل اليدوي متى شئت.
 #
 # نطاق الأسرار: الوظيفة الأولى تقرأ نطاق المستودع، والثانية تعمل فقط عند غيابه
-# لتجرّب نطاق بيئة `production` — فيعرف المالك من الملخّص أيّ النطاقين مضبوط.
+# لتجرّب نطاق بيئة `production` — فيعرف المالك من التعليق أيّ النطاقين مضبوط.
 # (بيئات GitHub لا تُقرأ من وظيفة واحدة بلا `environment` على مستوى الوظيفة.)
 on:
   pull_request:
@@ -23,6 +23,8 @@ concurrency:
 
 permissions:
   contents: read
+  # نشر/تحديث تعليق الجدول على طلب الدمج (لا صلاحية كتابة على المحتوى).
+  pull-requests: write
 
 jobs:
   repo-scope:
@@ -68,20 +70,11 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: |
-          set -uo pipefail
-          # ضع كود الخروج من node لا من tee (pipefail يغطي ذلك، و PIPESTATUS أدق).
-          node scripts/verify-turso.mjs | tee /tmp/probe.md
-          code=${PIPESTATUS[0]}
-          cat /tmp/probe.md >> "$GITHUB_STEP_SUMMARY"
-          if [ "$code" = "2" ]; then
-            echo "::error::تهيئة الفحص ناقصة (كود 2) — راجع ترويسة السكربت: TURSO_AUTH_TOKEN مطلوب لأي رابط غير محلي."
-            exit 1
-          fi
-          if [ "$code" != "0" ]; then
-            echo "::error::فحص Turso أعاد كود $code — توجد صفوف حمراء (الجدول في ملخّص التشغيل)."
-            exit 1
-          fi
+          SCOPE: "أسرار نطاق المستودع"
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/probe-turso-ci.sh
 
   env-scope:
     name: Probe (environment-scope secrets)
@@ -90,7 +83,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # قد ترفض سياسة حماية البيئة (`Production` = الفروع المحمية فقط) تشغيل هذا
-    # الفرع؛ لا يُفشل ذلك الفحصَ كله — الغرض معرفة نطاق الأسرار لا أكثر.
+    # الفرع، ونتيجة الفحص الأحمر في قاعدة غير مهيّأة متوقّعة — فلا تُفشل بوابة
+    # الطلب؛ الغرض تسجيل الأدلة لا حجب الدمج.
     continue-on-error: true
     environment: production
     steps:
@@ -112,16 +106,13 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SCOPE: "أسرار بيئة production"
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -uo pipefail
           if [ -z "${TURSO_DATABASE_URL:-}" ]; then
             echo "::warning::TURSO_DATABASE_URL غير مضبوط على نطاق المستودع ولا على بيئة production — أضِفه في Settings → Secrets and variables → Actions."
             exit 0
           fi
-          node scripts/verify-turso.mjs | tee /tmp/probe.md
-          code=${PIPESTATUS[0]}
-          cat /tmp/probe.md >> "$GITHUB_STEP_SUMMARY"
-          if [ "$code" != "0" ]; then
-            echo "::error::فحص Turso أعاد كود $code — توجد صفوف حمراء (الجدول في ملخّص التشغيل)."
-            exit 1
-          fi
+          bash scripts/probe-turso-ci.sh
