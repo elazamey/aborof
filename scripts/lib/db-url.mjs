@@ -1,3 +1,5 @@
+import { redact } from "./migration-checksums.mjs";
+
 /**
  * أوصاف آمنة لرابط قاعدة البيانات — للتشخيص فقط، ولا تُطبع قيمة الرابط.
  *
@@ -180,6 +182,37 @@ export function originForHttpProbe(url) {
  *
  * @returns {{ token: string|null, source: string|null, fallback: boolean }}
  */
+/**
+ * نداء HTTP خام (نقطة hrana `POST /v2/pipeline` بطلب `SELECT 1`) — السبب
+ * الخام الموثّق الذي يميّز 401 من 404 من 400. في `db-url.mjs` (لا في المجسّ)
+ * عمدًا: دالة قابلة للاختبار الوحدوي ضد stub محلي بلا إنشاء عملية —
+ * فالاختبار داخل-العملية (async) يُبقي حلقة الأحداث حية للـ stub، بينما
+ * `spawnSync` ضد stub في نفس العملية = جمود مؤكد (الوالد المحجوب لا يرد).
+ * `secrets` للتنقية فقط — لا تُطبَع أي قيمة.
+ */
+export async function probeHttpEndpoint(candidateUrl, token, secrets = []) {
+  const origin = originForHttpProbe(candidateUrl);
+  if (!origin) return { ok: false, code: "TURSO_UNREACHABLE", verdict: "رابط غير قابل للفحص عبر HTTP" };
+  try {
+    const res = await fetch(`${origin}/v2/pipeline`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        requests: [{ type: "execute", stmt: { sql: "SELECT 1 AS ok" } }, { type: "close" }],
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const body = await res.text().catch(() => "");
+    return interpretProbeStatus(res.status, redact(body, [...secrets, candidateUrl]));
+  } catch (error) {
+    const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidateUrl]);
+    return { ok: false, code: "TURSO_UNREACHABLE", verdict: `تعذّر الوصول للخادم (شبكة/DNS) — ${raw}` };
+  }
+}
+
 export function resolveTursoToken(env, role) {
   const scoped = { ci: "TURSO_AUTH_TOKEN_CI", prod: "TURSO_AUTH_TOKEN_PROD", preview: "TURSO_AUTH_TOKEN_PREVIEW" }[role];
   const legacy = "TURSO_AUTH_TOKEN";

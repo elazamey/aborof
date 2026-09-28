@@ -25,7 +25,9 @@
  *     أي طلب حقيقي بـ 503 «قاعدة البيانات غير مربوطة».
  *
  * لا تُطبع أي أسرار ولا أي بيانات عميل كاملة (يُفحص الجواب بحثًا عن PII ويُحجب).
- * كود الخروج: 0 = كل الفحوص المطلوبة خضراء، 1 = فشل حاجب، 2 = استخدام خاطئ.
+ * كود الخروج: 0 = خضراء أو متدهورة (الحكم في سطر `SMOKE: PASS|DEGRADED|FAIL`)،
+ * 1 = فشل حاجب، 2 = استخدام خاطئ. الصفوف الناعمة (`fallback`/`latency`)
+ * الحمراء وحدها تُنتج DEGRADED لا FAIL — «يعمل لكن متدهور» حكم قائم بذاته.
  */
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -112,6 +114,44 @@ export function looksLikeSeedFallback(products) {
   return products.some(
     (p) => p && typeof p === "object" && !Object.prototype.hasOwnProperty.call(p, "old_price")
   );
+}
+
+/**
+ * مصدر الكتالوج من الترويسة الصريحة أولًا (`X-DB-Source: turso|seed` على
+ * `/api/products`)، وقرينة الشكل احتياطًا للنشرات القديمة بلا ترويسة.
+ * مُصدَّرة للاختبار — تقبل Headers الحقيقية أو كائنًا عاديًا.
+ */
+export function dbSourceFromResponse(headers, products, productOk) {
+  if (!productOk) return { source: "unknown", via: "none" };
+  const get =
+    headers && typeof headers.get === "function"
+      ? (n) => headers.get(n)
+      : (n) => headers?.[n] ?? headers?.[n.toLowerCase()];
+  const h = String(get("x-db-source") ?? "").trim().toLowerCase();
+  if (h === "turso" || h === "seed") return { source: h, via: "header" };
+  return {
+    source: looksLikeSeedFallback(products) ? "seed" : "turso",
+    via: h ? "header-unknown" : "heuristic",
+  };
+}
+
+/**
+ * ميزانية المصباح الدخاني للمسارات الحرجة — مصباح يكشف التعلّق المرضي لا
+ * SLO أداء (عينة واحدة تشمل الإقلاع البارد؛ الـ RUM الحقيقي P3).
+ */
+export const LATENCY_BUDGET_MS = 15_000;
+
+/**
+ * حكم الـ smoke بثلاثة مستويات: أي صف صلب أحمر ⇒ FAIL؛ وإلا فأي صف ناعم
+ * (`fallback`/`latency`) أحمر ⇒ DEGRADED («يعمل لكن متدهور» — لا يُحسَب
+ * نجاحًا صامتًا)؛ وإلا PASS. دالة نقية مُصدَّرة للاختبار.
+ */
+const SOFT_ROWS = new Set(["fallback", "latency"]);
+export function smokeVerdict(results) {
+  const failed = (results ?? []).filter((r) => !r?.ok);
+  if (failed.some((r) => !SOFT_ROWS.has(r.id))) return "FAIL";
+  if (failed.length > 0) return "DEGRADED";
+  return "PASS";
 }
 
 /**
@@ -329,6 +369,27 @@ async function readOnlyChecks() {
         : "تعذّرت القراءة — لا حكم"
   );
 
+  // حالة السقوط للبديل — الثلاثية الصريحة (200 + seed = متدهور لا سليم):
+  // الترويسة دليل مباشر، والقرينة احتياط للنشرات القديمة. التنازل الصريح
+  // --allow-seed-fallback يُحترم هنا كما في db-binding (خطر مقبول مُعلَن).
+  const dbSource = dbSourceFromResponse(products.headers, productList, productOk);
+  const fallbackActive = dbSource.source === "seed";
+  const fallbackVia =
+    dbSource.via === "header"
+      ? "الترويسة X-DB-Source"
+      : dbSource.via === "header-unknown"
+        ? "الترويسة مجهولة القيمة — قُرئت قرينة الشكل"
+        : "قرينة الشكل (نشر قديم بلا ترويسة)";
+  record(
+    "fallback",
+    "حالة السقوط للبديل (200 + seed = متدهور)",
+    productOk && (!fallbackActive || allowSeedFallback),
+    "INACTIVE (الترويسة: turso) — أو --allow-seed-fallback للتنازل",
+    !productOk
+      ? "تعذّرت القراءة — لا حكم"
+      : `${fallbackActive ? "ACTIVE" : "INACTIVE"} (الدليل: ${fallbackVia})${fallbackActive && allowSeedFallback ? " [مُتنازَل عنه]" : ""}`
+  );
+
   // ------------------------------- الواجهة المنشورة (الصفوف 15–17)
   // عطل إنتاجي حقيقي: كل صفحات المنتجات كانت 404 لأن Next 16 يجعل `params` وعدًا
   // والكود قرأه متزامنًا. المنطق مُفصول في دالة نقية مُصدَّرة كي يغطّيها الاختبار
@@ -349,6 +410,21 @@ async function readOnlyChecks() {
   for (const finding of frontPageFindings({ sampleId, sampleName, productPage, missing, missingRoute, robotsTxt, sitemapXml, webmanifest, iconSvg })) {
     record(finding.id, finding.label, finding.ok, finding.expected, finding.actual);
   }
+
+  // زمن المسارات الحرجة — مصباح تعلّق (DEGRADED عند التجاوز) لا SLO.
+  const keyLatencies = [
+    ["GET /", home.ms],
+    ["GET /api/products", products.ms],
+    [`GET /product/${sampleId}`, productPage.ms],
+  ];
+  const worstLatency = keyLatencies.reduce((a, b) => (Number(a[1]) > Number(b[1]) ? a : b));
+  record(
+    "latency",
+    `زمن الاستجابة (الميزانية ${LATENCY_BUDGET_MS}ms)`,
+    Number(worstLatency[1]) <= LATENCY_BUDGET_MS,
+    `كل مسار حرج ≤ ${LATENCY_BUDGET_MS}ms`,
+    keyLatencies.map(([name, ms]) => `${name}: ${ms}ms`).join(" · ")
+  );
 
   // إضافي: وجود مسار التتبع في البناء المنشور (GET غير مدعوم ⇒ 405).
   // لا يكشف حالة العلم: الحالة تُقرأ فقط بـ POST (الصفان 13 و14).
@@ -495,9 +571,10 @@ async function main() {
   }
 
   const failed = results.filter((r) => !r.ok);
+  const verdict = smokeVerdict(results);
 
   if (asJson) {
-    console.log(JSON.stringify({ base: BASE, ok: failed.length === 0, results }, null, 2));
+    console.log(JSON.stringify({ base: BASE, ok: failed.length === 0, verdict, results }, null, 2));
   } else {
     console.log(`# Smoke test — ${BASE}\n`);
     console.log("| الصف | الفحص | النتيجة | المتوقع | الفعلي |");
@@ -506,10 +583,14 @@ async function main() {
       console.log(`| ${r.id} | ${r.label} | ${r.ok ? "✅" : "❌"} | ${r.expected} | ${String(r.actual).replace(/\|/g, "\\|")} |`);
     }
     console.log(
-      failed.length === 0
+      verdict === "PASS"
         ? `\n✅ كل الفحوص المنفَّذة خضراء (${results.length}).`
-        : `\n❌ فشل ${failed.length} فحصًا: ${failed.map((f) => f.id).join(", ")}`
+        : verdict === "DEGRADED"
+          ? `\n⚠️ يعمل لكن متدهور: ${failed.map((f) => f.id).join(", ")} (صفوف ناعمة — راجعها قبل إعلان السلامة).`
+          : `\n❌ فشل ${failed.length} فحصًا: ${failed.map((f) => f.id).join(", ")}`
     );
+    // الحكم الختامي الصريح — يقرأه البشر والآلات (نظير FINAL في المجسّ).
+    console.log(`SMOKE: ${verdict}`);
     if (!flag("--admin-probe")) console.log("\nملاحظة: الصف 4 يحتاج تشغيل `--admin-probe` (محاولة واحدة احترامًا لحد المعدل).");
     if (!flag("--chat-probe")) console.log("ملاحظة: الصف 12 يحتاج تشغيل `--chat-probe` (POST على /api/chat).");
     if (!flag("--allow-mutations")) console.log("ملاحظة: الصفان 10 و11 يحتاجان `--allow-mutations --orders-body <file>` لأن أول إنشاء طلب حقيقي.");
@@ -517,7 +598,9 @@ async function main() {
     if (!flag("--allow-seed-fallback")) console.log("ملاحظة: صف `db-binding` قرينة على مصدر الكتالوج؛ إثبات اتصال Turso نفسه بالصفوف 7–9 عبر `npm run verify:turso` أو `service-health.yml`.");
   }
 
-  process.exit(failed.length === 0 ? 0 : 1);
+  // DEGRADED خروج 0 (يعمل) — الحكم في سطر SMOKE لا في الكود؛ الـ probe-turso-ci
+  // غير حاجب أصلًا (`|| true`) فلا يتغير سلوك البوابات.
+  process.exit(verdict === "FAIL" ? 1 : 0);
 }
 
 // التنفيذ فقط عند تشغيل الملف مباشرة (لا عند استيراده في الاختبارات).

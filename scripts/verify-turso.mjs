@@ -17,8 +17,8 @@
  *
  * الصفوف: conn · conn-token-shape (صيغة الرمز دائمًا) · conn-url-shape (صيغة
  * الرابط دائمًا) · conn-cause (السبب الخام الموثّق عند فشل الاتصال: 401 رمز
- * مرفوض مقابل 404 لا قاعدة) · ثم الهجرات وهوية القاعدة والصفوف 7–9 عند نجاح
- * الاتصال.
+ * مرفوض مقابل 404 لا قاعدة) · ثم سلسلة الأدلة عند نجاح الاتصال: الهجرات ←
+ * هوية القاعدة ← عقد السكيما ← الصفوف 7–9.
  *
  * كل صف أحمر يحمل كودًا ثابتًا (`[TURSO_AUTH_401]`) للبحث الآلي، ويُطبع حكم
  * ختامي صريح `FINAL: PASS|BLOCKED` (وفي `--json`: `verdict` + `code` لكل صف،
@@ -29,7 +29,7 @@
  * TURSO_AUTH_401 · TURSO_AUTH_401_EMPTY_JWT · TURSO_DB_NOT_FOUND ·
  * TURSO_REQUEST_REJECTED · TURSO_UNREACHABLE · TURSO_UNEXPECTED_STATUS ·
  * MIGRATION_TABLE_MISSING · MIGRATION_MISMATCH · DB_IDENTITY_FORKED ·
- * DB_IDENTITY_EMPTY · ROW7_ORDER_ITEMS_MISSING ·
+ * DB_IDENTITY_EMPTY · SCHEMA_CONTRACT_VIOLATION · ROW7_ORDER_ITEMS_MISSING ·
  * ROW8_FTS_MISSING · ROW9_FTS_OUT_OF_SYNC · TABLES_INCOMPLETE.
  *
  * كود الخروج: 0 = كل الفحوص خضراء، 1 = فشل حاجب، 2 = تهيئة الفحص ناقصة.
@@ -37,12 +37,13 @@
 import { createHash } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
+import { SCHEMA_CONTRACT, checkSchemaContract } from "./lib/schema-contract.mjs";
 import {
   dashboardUrlToConnectionCandidates,
   describeDatabaseUrl,
-  interpretProbeStatus,
   originForHttpProbe,
   parseAuthValue,
+  probeHttpEndpoint,
   resolveTursoToken,
 } from "./lib/db-url.mjs";
 
@@ -135,29 +136,6 @@ async function diagnoseEndpoint() {
   return parts;
 }
 
-async function probeHttpEndpoint(candidateUrl, token) {
-  const origin = originForHttpProbe(candidateUrl);
-  if (!origin) return { ok: false, code: "TURSO_UNREACHABLE", verdict: "رابط غير قابل للفحص عبر HTTP" };
-  try {
-    const res = await fetch(`${origin}/v2/pipeline`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        requests: [{ type: "execute", stmt: { sql: "SELECT 1 AS ok" } }, { type: "close" }],
-      }),
-      signal: AbortSignal.timeout(8_000),
-    });
-    const body = await res.text().catch(() => "");
-    return interpretProbeStatus(res.status, redact(body, [...secrets, candidateUrl]));
-  } catch (error) {
-    const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidateUrl]);
-    return { ok: false, code: "TURSO_UNREACHABLE", verdict: `تعذّر الوصول للخادم (شبكة/DNS) — ${raw}` };
-  }
-}
-
 async function attemptDerivedConnection() {
   const authParts = parseAuthValue(authToken);
 
@@ -184,7 +162,7 @@ async function attemptDerivedConnection() {
   const failures = [];
   for (const pair of pairs) {
     // 1) الفحص الخام أولًا ليُعرف السبب (لا قاعدة / رمز) لا مجرد «فشل اتصال».
-    const verdict = await probeHttpEndpoint(pair.candidateUrl, pair.token);
+    const verdict = await probeHttpEndpoint(pair.candidateUrl, pair.token, secrets);
     if (!verdict.ok) {
       failures.push(`${pair.label}: ${verdict.verdict}`);
       continue;
@@ -379,7 +357,7 @@ try {
       // جدّد الرمز)» من «لا قاعدة بهذا الاسم (404 — تحقق من الاسم)» — وهما
       // علاجان مختلفان تمامًا. (فحص 2026-09-28: 401 برمز JWT سليم الشكل.)
       if (!local) {
-        const cause = await probeHttpEndpoint(url, authToken);
+        const cause = await probeHttpEndpoint(url, authToken, secrets);
         record(
           "conn-cause",
           "السبب الخام من الخادم (طلب موثّق بالرمز المضبوط)",
@@ -486,6 +464,18 @@ try {
       : `نفس القاعدة متأخرة بـ ${behind}: المطبَّق ${appliedVersions.join(",")} ‏(fp ${fp}) — النشر معلَّق، والحجب في mig-parity`;
   }
   record("db-identity", "هوية القاعدة المتصلة (بصمة النسب)", identityOk, identityDetail, identityCode);
+
+  // 3ج) عقد السكيما: الأعمدة التي يقرؤها التطبيق فعلًا حاضرة. (db-identity
+  // تجيب «أي قاعدة؟»، وهذا يجيب «هل بنيتها تكفي التطبيق؟» — قاعدة صحيحة
+  // النسب قديمة الأعمدة تُحجَب هنا لا هناك.)
+  const schemaViolations = await checkSchemaContract(db);
+  record(
+    "schema-contract",
+    "عقد السكيما (الأعمدة التي يقرؤها التطبيق)",
+    schemaViolations.length === 0,
+    schemaViolations.length ? schemaViolations.join(" | ") : `${SCHEMA_CONTRACT.length} جداول بأعمدتها المقروءة حاضرة`,
+    schemaViolations.length ? "SCHEMA_CONTRACT_VIOLATION" : null
+  );
 
   // 4) الصف 7: order_items موجودة (تثبيت إصلاح P0 بعد الدمج).
   const orderItems = await db.execute("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='order_items'");

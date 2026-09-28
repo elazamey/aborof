@@ -39,3 +39,40 @@ export function start401Stub(): Promise<Stub401> {
 
 /** رابط libsql لمضيف مغلق — يحاكي تعذّر الوصول (DNS/شبكة) بلا انتظار. */
 export const UNREACHABLE_LIBSQL_URL = "libsql://127.0.0.1:9";
+
+export interface CannedStub {
+  url: string;
+  /** تغيير الاستجابة المعلّبة بين الحالات (رمز/جسم/نوع). */
+  set: (status: number, body: string, contentType?: string) => void;
+  close: () => Promise<void>;
+}
+
+/**
+ * خادم محلي باستجابة معلّبة قابلة للتبديل — للضوابط السالبة (P1c) وفوضى
+ * P3: نفس المسار الحقيقي (عميل libsql + فحص HTTP خام) ضد 401/404/400/500
+ * و200-مضلِّل، بلا شبكة وبلا أسرار.
+ */
+export function startCannedStub(
+  initial: { status: number; body: string; contentType?: string } = {
+    status: 401,
+    body: JSON.stringify({ error: "Unauthorized: invalid token" }),
+  }
+): Promise<CannedStub> {
+  let current = initial;
+  const server = http.createServer((_req, res) => {
+    res.writeHead(current.status, { "content-type": current.contentType ?? "application/json" });
+    res.end(current.body);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as { port: number }).port;
+      resolve({
+        url: `http://127.0.0.1:${port}`,
+        set: (status, body, contentType) => {
+          current = { status, body, contentType };
+        },
+        close: () => new Promise<void>((done) => server.close(() => done())),
+      });
+    });
+  });
+}

@@ -124,34 +124,48 @@ function toPlain<T>(rows: unknown[]): T[] {
   return rows.map((r) => ({ ...(r as object) })) as T[];
 }
 
-export async function getProducts(): Promise<Product[]> {
+/** مصدر الكتالوج المُقدَّم — يُعرَض عبر ترويسة `X-DB-Source` على `/api/products`. */
+export type DbSource = "turso" | "seed";
+
+export async function getProductsWithSource(): Promise<{ products: Product[]; source: DbSource }> {
   // `db()` داخل الـ try عمدًا: إعداد معطوب (رابط بلا مخطّط صالح) كان يرمي خارجها
   // فيسقط المسار كله بـ 500؛ الآن يُعامَل كأي عطل قاعدة: سقوط آمن للبذرة مع سجل
   // منقّح. (سياسة الإنتاج fail-closed مقابل البذرة قرار منفصل — انظر PR #17 —
   // والبنية هنا تدعمه: يكفي تبديل السقوط برمي 503 في هذا الموضع وحده.)
+  // العدّاد يزيد **فقط** عند سقوط بعد محاولة (عطل/رفض) — لا عند غياب الإعداد
+  // أصلًا (`!c`): «غير مهيّأة» حالة إعداد تُرصد بقرينة الربط، لا تدهورًا حيًّا.
   let c: Client | null = null;
   try {
     c = db();
   } catch (e) {
     console.error("DB error, using seed:", redactSecrets(String((e as Error)?.message ?? e)));
-    return SEED_PRODUCTS;
+    metrics.recordDbFallback();
+    return { products: SEED_PRODUCTS, source: "seed" };
   }
-  if (!c) return SEED_PRODUCTS;
+  if (!c) return { products: SEED_PRODUCTS, source: "seed" };
   try {
     await ensureSchema();
     const started = Date.now();
     const r = await c.execute("SELECT * FROM products ORDER BY featured DESC, rowid ASC");
     metrics.recordTiming("db", Date.now() - started);
-    return toPlain<Product>(r.rows).map((p) => ({
-      ...p,
-      price: Number(p.price),
-      old_price: p.old_price == null ? null : Number(p.old_price),
-      stock: Number(p.stock),
-    }));
+    return {
+      products: toPlain<Product>(r.rows).map((p) => ({
+        ...p,
+        price: Number(p.price),
+        old_price: p.old_price == null ? null : Number(p.old_price),
+        stock: Number(p.stock),
+      })),
+      source: "turso",
+    };
   } catch (e) {
     console.error("DB error, using seed:", redactSecrets(String((e as Error)?.message ?? e)));
-    return SEED_PRODUCTS;
+    metrics.recordDbFallback();
+    return { products: SEED_PRODUCTS, source: "seed" };
   }
+}
+
+export async function getProducts(): Promise<Product[]> {
+  return (await getProductsWithSource()).products;
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -184,6 +198,7 @@ export async function getFaq(): Promise<{ question: string; answer: string }[]> 
   try {
     c = db();
   } catch {
+    metrics.recordDbFallback();
     return fallback;
   }
   if (!c) return fallback;
@@ -192,6 +207,7 @@ export async function getFaq(): Promise<{ question: string; answer: string }[]> 
     const r = await c.execute("SELECT question, answer FROM faq");
     return toPlain<{ question: string; answer: string }>(r.rows);
   } catch {
+    metrics.recordDbFallback();
     return fallback;
   }
 }

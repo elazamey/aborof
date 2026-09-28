@@ -38,11 +38,25 @@
 
 ## 4. تدريب الاستعادة (ربع سنوي — يُسجَّل)
 
+التدريب = خطوات 1–4 من §2 على قاعدة خدش ثم حذفها. الأوامر الجاهزة (نمط
+`read -rsp` الآمن — بلا inline):
+
+```bash
+read -rsp " scratch DB URL: " TURSO_DATABASE_URL; echo
+read -rsp " scratch token: " TURSO_AUTH_TOKEN_CI; echo
+export TURSO_DATABASE_URL TURSO_AUTH_TOKEN_CI
+node scripts/verify-turso.mjs --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);for (const id of ['db-identity','mig-parity','schema-contract']) console.log(id,'=>',JSON.stringify(j.rows.find(r=>r.id===id)));console.log('FINAL:',j.verdict)})"
+unset TURSO_DATABASE_URL TURSO_AUTH_TOKEN_CI
+```
+
+القبول: `db-identity` تُظهر بصمة الإنتاج نفسها + `mig-parity` و`schema-contract`
+خضراوان. ثم احذف قاعدة الخدش وسجّل:
+
 | التاريخ | المدة | البصمة طابقت؟ | ملاحظات |
 |---|---|---|---|
 | _(أول تدريب بعد الدمج)_ | | | |
 
-التدريب = خطوات 1–4 من §2 على قاعدة خدش ثم حذفها. تدريب فاشل = P2 حتى يُعاد ناجحًا.
+تدريب فاشل = P2 حتى يُعاد ناجحًا.
 
 ## 5. قالب بلاغ الكارثة (يُلصَق في القضية)
 

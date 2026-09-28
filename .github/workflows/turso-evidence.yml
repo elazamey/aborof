@@ -2,7 +2,7 @@ name: Turso evidence probe
 
 # ‏أداة قياس لا أداة نشر: تفتح اتصالًا **للقراءة فقط** بقاعدة الإنتاج وتطبع جدول
 # الصفوف (conn · conn-token-shape · conn-url-shape · conn-cause · mig-table ·
-# mig-parity · db-identity · row-7 · row-8 · row-9 · tables) في ملخّص التشغيل وسجلّه وفي
+# mig-parity · db-identity · schema-contract · row-7 · row-8 · row-9 · tables) في ملخّص التشغيل وسجلّه وفي
 # تعليق على طلب الدمج — بلا أي كتابة وبلا أي سرّ في المخرجات (السكربت ينقّي
 # الرابط والرمز قبل الطباعة). كل صف أحمر يحمل كود `[TURSO_*]` ثابتًا، والجدول
 # يُختم بحكم `FINAL: PASS|BLOCKED`.

@@ -1,4 +1,4 @@
-import { test, describe, beforeEach, afterEach } from "node:test";
+import { test, describe, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -14,6 +14,7 @@ import {
   interpretProbeStatus,
   originForHttpProbe,
   parseAuthValue,
+  probeHttpEndpoint,
   resolveTursoToken,
 } from "../scripts/lib/db-url.mjs";
 import { resolveAppToken } from "../src/lib/db/token";
@@ -23,10 +24,15 @@ import {
   looksLikeSeedFallback,
   frontPageFindings,
   extractErrorDigest,
+  dbSourceFromResponse,
+  smokeVerdict,
+  LATENCY_BUDGET_MS,
   BASELINE_SECURITY_HEADERS,
 } from "../scripts/smoke-production.mjs";
 import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
-import { setDbClientForTest, db, hasDB } from "../src/lib/db";
+import { checkSchemaContract } from "../scripts/lib/schema-contract.mjs";
+import { setDbClientForTest, db, hasDB, getProductsWithSource } from "../src/lib/db";
+import { snapshot as metricsSnapshot } from "../src/lib/observability/metrics";
 import { SEED_PRODUCTS } from "../src/lib/seed";
 
 /**
@@ -698,7 +704,7 @@ describe("scripts/verify-turso — تقرير آلي", () => {
     assert.equal(out.verdict, "PASS");
     assert.deepEqual(
       out.rows.map((r) => r.id),
-      ["conn", "mig-table", "mig-parity", "db-identity", "row-7", "row-8", "row-9", "tables"]
+      ["conn", "mig-table", "mig-parity", "db-identity", "schema-contract", "row-7", "row-8", "row-9", "tables"]
     );
     assert.ok(out.rows.every((r) => r.code === null), "الصفوف الخضراء بلا أكواد");
   });
@@ -1012,19 +1018,38 @@ describe("scripts/verify-turso — صف هوية القاعدة (db-identity)", 
 });
 
 describe("قفل عدم الكتابة في مجسّ الأدلة", () => {
-  test("verify-turso.mjs لا ينفّذ إلا SELECT (كل SQL حرفي يبدأ بـ SELECT)", () => {
-    const src = fs.readFileSync("scripts/verify-turso.mjs", "utf8");
-    const verbs = [...src.matchAll(/\.execute\(\s*["'`]([A-Za-z]+)/g)].map((m) => m[1].toUpperCase());
-    assert.ok(verbs.length > 5, "الحارس نفسه يجب أن يجد مواقع التنفيذ — وإلا فهو يمرّر بصمت");
-    assert.ok(verbs.every((v) => v === "SELECT"), `أفعال غير SELECT في المجسّ: ${verbs.join(",")}`);
-    const payloadVerbs = [...src.matchAll(/sql:\s*["'`]([A-Za-z]+)/g)].map((m) => m[1].toUpperCase());
-    assert.ok(payloadVerbs.every((v) => v === "SELECT"), `حمولة hrana غير SELECT: ${payloadVerbs.join(",")}`);
+  test("المجسّ ومكتباته لا تنفّذ إلا عبارات قراءة (SELECT أو PRAGMA table_info حصرًا)", () => {
+    const files = ["scripts/verify-turso.mjs", "scripts/lib/schema-contract.mjs"];
+    let total = 0;
+    for (const file of files) {
+      const src = fs.readFileSync(file, "utf8");
+      const stmts = [...src.matchAll(/\.execute\(\s*["'`]([A-Za-z]+)(?:\s+([A-Za-z_]+))?/g)].map((m) => [
+        m[1].toUpperCase(),
+        (m[2] ?? "").toUpperCase(),
+      ]);
+      total += stmts.length;
+      for (const [first, second] of stmts) {
+        // أي SELECT (بأي بقية) أو PRAGMA table_info حصرًا — أي PRAGMA آخر مرفوض.
+        const ok = first === "SELECT" || (first === "PRAGMA" && second === "TABLE_INFO");
+        assert.ok(ok, `عبارة غير مقروءة في ${file}: ${first} ${second} (المسموح SELECT/PRAGMA table_info فقط)`);
+      }
+      const payloadVerbs = [...src.matchAll(/sql:\s*["'`]([A-Za-z]+)/g)].map((m) => m[1].toUpperCase());
+      assert.ok(payloadVerbs.every((v) => v === "SELECT"), `حمولة hrana غير SELECT في ${file}: ${payloadVerbs.join(",")}`);
+    }
+    assert.ok(total > 5, "الحارس نفسه يجب أن يجد مواقع التنفيذ — وإلا فهو يمرّر بصمت");
   });
 
-  test("المجسّ لا يستخدم .batch ولا يستورد مشغّل الهجرات", () => {
+  test("المجسّ لا يستخدم .batch ولا يستورد مشغّل الهجرات ولا مجهّز البنية", () => {
+    // الأنماط على شكل معرّف (استيراد/استدعاء) لا اسم عارٍ: ذِكر الاسم في
+    // تعليق أو سلسلة (توثيق/رسالة مستخدم) ليس وصولًا لمسار الكتابة.
     const src = fs.readFileSync("scripts/verify-turso.mjs", "utf8");
     assert.doesNotMatch(src, /\.batch\(/);
-    assert.doesNotMatch(src, /runMigrations/);
+    assert.doesNotMatch(src, /import[^;]*\brunMigrations\b/);
+    assert.doesNotMatch(src, /\brunMigrations\s*\(/);
+    // ensureSchema تكتب (هجرات + بذرة) — غياب استيرادها واستدعائها ضابطة
+    // سالبة بنيوية: المجسّ لا يستطيع الوصول لمسار الكتابة أصلًا.
+    assert.doesNotMatch(src, /import[^;]*\bensureSchema\b/);
+    assert.doesNotMatch(src, /\bensureSchema\s*\(/);
   });
 
   test("غلاف CI يشغّل الـ smoke بلا أي علم طافر (GET فقط)", () => {
@@ -1123,5 +1148,450 @@ describe("scripts/apply-turso-secrets — فصل الرموز", () => {
     assert.match(res.stderr, /TURSO_AUTH_TOKEN_PROD غير مضبوط/);
     assert.match(res.stderr, /TURSO_AUTH_TOKEN_CI غير مضبوط/);
     assert.match(res.stdout, /مشترك انتقالي/);
+  });
+});
+
+describe("scripts/apply-turso-secrets — الموجه-أولًا ونظافة السجل (P0)", () => {
+  const GOOD_URL = "libsql://aborof-elazamey.turso.io";
+  const PROD_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwcm9kIn0.c2lnbmF0dXJlLXByb2Q";
+  const CI_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaSJ9.c2lnbmF0dXJlLWNp";
+  const run = (env: Record<string, string>, args: string[] = ["--dry-run"]) =>
+    spawnSync("bash", ["scripts/apply-turso-secrets.sh", ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+      input: "",
+    });
+
+  test("المسار الأول تشغيل عارٍ بمدخل مخفي — والقيم inline موسومة كأتمتة/اختبار", () => {
+    const help = spawnSync("bash", ["scripts/apply-turso-secrets.sh", "--help"], { encoding: "utf8" });
+    assert.equal(help.status, 0);
+    assert.match(help.stdout, /bash scripts\/apply-turso-secrets\.sh\n/, "التشغيل العاري أولًا");
+    assert.match(help.stdout, /سجل الصدفة/, "تحذير الـ history في الاستخدام نفسه");
+  });
+
+  test("رابط وحده بلا رموز: يُسأل عن الرمز (لا سقوط صامت) ويفشل بنظافة بلا مدخل", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /أدخل TURSO_AUTH_TOKEN/);
+    assert.match(res.stderr, /لا رمز/);
+  });
+
+  test("--vercel-only برمز PROD وحده: ينجح بلا سؤال عن CI", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN_PROD: PROD_TOKEN }, [
+      "--vercel-only",
+      "--dry-run",
+    ]);
+    assert.equal(res.status, 0);
+    assert.doesNotMatch(res.stderr, /أدخل TURSO_AUTH_TOKEN_CI/);
+    assert.doesNotMatch(res.stdout, /TURSO_AUTH_TOKEN_CI/);
+  });
+
+  test("--github-only برمز CI وحده: ينجح بلا سؤال عن PROD", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN_CI: CI_TOKEN }, [
+      "--github-only",
+      "--dry-run",
+    ]);
+    assert.equal(res.status, 0);
+    assert.doesNotMatch(res.stderr, /أدخل TURSO_AUTH_TOKEN_PROD/);
+    assert.doesNotMatch(res.stdout, /TURSO_AUTH_TOKEN_PROD/);
+  });
+
+  test("لا تلوث متبادل: رمز CI وحده لا يُستخدَم للتشغيل — يُسأل عن PROD صراحةً", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN_CI: CI_TOKEN });
+    assert.equal(res.status, 1, "بلا مدخل يفشل — المهم أنه سأل ولم يُعِد الاستخدام بصمت");
+    assert.match(res.stderr, /أدخل TURSO_AUTH_TOKEN_PROD/);
+  });
+
+  test("القيم من البيئة تُعلَن مع تذكير نظافة السجل", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: PROD_TOKEN });
+    assert.equal(res.status, 0);
+    assert.match(res.stderr, /قيم من البيئة.*سجل الصدفة/);
+  });
+});
+
+describe("scripts/lib/schema-contract — عقد السكيما (P1a)", () => {
+  test("قاعدة مهاجَرة: بلا انتهاكات", async () => {
+    const { client } = fileClient("aborof-schema-ok");
+    await runMigrations(client);
+    try {
+      assert.deepEqual(await checkSchemaContract(client), []);
+    } finally {
+      client.close();
+    }
+  });
+
+  test("عمود مسقَط يُرصَد باسمه (featured مثالًا)", async () => {
+    const { client } = fileClient("aborof-schema-bad");
+    await runMigrations(client);
+    await client.execute("ALTER TABLE products DROP COLUMN featured");
+    try {
+      const violations = await checkSchemaContract(client);
+      assert.equal(violations.length, 1);
+      assert.match(violations[0], /products: أعمدة ناقصة \(featured\)/);
+    } finally {
+      client.close();
+    }
+  });
+
+  test("صف schema-contract في التقرير: أخضر بلا كود، والأحمر يحجب بـ SCHEMA_CONTRACT_VIOLATION", async () => {
+    const good = fileClient("aborof-schema-row-ok");
+    await runMigrations(good.client);
+    good.client.close();
+    const okReport = JSON.parse(runVerifyTurso(good.url)) as {
+      verdict: string;
+      rows: { id: string; ok: boolean; code: string | null }[];
+    };
+    assert.equal(okReport.rows.find((r) => r.id === "schema-contract")?.ok, true);
+    assert.equal(okReport.rows.find((r) => r.id === "schema-contract")?.code, null);
+
+    const bad = fileClient("aborof-schema-row-bad");
+    await runMigrations(bad.client);
+    await bad.client.execute("ALTER TABLE orders DROP COLUMN note");
+    bad.client.close();
+    let stdout = "";
+    let status = 0;
+    try {
+      stdout = runVerifyTurso(bad.url);
+    } catch (error) {
+      const e = error as { status?: number; stdout?: string };
+      status = e.status ?? 0;
+      stdout = e.stdout ?? "";
+    }
+    assert.equal(status, 1);
+    const badReport = JSON.parse(stdout) as {
+      verdict: string;
+      rows: { id: string; ok: boolean; code: string | null }[];
+    };
+    assert.equal(badReport.verdict, "BLOCKED");
+    assert.equal(badReport.rows.find((r) => r.id === "schema-contract")?.code, "SCHEMA_CONTRACT_VIOLATION");
+  });
+});
+
+describe("src/lib/db — مصدر الكتالوج وعدّاد السقوط (P1b)", () => {
+  let savedEnv: Record<string, string | undefined>;
+  beforeEach(() => {
+    savedEnv = {};
+    for (const k of Object.keys(process.env)) {
+      if (k.startsWith("TURSO_")) {
+        savedEnv[k] = process.env[k];
+        delete process.env[k];
+      }
+    }
+    setDbClientForTest(null);
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    setDbClientForTest(null);
+  });
+
+  const fallbackCount = () =>
+    (metricsSnapshot().counters["db.fallback_activations_total"] as number | undefined) ?? 0;
+
+  test("رفض 401 ⇒ المصدر seed والعدّاد يزيد واحدًا", async () => {
+    const { start401Stub } = await import("./stub-helpers");
+    const stub = await start401Stub();
+    const client = createClient({ url: stub.url, authToken: "x" });
+    setDbClientForTest(client);
+    const before = fallbackCount();
+    try {
+      const { products, source } = await getProductsWithSource();
+      assert.equal(source, "seed");
+      assert.deepEqual(products, SEED_PRODUCTS);
+      assert.equal(fallbackCount(), before + 1, "سقوط بعد محاولة فاشلة = تفعيلة واحدة");
+    } finally {
+      setDbClientForTest(null);
+      client.close();
+      await stub.close();
+    }
+  });
+
+  test("getFaq الساقط يزيد العدّاد أيضًا (نفس الحدث: بديل بدل قاعدة)", async () => {
+    const { start401Stub } = await import("./stub-helpers");
+    const { getFaq } = await import("../src/lib/db");
+    const stub = await start401Stub();
+    const client = createClient({ url: stub.url, authToken: "x" });
+    setDbClientForTest(client);
+    const before = fallbackCount();
+    try {
+      const faq = await getFaq();
+      assert.ok(Array.isArray(faq) && faq.length > 0);
+      assert.equal(fallbackCount(), before + 1);
+    } finally {
+      setDbClientForTest(null);
+      client.close();
+      await stub.close();
+    }
+  });
+
+  test("غياب الإعداد أصلًا ⇒ بذرة بلا عدّ (ليست تدهورًا حيًّا)", async () => {
+    const before = fallbackCount();
+    const { products, source } = await getProductsWithSource();
+    assert.equal(source, "seed");
+    assert.deepEqual(products, SEED_PRODUCTS);
+    assert.equal(fallbackCount(), before, "بلا URL لا محاولة — فلا تفعيلة");
+  });
+
+  test("مسار القاعدة السليم ⇒ المصدر turso", async () => {
+    const { client } = fileClient("aborof-source-turso");
+    await runMigrations(client);
+    setDbClientForTest(client);
+    try {
+      const { source } = await getProductsWithSource();
+      assert.equal(source, "turso");
+    } finally {
+      setDbClientForTest(null);
+      client.close();
+    }
+  });
+});
+
+describe("scripts/smoke-production — الحكم الثلاثي ومصدر الكتالوج (P1b/#5)", () => {
+  test("smokeVerdict: صلب أحمر ⇒ FAIL، وناعم وحده ⇒ DEGRADED، وإلا PASS", () => {
+    assert.equal(smokeVerdict([{ id: "1", ok: true }]), "PASS");
+    assert.equal(
+      smokeVerdict([
+        { id: "1", ok: true },
+        { id: "fallback", ok: false },
+      ]),
+      "DEGRADED"
+    );
+    assert.equal(
+      smokeVerdict([
+        { id: "1", ok: true },
+        { id: "latency", ok: false },
+      ]),
+      "DEGRADED"
+    );
+    assert.equal(
+      smokeVerdict([
+        { id: "1", ok: false },
+        { id: "fallback", ok: false },
+      ]),
+      "FAIL"
+    );
+  });
+
+  test("dbSourceFromResponse: الترويسة أولًا ثم القرينة ثم مجهول", () => {
+    assert.deepEqual(dbSourceFromResponse({ "x-db-source": "seed" }, [], true), { source: "seed", via: "header" });
+    assert.deepEqual(dbSourceFromResponse({ "x-db-source": "turso" }, [], true), { source: "turso", via: "header" });
+    assert.deepEqual(dbSourceFromResponse({}, [{ id: "x" }], true), { source: "seed", via: "heuristic" });
+    assert.deepEqual(dbSourceFromResponse({}, [{ id: "x", old_price: 1 }], true), {
+      source: "turso",
+      via: "heuristic",
+    });
+    assert.deepEqual(dbSourceFromResponse({}, [], false), { source: "unknown", via: "none" });
+  });
+
+  test("ميزانية المصباح الدخاني ثابت مسمّى (15s — تعلّق مرضي لا SLO)", () => {
+    assert.equal(LATENCY_BUDGET_MS, 15_000);
+  });
+
+  test("مسار /api/products يعلن المصدر في ترويسة بلا كسر للجسم", () => {
+    const src = fs.readFileSync("src/app/api/products/route.ts", "utf8");
+    assert.match(src, /getProductsWithSource/);
+    assert.match(src, /X-DB-Source/);
+    assert.match(src, /\{ products \}/, "الجسم كما هو: {products}");
+  });
+});
+
+describe("scripts/lib/db-url — الضوابط السالبة والفوضى (P1c/P3)", () => {
+  // داخل-العملية (async) عمدًا: spawnSync ضد stub في نفس العملية جمود مؤكد
+  // (الوالد المحجوب لا يرد على HTTP) — اكتُشف بالتعليق مرة، وهذه صيغته الآمنة.
+  // عرض الصفوف وFINAL مغطّى باختبارات الـ spawn (غير الشبكية) أعلاه.
+  let stub: { url: string; set: (s: number, b: string, c?: string) => void; close: () => Promise<void> } | null =
+    null;
+
+  before(async () => {
+    const { startCannedStub } = await import("./stub-helpers");
+    stub = await startCannedStub();
+  });
+  after(async () => {
+    await stub?.close();
+    stub = null;
+  });
+
+  test("401 بجسم انتهاء ⇒ TURSO_AUTH_401 (الانتهاء ≡ الرفض عند API)", async () => {
+    stub!.set(401, JSON.stringify({ error: "JWT expired" }));
+    const r = await probeHttpEndpoint(stub!.url, "tok", []);
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "TURSO_AUTH_401");
+  });
+
+  test("401 بجسم empty-JWT ⇒ TURSO_AUTH_401_EMPTY_JWT", async () => {
+    stub!.set(401, JSON.stringify({ error: "empty JWT token" }));
+    const r = await probeHttpEndpoint(stub!.url, "tok", []);
+    assert.equal(r.code, "TURSO_AUTH_401_EMPTY_JWT");
+  });
+
+  test("404 ⇒ TURSO_DB_NOT_FOUND", async () => {
+    stub!.set(404, JSON.stringify({ error: "not found" }));
+    const r = await probeHttpEndpoint(stub!.url, "tok", []);
+    assert.equal(r.code, "TURSO_DB_NOT_FOUND");
+  });
+
+  test("400 ⇒ TURSO_REQUEST_REJECTED", async () => {
+    stub!.set(400, JSON.stringify({ error: "bad request" }));
+    const r = await probeHttpEndpoint(stub!.url, "tok", []);
+    assert.equal(r.code, "TURSO_REQUEST_REJECTED");
+  });
+
+  test("فوضى: 500 بقمامة ⇒ TURSO_UNEXPECTED_STATUS (ولا يُرمَى أبدًا)", async () => {
+    stub!.set(500, "<html>garbage-500-marker {{{", "text/html");
+    const r = await probeHttpEndpoint(stub!.url, "tok", []);
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "TURSO_UNEXPECTED_STATUS");
+  });
+
+  test("فوضى: 200 بقمامة ⇒ ok (المسبار الخام يثق بالحالة؛ تباين العميل شأن المستدعي)", async () => {
+    stub!.set(200, "not-json{{{", "text/plain");
+    const r = await probeHttpEndpoint(stub!.url, "tok", []);
+    assert.equal(r.ok, true);
+    assert.equal(r.code, null);
+  });
+
+  test("فوضى: منفذ مغلق ⇒ TURSO_UNREACHABLE (بلا انتظار معلّق)", async () => {
+    const r = await probeHttpEndpoint("http://127.0.0.1:9", "x", []);
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "TURSO_UNREACHABLE");
+  });
+
+  test("رابط غير قابل للفحص ⇒ TURSO_UNREACHABLE لا رمي", async () => {
+    const r = await probeHttpEndpoint("file:/tmp/x.db", null, []);
+    assert.equal(r.code, "TURSO_UNREACHABLE");
+  });
+
+  test("الرمز يُنقَّى من الحكم (لا يظهر في verdict أبدًا)", async () => {
+    stub!.set(401, "leak-marker-xyz");
+    const r = await probeHttpEndpoint(stub!.url, "SECRET-TOKEN-abc", ["SECRET-TOKEN-abc"]);
+    assert.doesNotMatch(r.verdict, /SECRET-TOKEN-abc/);
+  });
+});
+
+describe("scripts/verify-turso — غياب الرمز (سالبة)", () => {
+  test("رمز فارغ (غياب كامل) ⇒ TURSO_TOKEN_MISSING وخروج 2", () => {
+    const env = { ...process.env };
+    for (const k of Object.keys(env)) if (k.startsWith("TURSO_")) delete env[k];
+    env.TURSO_DATABASE_URL = "http://127.0.0.1:9";
+    const res = spawnSync("node", ["scripts/verify-turso.mjs"], { encoding: "utf8", env });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /\[TURSO_TOKEN_MISSING\]/);
+  });
+});
+
+describe("scripts/rotation-drill.mjs — تدريب التدوير (P1d)", () => {
+  test("--self-test يثبت الالتقاط الأمين (BLOCKED على الفارغة بلا أسرار)", () => {
+    const res = spawnSync("node", ["scripts/rotation-drill.mjs", "--self-test"], { encoding: "utf8" });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /BLOCKED/);
+  });
+
+  test("--self-test --json سجل آلي قابل للتحليل", () => {
+    const res = spawnSync("node", ["scripts/rotation-drill.mjs", "--self-test", "--json"], { encoding: "utf8" });
+    assert.equal(res.status, 0);
+    const record = JSON.parse(res.stdout) as { tool: string; probe_verdict: string };
+    assert.equal(record.tool, "rotation-drill");
+    assert.equal(record.probe_verdict, "BLOCKED");
+  });
+
+  test("--phase بلا رابط ⇒ خروج 2 (التدريب على اعتماد حقيقي أو لا شيء)", () => {
+    const env = { ...process.env };
+    for (const k of Object.keys(env)) if (k.startsWith("TURSO_")) delete env[k];
+    const res = spawnSync("node", ["scripts/rotation-drill.mjs", "--phase", "pre"], { encoding: "utf8", env });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /TURSO_DATABASE_URL غير مُعيَّن/);
+  });
+});
+
+describe("حدود الصلاحيات الدنيا في الـ workflows (P2b/#6)", () => {
+  const files = [
+    ".github/workflows/deploy.yml",
+    ".github/workflows/quality.yml",
+    ".github/workflows/service-health.yml",
+    ".github/workflows/probe-production.yml",
+    ".github/workflows/turso-evidence.yml",
+  ];
+  const src: Record<string, string> = Object.fromEntries(files.map((f) => [f, fs.readFileSync(f, "utf8")]));
+
+  test("كل workflow يعلن صلاحياته صراحةً (لا افتراضيات ضمنية)", () => {
+    for (const f of files) {
+      assert.match(src[f], /^permissions:/m, `${f}: كتلة permissions العليا مفقودة`);
+    }
+  });
+
+  test("لا صلاحيات كتابة واسعة في أي workflow (القائمة الممنوعة)", () => {
+    // المسموح كتابةً في المنظومة كلها: pull-requests (تعليق المجسّ) + issues (قضية التتبّع).
+    const banned = [
+      /write-all/,
+      /contents:\s*write/,
+      /actions:\s*write/,
+      /packages:\s*write/,
+      /deployments:\s*write/,
+      /security-events:\s*write/,
+      /id-token:\s*write/,
+    ];
+    for (const f of files) {
+      for (const pattern of banned) {
+        assert.doesNotMatch(src[f], pattern, `${f}: صلاحية واسعة ${pattern}`);
+      }
+    }
+  });
+
+  test("النشر والصحة والإنتاج-probe بلا أي كتابة (قراءة/صفر فقط)", () => {
+    assert.match(src[".github/workflows/deploy.yml"], /^permissions:\n  contents: read\n/m);
+    assert.equal((src[".github/workflows/deploy.yml"].match(/^\s*permissions:/gm) ?? []).length, 1);
+    assert.match(src[".github/workflows/service-health.yml"], /^permissions: \{\}/m);
+    assert.match(src[".github/workflows/probe-production.yml"], /^permissions: \{\}/m);
+  });
+
+  test("مهمة Secret Scan قراءة فقط", () => {
+    const scan = src[".github/workflows/quality.yml"].slice(
+      src[".github/workflows/quality.yml"].indexOf("secret-scan:")
+    );
+    assert.match(scan, /contents: read/);
+    assert.doesNotMatch(scan, /:\s*write/);
+  });
+});
+
+describe("حدّ المزوّد وNEXT_PUBLIC (P2c + سالبة)", () => {
+  function walkTs(dir: string, out: string[] = []): string[] {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walkTs(full, out);
+      else if (/\.tsx?$/.test(e.name)) out.push(full);
+    }
+    return out;
+  }
+
+  test("@libsql/client القيمية داخل src/lib/db فقط (الأنواع type-only مسموحة)", () => {
+    // الحدّ الرسمي: التطبيق ← src/lib/db/* ← Turso. أي استيراد قيمي خارج
+    // الحدّ يُفشل البوابة — هذا ما يجعل استبدال المزوّد (سنة-1) ممكنًا.
+    // (scripts/ أدوات مباشرة بالتصميم — خارج نطاق هذا القفل.)
+    const files = walkTs(path.join(process.cwd(), "src"));
+    assert.ok(files.length > 10, "الماسح يجب أن يجد ملفات src وإلا مرّر بصمت");
+    for (const file of files) {
+      const rel = path.relative(process.cwd(), file);
+      if (rel.startsWith(`src${path.sep}lib${path.sep}db${path.sep}`)) continue;
+      for (const [i, line] of fs.readFileSync(file, "utf8").split("\n").entries()) {
+        if (!line.includes("@libsql/client")) continue;
+        assert.match(line, /import\s+type\b/, `${rel}:${i + 1}: استيراد قيمي خارج حدّ قاعدة البيانات`);
+      }
+    }
+  });
+
+  test("لا أسرار خادم في متغيرات NEXT_PUBLIC_* (تُضمَّن في حزمة العميل)", () => {
+    const files = walkTs(path.join(process.cwd(), "src"));
+    for (const file of files) {
+      const rel = path.relative(process.cwd(), file);
+      for (const [i, line] of fs.readFileSync(file, "utf8").split("\n").entries()) {
+        assert.doesNotMatch(
+          line,
+          /NEXT_PUBLIC_(TURSO|ADMIN|GEMINI|GROQ|NVIDIA|DIAGNOSTICS|VERCEL_TOKEN)/,
+          `${rel}:${i + 1}: سر خادم في NEXT_PUBLIC`
+        );
+      }
+    }
   });
 });

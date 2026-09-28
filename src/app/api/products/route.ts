@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
-import { getProducts, db, ensureSchema, mapDatabaseWriteError } from "@/lib/db";
+import { getProductsWithSource, db, ensureSchema, mapDatabaseWriteError } from "@/lib/db";
 import { isAdminRequest } from "@/lib/auth";
 import { productUpsertContract, firstZodIssue } from "@/lib/validation/contracts";
 import { upsertProductSearch, removeProductSearch } from "@/lib/search";
@@ -10,7 +10,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const GET = apiHandler("/api/products", async () => {
-  return NextResponse.json({ products: await getProducts() });
+  // مصدر الكتالوج مُعلَن في ترويسة (turso/seed) — الجسم كما هو بلا كسر.
+  // الـ smoke يقرأها لصف `fallback` (200 + seed = متدهور لا سليم).
+  const { products, source } = await getProductsWithSource();
+  return NextResponse.json({ products }, { headers: { "X-DB-Source": source } });
 });
 
 export const POST = apiHandler("/api/products/admin-post", async (request) => {

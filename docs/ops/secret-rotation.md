@@ -8,8 +8,8 @@
 | الدور | المتغير | أين يُضبَط | الصلاحية المطلوبة |
 |---|---|---|---|
 | التشغيل | `TURSO_AUTH_TOKEN_PROD` | Vercel → Environment Variables → Production | قاعدة واحدة، قراءة+كتابة (الطلبات تكتب) |
-| المجسّ | `TURSO_AUTH_TOKEN_CI` | GitHub → Environments → `production` → Secrets (ويُقرأ أيضًا من نطاق المستودع كبديل) | قاعدة واحدة، أضيق قراءة يتيحها Turso |
-| المعاينات | `TURSO_AUTH_TOKEN_PREVIEW` | Vercel → Preview | قاعدة واحدة، قراءة (والكتابة للتجربة المقصودة فقط) |
+| المجسّ | `TURSO_AUTH_TOKEN_CI` | GitHub → Environments → `production` → Secrets (ويُقرأ أيضًا من نطاق المستودع كبديل) | قاعدة واحدة، **قراءة فقط** — المجسّ مثبت أنه لا يحتاج الكتابة (قفل عدم-الكتابة: `SELECT`/`PRAGMA table_info` حصرًا + لا وصول لـ `ensureSchema`)، فأي صلاحية كتابة لرمز CI = خرق |
+| المعاينات | `TURSO_AUTH_TOKEN_PREVIEW` | Vercel → Preview | **قاعدة معزولة** (ليست قاعدة الإنتاج) + رمز مستقل، قراءة (والكتابة للتجربة المقصودة فقط) |
 | انتقالي | `TURSO_AUTH_TOKEN` | نفس مواضع الأدوار (نفس قيمة الدور) | يُحذَف بعد اكتمال الفصل — وجوده يُطلِق تحذير سقوط في السجلات |
 
 **مدة الصلاحية:** حدّ أقصى 90 يومًا لكل رمز، والتدوير قبل الانتهاء بـ 14 يومًا.
@@ -22,9 +22,11 @@
 ## 2. إجراء التدوير المجدول (لكل دور)
 
 1. أنشئ رمزًا جديدًا من لوحة Turso (قاعدة واحدة + مدة ≤ 90 يومًا).
-2. طبّقه بالسكربت (تحقق شكلي + ضبط + تذكير بالسجل):
-   `TURSO_DATABASE_URL='libsql://…' TURSO_AUTH_TOKEN_PROD='eyJ…' TURSO_AUTH_TOKEN_CI='eyJ…' bash scripts/apply-turso-secrets.sh`
-   (أضِف `--dry-run` أولًا للمراجعة، و`--github-only`/`--vercel-only` للتقسيم).
+2. طبّقه بالسكربت **عارِيًا** (القيم تُطلَب بمدخل مخفي — بلا أثر في السجل):
+   `bash scripts/apply-turso-secrets.sh`
+   (أضِف `--dry-run` أولًا للمراجعة، و`--github-only`/`--vercel-only` للتقسيم —
+   ومع التقسيم لا يُسأل عن الدور المُتخطَّى أصلًا). القيم inline للأتمتة
+   والاختبار فقط — انظر «نظافة السجل» أدناه قبل لصق أي سر في سطر الأوامر.
 3. تحقق: أي دفع يُشغِّل المجسّ، أو `gh workflow run turso-evidence.yml --ref main` بعد الدمج — المطلوب `FINAL: PASS`.
 4. أعد النشر: `vercel deploy --prod` (متغيرات Vercel تُقرأ في نشر جديد).
 5. أبطِل الرمز القديم من اللوحة **بعد** خضرة المجسّ والنشر — لا قبلهما.
@@ -53,3 +55,42 @@
 
 لا مؤقِّت مدمج بعد (يدوي): راجع هذا السجل أول كل شهر. المجسّ اليومي ينبّه عند
 **الفشل** (رمز ميت)، لا عند **اقتراب الانتهاء** — فلا تعتمد عليه للتذكير.
+
+## 7. تدريب التدوير (إجراء ناجح = سجلّا pre/post خضراوان)
+
+«التدوير يعمل» لا يُدَّعَى شفهيًا — يُثبَت بتشغيل `scripts/rotation-drill.mjs`
+(المجسّ + الـ smoke معًا، الأحكام فقط بلا قيم):
+
+```bash
+node scripts/rotation-drill.mjs --phase pre --json     # خط الأساس قبل التدوير
+# ... التدوير (§2) + vercel deploy --prod ...
+node scripts/rotation-drill.mjs --phase post --json    # إثبات الشفاء بعده
+# ... إبطال القديم من اللوحة ...
+SMOKE_BASE=https://aborof.vercel.app node scripts/smoke-production.mjs  # دخان ثانٍ بعد الإبطال
+```
+
+`SMOKE_BASE` اختياري (بدونه يُتخطَّى الـ smoke ويُعلَن التخطي). الصق السجلّين
+في جدول الأدلة — التدوير ناجح فقط بهما معًا:
+
+| التاريخ | الطور | probe | smoke | المشغِّل |
+|---|---|---|---|---|
+| _(يُملأ عند أول تدوير فعلي)_ | pre/post | | | |
+
+## 8. نظافة السجل (قاعدة صلبة)
+
+المشكلة: `VAR='secret' command` يُحفَظ كاملًا في `~/.bash_history` (أو ما
+يكافئه) — فيتساوى أقوى سر مع أضعف ملف نصي. القواعد:
+
+1. **الموجه-أولًا دائمًا:** `apply-turso-secrets.sh` عارِيًا (مدخل مخفي)،
+   وللأدوات بلا موجه (`verify-turso`) النمط الآمن:
+   ```bash
+   read -rsp "TURSO URL: " TURSO_DATABASE_URL; echo
+   read -rsp "TURSO CI token: " TURSO_AUTH_TOKEN_CI; echo
+   export TURSO_DATABASE_URL TURSO_AUTH_TOKEN_CI
+   node scripts/verify-turso.mjs
+   unset TURSO_DATABASE_URL TURSO_AUTH_TOKEN_CI
+   ```
+2. **الممنوع:** لصق أي قيمة سرية حقيقية في سطر أوامر يُحفَظ في السجل —
+   العناصر النائبة (`…`) في أمثلة التوثيق ليست قيمًا وهي آمنة.
+3. **الملاذ الأخير** (أتمتة لا مفر منها): مسافة بادئة + `HISTCONTROL=ignorespace`
+   (أو `HIST_IGNORE_SPACE` في zsh) — ويُعامَل كدَين يُزال، لا كإجراء دائم.

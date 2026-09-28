@@ -60,6 +60,15 @@ export const metrics = {
   recordTiming(name: string, ms: number) {
     push(timings, { name, ms: Math.round(ms), at: Date.now() });
   },
+  /**
+   * تفعيلة سقوط للبديل المحلي (بذرة/احتياطي) بعد محاولة قاعدة فاشلة.
+   * القيد الصريح: العدّاد في الذاكرة لكل نسخة serverless — يُظهر «هل يسقط
+   * هذا النسخة» لا إجماليًا عالميًا؛ الإجمالي العالمي يحتاج مصرفًا خارجيًا (P3).
+   * يُعرَض في `snapshot().counters["db.fallback_activations_total"]`.
+   */
+  recordDbFallback() {
+    counters.set("db.fallback_activations_total", (counters.get("db.fallback_activations_total") ?? 0) + 1);
+  },
   /** استدعاء أداة MCP: الاسم والحالة والزمن فقط — لا وسائط ولا مخرجات. */
   recordMcpToolCall(tool: string, status: string, ms: number) {
     push(mcpCalls, { tool, status, ms: Math.round(ms), at: Date.now() });

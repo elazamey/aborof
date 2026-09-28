@@ -14,14 +14,17 @@
 #   - لا تُمرَّر القيم كوسائط سطر أوامر (تظهر في `ps`)؛ تُمرَّر عبر stdin فقط.
 #   - التحقق شكلي قبل اللمس: رابط `libsql://` حقيقي، ورمز JWT (`eyJ…` بثلاثة مقاطع).
 #
-# الاستخدام:
-#   TURSO_DATABASE_URL='libsql://…' TURSO_AUTH_TOKEN_PROD='eyJ…' TURSO_AUTH_TOKEN_CI='eyJ…' bash scripts/apply-turso-secrets.sh
-#   TURSO_DATABASE_URL='libsql://…' TURSO_AUTH_TOKEN='eyJ…' bash scripts/apply-turso-secrets.sh   # مشترك انتقالي (بتحذير)
-#   bash scripts/apply-turso-secrets.sh --dry-run          # عرض ما سيُفعل بلا تنفيذ
-#   bash scripts/apply-turso-secrets.sh --github-only      # بلا لمس Vercel
-#   bash scripts/apply-turso-secrets.sh --repo owner/name --env production
+# الاستخدام الأول (لا يترك أثرًا في سجل الصدفة — القيم تُطلب بمدخل مخفي):
+#   bash scripts/apply-turso-secrets.sh
 #
-# بلا متغيرات بيئة يطلب القيم من المدخل بشكل مخفي (read -s).
+# الاستخدام الثاني (أتمتة/اختبار فقط — القيم inline تُحفَظ في ~/.bash_history
+# أو ما يكافئه، فلا تستخدمه على جهاز مشترك؛ انظر «نظافة السجل» في
+# docs/ops/secret-rotation.md قبل لصق أي سر في سطر الأوامر):
+#   TURSO_DATABASE_URL='libsql://…' TURSO_AUTH_TOKEN_PROD='eyJ…' TURSO_AUTH_TOKEN_CI='eyJ…' bash scripts/apply-turso-secrets.sh
+#   bash scripts/apply-turso-secrets.sh --dry-run          # عرض ما سيُفعل بلا تنفيذ
+#   bash scripts/apply-turso-secrets.sh --github-only      # بلا لمس Vercel (لا يُسأل عن رمز التشغيل)
+#   bash scripts/apply-turso-secrets.sh --vercel-only      # بلا لمس GitHub (لا يُسأل عن رمز المجسّ)
+#   bash scripts/apply-turso-secrets.sh --repo owner/name --env production
 set -uo pipefail
 
 REPO=""
@@ -31,7 +34,7 @@ SKIP_VERCEL=false
 SKIP_GITHUB=false
 
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -78,24 +81,43 @@ describe_token() {
   fi
 }
 
-URL_VALUE="$(read_secret TURSO_DATABASE_URL)"
+URL_ENV="$(printenv TURSO_DATABASE_URL || true)"
+URL_VALUE="${URL_ENV:-$(read_secret TURSO_DATABASE_URL)}"
 
-# الرموز المفصولة تُقرأ من البيئة فقط (بلا سؤال تفاعلي)؛ السؤال التفاعلي الواحد
-# يبقى على الاسم القديم للحفاظ على تجربة الاستخدام السابقة حرفيًا.
+# القراءة أولًا من البيئة (للأتمتة والاختبار)، وكل غائب يُسأل عنه بمدخل مخفي
+# — فالمسار الأول (تشغيل عارٍ) لا يترك أي سر في سجل الصدفة. قاعدتان صارمتان:
+#   1. لا تلوث متبادل: رمز CI لا يُستخدَم للتشغيل أبدًا، ورمز PROD لا يُستخدَم
+#      للمجسّ أبدًا — السقوط الوحيد المسموح هو الرمز المشترك القديم.
+#   2. مع --vercel-only/--github-only لا يُسأل عن الدور المُتخطَّى أصلًا.
 PROD_ENV="$(printenv TURSO_AUTH_TOKEN_PROD || true)"
 CI_ENV="$(printenv TURSO_AUTH_TOKEN_CI || true)"
 LEGACY_ENV="$(printenv TURSO_AUTH_TOKEN || true)"
+if [ -n "${URL_ENV}${PROD_ENV}${CI_ENV}${LEGACY_ENV}" ]; then
+  echo "ℹ️  قيم من البيئة — إن كُتبت inline فهي في سجل الصدفة (~/.bash_history)؛ المرة القادمة شغّل عاريًا والصق في المدخل المخفي (انظر «نظافة السجل» في docs/ops/secret-rotation.md)." >&2
+elif [ -t 0 ]; then
+  echo "ℹ️  لا قيم في البيئة — ستُطلَب بمدخل مخفي لا يُحفَظ في السجل." >&2
+fi
 if [ -z "${PROD_ENV}${CI_ENV}${LEGACY_ENV}" ]; then
   LEGACY_ENV="$(read_secret TURSO_AUTH_TOKEN)"
 fi
 PROD_VALUE="${PROD_ENV:-$LEGACY_ENV}"
 CI_VALUE="${CI_ENV:-$LEGACY_ENV}"
-[ -n "$PROD_VALUE" ] || fail "لا رمز للتشغيل: اضبط TURSO_AUTH_TOKEN_PROD أو الرمز المشترك TURSO_AUTH_TOKEN."
-[ -n "$CI_VALUE" ] || fail "لا رمز للمجسّ: اضبط TURSO_AUTH_TOKEN_CI أو الرمز المشترك TURSO_AUTH_TOKEN."
-if [ -z "$PROD_ENV" ]; then
+if [ -z "$PROD_VALUE" ] && [ "$SKIP_VERCEL" = false ]; then
+  PROD_VALUE="$(read_secret TURSO_AUTH_TOKEN_PROD)"
+fi
+if [ -z "$CI_VALUE" ] && [ "$SKIP_GITHUB" = false ]; then
+  CI_VALUE="$(read_secret TURSO_AUTH_TOKEN_CI)"
+fi
+if [ "$SKIP_VERCEL" = false ] && [ -z "$PROD_VALUE" ]; then
+  fail "لا رمز للتشغيل: اضبط TURSO_AUTH_TOKEN_PROD أو الرمز المشترك TURSO_AUTH_TOKEN."
+fi
+if [ "$SKIP_GITHUB" = false ] && [ -z "$CI_VALUE" ]; then
+  fail "لا رمز للمجسّ: اضبط TURSO_AUTH_TOKEN_CI أو الرمز المشترك TURSO_AUTH_TOKEN."
+fi
+if [ -z "$PROD_ENV" ] && [ "$SKIP_VERCEL" = false ]; then
   echo "⚠️  TURSO_AUTH_TOKEN_PROD غير مضبوط — سيُستخدم الرمز المشترك للتشغيل؛ للفصل مرّر TURSO_AUTH_TOKEN_PROD وTURSO_AUTH_TOKEN_CI قيمتين مختلفتين." >&2
 fi
-if [ -z "$CI_ENV" ]; then
+if [ -z "$CI_ENV" ] && [ "$SKIP_GITHUB" = false ]; then
   echo "⚠️  TURSO_AUTH_TOKEN_CI غير مضبوط — سيُستخدم الرمز المشترك للمجسّ؛ للفصل مرّر TURSO_AUTH_TOKEN_PROD وTURSO_AUTH_TOKEN_CI قيمتين مختلفتين." >&2
 fi
 
@@ -154,13 +176,13 @@ validate_token() {
   case "$value" in *://*) fail "قيمة الرمز في $label تحمل رابطًا لا رمزًا — $(describe_token "$value")." ;; esac
 }
 
-validate_token "TURSO_AUTH_TOKEN_PROD" "$PROD_VALUE"
-validate_token "TURSO_AUTH_TOKEN_CI" "$CI_VALUE"
+if [ "$SKIP_VERCEL" = false ]; then validate_token "TURSO_AUTH_TOKEN_PROD" "$PROD_VALUE"; fi
+if [ "$SKIP_GITHUB" = false ]; then validate_token "TURSO_AUTH_TOKEN_CI" "$CI_VALUE"; fi
 
 echo "🔎 التحقق الشكلي نجح:"
 echo "   • TURSO_DATABASE_URL: $(describe_url "$URL_VALUE")"
-echo "   • TURSO_AUTH_TOKEN_PROD: JWT (طول ${#PROD_VALUE})$([ -z "$PROD_ENV" ] && printf ' ← مشترك انتقالي ⚠️')"
-echo "   • TURSO_AUTH_TOKEN_CI:   JWT (طول ${#CI_VALUE})$([ -z "$CI_ENV" ] && printf ' ← مشترك انتقالي ⚠️')"
+if [ "$SKIP_VERCEL" = false ]; then echo "   • TURSO_AUTH_TOKEN_PROD: JWT (طول ${#PROD_VALUE})$([ -z "$PROD_ENV" ] && printf ' ← مشترك انتقالي ⚠️')"; fi
+if [ "$SKIP_GITHUB" = false ]; then echo "   • TURSO_AUTH_TOKEN_CI:   JWT (طول ${#CI_VALUE})$([ -z "$CI_ENV" ] && printf ' ← مشترك انتقالي ⚠️')"; fi
 echo
 
 actions=()

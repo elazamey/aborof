@@ -1,6 +1,7 @@
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { checkMigrationSql, stripSqlComments } from "../scripts/lib/migration-policy.mjs";
 import { createClient, type Client } from "@libsql/client";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -148,49 +149,75 @@ describe("compound transaction (order + items + stock)", () => {
   });
 });
 
-describe("additive-only migrations lock", () => {
-  // الهجرات إضافية فقط: CREATE/INSERT..SELECT/ADD COLUMN. أي عبارة هادمة
-  // (DROP/RENAME/TRUNCATE/DELETE/UPDATE) في ملف .sql تُفشل البوابة — والبديل
-  // الموثّق: عمود جديد + نقل تدريجي + إسقاط لاحق في نافذة صيانة مُعلَنة
-  // (انظر PRODUCTION-CONTRACT.md). الوحدات .ts المولّدة لا تُفحص (مشتقة ومُزامَنة
-  // عبر sync-migrations --check) — المصدر المرجعي هو .sql وحده.
-  const DESTRUCTIVE = [
-    /\bDROP\s+(TABLE|COLUMN|INDEX|TRIGGER|VIEW)\b/i,
-    /\bALTER\s+TABLE\s+\S+\s+(DROP|RENAME)\b/i,
-    /\bRENAME\s+(TO|COLUMN)\b/i,
-    /\bTRUNCATE\b/i,
-    /\bDELETE\s+FROM\b/i,
-    /\bUPDATE\s+\S+\s+SET\b/i,
-  ];
-
-  function migrationSql(): { file: string; sql: string }[] {
+describe("migration policy lock (additive + approved backfill)", () => {
+  // السياسة في scripts/lib/migration-policy.mjs: إضافية افتراضيًا، وUPDATE/
+  // DELETE فقط في ملف *_backfill.sql مصرّح ومحدود الدفعات. الوحدات .ts المولّدة
+  // لا تُفحص (مشتقة ومُزامَنة عبر sync-migrations --check) — المرجع هو .sql.
+  function migrationFiles(): { file: string; sql: string }[] {
     const dir = path.join(process.cwd(), "src", "lib", "db", "migrations");
     return fs
       .readdirSync(dir)
       .filter((f) => f.endsWith(".sql"))
-      .map((file) => {
-        const raw = fs.readFileSync(path.join(dir, file), "utf8");
-        // تجريد التعليقات أولًا حتى لا تُحسب كلماتها (مثل @ensure-columns).
-        const sql = raw
-          .replace(/--[^\n]*/g, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-        return { file, sql };
-      });
+      .map((file) => ({ file, sql: fs.readFileSync(path.join(dir, file), "utf8") }));
   }
 
-  test("no destructive statements in any .sql migration", () => {
-    const files = migrationSql();
+  test("every real .sql migration passes the policy checker", () => {
+    const files = migrationFiles();
     assert.ok(files.length > 0, "لا ملفات هجرة — الحارس يجب أن يجد المرجع وإلا مرّر بصمت");
     for (const { file, sql } of files) {
-      for (const pattern of DESTRUCTIVE) {
-        assert.doesNotMatch(sql, pattern, `${file} يحمل عبارة هادمة ${pattern} — الهجرات إضافية فقط`);
-      }
+      assert.deepEqual(checkMigrationSql(file, sql), [], `${file} يخرق سياسة الهجرات`);
     }
   });
 
+  test("DROP/RENAME/TRUNCATE banned unconditionally (even in backfill files)", () => {
+    const backfill = (body: string) =>
+      `-- @backfill:approved: PR-1\n-- @backfill:rollback: re-run\n${body}`;
+    for (const banned of [
+      "DROP TABLE products;",
+      "ALTER TABLE products DROP COLUMN stock;",
+      "ALTER TABLE products RENAME TO p2;",
+      "TRUNCATE TABLE orders;",
+    ]) {
+      assert.ok(
+        checkMigrationSql("0003_x_backfill.sql", backfill(banned)).length > 0,
+        `كان يجب رفض: ${banned}`
+      );
+    }
+  });
+
+  test("UPDATE/DELETE outside *_backfill.sql rejected; approved+bounded backfill accepted", () => {
+    const update = "UPDATE products SET stock=0 WHERE id='p1' LIMIT 100;";
+    assert.ok(checkMigrationSql("0003_normal.sql", update).length > 0, "UPDATE في ملف عادي مرفوض");
+    const file = "0003_stock_backfill.sql";
+    assert.ok(
+      checkMigrationSql(file, update).some((v) => v.includes("التصريح")),
+      "بلا @backfill:approved مرفوض"
+    );
+    assert.ok(
+      checkMigrationSql(file, `-- @backfill:approved: PR-9\n${update}`).some((v) => v.includes("التراجع")),
+      "بلا @backfill:rollback مرفوض"
+    );
+    assert.ok(
+      checkMigrationSql(
+        file,
+        `-- @backfill:approved: PR-9\n-- @backfill:rollback: restore-from-backup\nUPDATE products SET stock=0 WHERE id='p1';`
+      ).some((v) => v.includes("LIMIT")),
+      "بلا حدّ دفعات مرفوض"
+    );
+    assert.deepEqual(
+      checkMigrationSql(
+        file,
+        `-- @backfill:approved: PR-9\n-- @backfill:rollback: restore-from-backup\nUPDATE products SET stock=0 WHERE id='p1' LIMIT 100;`
+      ),
+      [],
+      "backfill مصرّح ومحدود مقبول"
+    );
+  });
+
   test("ALTER TABLE allowed only as ADD COLUMN (safe in SQLite)", () => {
-    for (const { file, sql } of migrationSql()) {
-      const alters = [...sql.matchAll(/\bALTER\s+TABLE\b([\s\S]{0,80}?);/gi)];
+    for (const { file, sql } of migrationFiles()) {
+      const stripped = stripSqlComments(sql);
+      const alters = [...stripped.matchAll(/\bALTER\s+TABLE\b([\s\S]{0,80}?);/gi)];
       for (const m of alters) {
         assert.match(m[1], /ADD\s+COLUMN/i, `${file}: ALTER TABLE بلا ADD COLUMN ممنوع`);
       }
