@@ -77,7 +77,10 @@ async function attemptDerivedConnection() {
       await client.execute("SELECT 1 AS ok");
       return { client, candidate, note: "" };
     } catch (error) {
-      failures.push(classifyConnectionError(error));
+      // نص الخطأ نفسه مفيد للتشخيص ومع ذلك آمن: الرابط المرشّح داخل قائمة
+      // الحجب، فأي ظهور له في الرسالة يُستبدل بـ *** قبل الطباعة.
+      const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidate]);
+      failures.push(`${classifyConnectionError(error)} — ${raw}`);
       client.close();
     }
   }
