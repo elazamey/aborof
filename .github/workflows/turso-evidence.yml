@@ -10,6 +10,10 @@ name: Turso evidence probe
 #    في مكانه الطبيعي بدل انتظار تشغيل يدوي بعد النشر.
 #  - `workflow_dispatch`: التشغيل اليدوي متى شئت.
 #
+# ‏أداة **أدلة لا بوابة**: حالة قاعدة الإنتاج لا تُحمرّ نقطة التحقق في الطلب (وإلا
+# بدا كل طلب مكسورًا بسبب إعداد خارجي)، لكن الفشل يُعلَن مرّتين: تعليق بالجدول
+# كاملًا + إشعار `::error::` في تبويب الفحوص. البوابة الحاجبة تبقى Quality and Security.
+#
 # نطاق الأسرار: الوظيفة الأولى تقرأ نطاق المستودع، والثانية تعمل فقط عند غيابه
 # لتجرّب نطاق بيئة `production` — فيعرف المالك من التعليق أيّ النطاقين مضبوط.
 # (بيئات GitHub لا تُقرأ من وظيفة واحدة بلا `environment` على مستوى الوظيفة.)
@@ -67,6 +71,8 @@ jobs:
 
       - name: Turso probe (read-only)
         if: steps.detect.outputs.configured == 'true'
+        # كود الخروج يُترجم إشعارًا وتعليقًا لا نقطة حمراء — انظر ترويسة الملف.
+        continue-on-error: true
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -103,6 +109,7 @@ jobs:
         run: npm ci --omit=dev --no-audit --no-fund
 
       - name: Turso probe (read-only)
+        continue-on-error: true
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
