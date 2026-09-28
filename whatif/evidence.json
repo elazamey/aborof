@@ -1,34 +1,34 @@
 {
-  "run": "run16",
+  "run": "run23",
   "base": "http://127.0.0.1:3000",
   "nodb_base": "http://127.0.0.1:3001",
-  "generated_at": "2026-09-28T09:04:37.889Z",
+  "generated_at": "2026-09-28T09:15:08.295Z",
   "baseline": {
-    "orders": 126,
-    "order_items": 126,
+    "orders": 191,
+    "order_items": 191,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-84998357-e7f458f9",
+      "id": "ORD-86895010-fef2178a",
       "total": 120,
       "shipping_fee": 50,
       "items": "[{\"id\":\"p3\",\"name\":\"سائل غسيل أطباق ليمون 2 لتر\",\"price\":70,\"qty\":1}]"
     }
   },
   "final_db": {
-    "orders": 139,
-    "order_items": 139,
+    "orders": 204,
+    "order_items": 204,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-86276322-2b433ea2",
+      "id": "ORD-86907078-1eed5d26",
       "total": 120,
       "shipping_fee": 50,
       "items": "[{\"id\":\"p3\",\"name\":\"سائل غسيل أطباق ليمون 2 لتر\",\"price\":70,\"qty\":1}]"
     }
   },
   "totals": {
-    "PASS": 31
+    "PASS": 32
   },
   "scenarios": [
     {
@@ -75,10 +75,10 @@
       ],
       "actual": {
         "http": 200,
-        "request_id": "req_86a45dc2-87fe-4947-923c-e59ff21c52a3",
+        "request_id": "req_c9aad6e7-0fbe-49e0-9f57-5344abacf7c5",
         "body": {
           "ok": true,
-          "id": "ORD-86274570-e8116cb7",
+          "id": "ORD-86905251-fa904cea",
           "subtotal": 3600,
           "shipping": 0,
           "total": 3600
@@ -86,12 +86,12 @@
         "stock_before": 50,
         "stock_after": 30,
         "db": {
-          "orders": 127,
-          "order_items": 127,
+          "orders": 192,
+          "order_items": 192,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-86274570-e8116cb7",
+            "id": "ORD-86905251-fa904cea",
             "total": 3600,
             "shipping_fee": 0,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":20}]"
@@ -99,7 +99,7 @@
         }
       },
       "status": "PASS",
-      "ms": 84
+      "ms": 79
     },
     {
       "id": "WF-002",
@@ -132,7 +132,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 127 → 127 (بلا تغيير)"
+          "detail": "عدد الطلبات 192 → 192 (بلا تغيير)"
         },
         {
           "ok": true,
@@ -145,17 +145,17 @@
         "chat_reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف زجاج ومرايا 1 لتر — 55 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 جنيه\n• منظف حمامات ومزيل جير 1 لتر — 75 جنيه\n• مز",
         "http": 409,
         "code": "CONFLICT",
-        "request_id": "req_725be577-afbd-4f95-9ada-2f1ce6911f6d",
+        "request_id": "req_6738c087-9b05-43cb-8488-9b44e8cdd7ed",
         "body": {
           "error": "أحد المنتجات لم يعد متاحًا",
           "code": "CONFLICT",
-          "request_id": "req_725be577-afbd-4f95-9ada-2f1ce6911f6d"
+          "request_id": "req_6738c087-9b05-43cb-8488-9b44e8cdd7ed"
         },
-        "orders_before": 127,
-        "orders_after": 127
+        "orders_before": 192,
+        "orders_after": 192
       },
       "status": "PASS",
-      "ms": 91
+      "ms": 35
     },
     {
       "id": "WF-003",
@@ -188,21 +188,21 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 127 → 127 (لم يُنشأ طلب)"
+          "detail": "عدد الطلبات 192 → 192 (لم يُنشأ طلب)"
         }
       ],
       "actual": {
         "http": 409,
         "code": "CONFLICT",
         "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-        "request_id": "req_aed503d1-de03-4168-8c32-d9c82066ac18",
+        "request_id": "req_4cecb134-a831-4ad9-9a3d-29f3530e22d4",
         "stock_before": 7,
         "stock_after": 7,
-        "orders_before": 127,
-        "orders_after": 127
+        "orders_before": 192,
+        "orders_after": 192
       },
       "status": "PASS",
-      "ms": 91
+      "ms": 170
     },
     {
       "id": "WF-004",
@@ -231,7 +231,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 127 → 127"
+          "detail": "عدد الطلبات 192 → 192"
         },
         {
           "ok": true,
@@ -242,13 +242,13 @@
         "http": 409,
         "code": "CONFLICT",
         "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-        "request_id": "req_5c8466e4-9c9d-416d-b4e4-d762d51adfbb",
+        "request_id": "req_59ef4b16-4f99-4a4a-b9ea-d3512c9ebb7e",
         "stock_before": 0,
         "stock_after": 0,
-        "orders_after": 127
+        "orders_after": 192
       },
       "status": "PASS",
-      "ms": 58
+      "ms": 66
     },
     {
       "id": "WF-005",
@@ -273,7 +273,7 @@
         },
         {
           "ok": true,
-          "detail": "request_id=req_2b81e946-d21e-40c1-8e36-a21090ba6e1c"
+          "detail": "request_id=req_1d7e33c8-7fb5-4762-8624-a0a33bce2446"
         },
         {
           "ok": true,
@@ -289,23 +289,23 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 127 → 127 (بلا تغيير)"
+          "detail": "عدد الطلبات 192 → 192 (بلا تغيير)"
         }
       ],
       "actual": {
         "chat_http": 422,
         "chat_code": "VALIDATION_FAILED",
         "chat_error": "Unrecognized key(s) in object: 'message'",
-        "chat_request_id": "req_2b81e946-d21e-40c1-8e36-a21090ba6e1c",
+        "chat_request_id": "req_1d7e33c8-7fb5-4762-8624-a0a33bce2446",
         "order_http": 422,
         "order_code": "VALIDATION_FAILED",
         "order_error": "items: السلة فارغة",
-        "order_request_id": "req_8b3630c0-0610-4cbc-8101-40bee172e998",
-        "orders_before": 127,
-        "orders_after": 127
+        "order_request_id": "req_98d472b8-4cf2-48f7-9360-682eb1d24f80",
+        "orders_before": 192,
+        "orders_after": 192
       },
       "status": "PASS",
-      "ms": 27
+      "ms": 32
     },
     {
       "id": "WF-010",
@@ -322,7 +322,7 @@
         },
         {
           "ok": true,
-          "detail": "رقما الطلبين مختلفان: ORD-86274913-c339a99b , ORD-86274929-da4c8315"
+          "detail": "رقما الطلبين مختلفان: ORD-86905623-53976efc , ORD-86905639-614bdc29"
         },
         {
           "ok": true,
@@ -340,19 +340,19 @@
       "actual": {
         "http_1": 200,
         "http_2": 200,
-        "id_1": "ORD-86274913-c339a99b",
-        "id_2": "ORD-86274929-da4c8315",
-        "request_id_1": "req_22bea788-e6cd-4e2a-a3e0-689be767b18c",
-        "request_id_2": "req_ed418b1e-57b9-4c69-b13a-eb0d70048c18",
+        "id_1": "ORD-86905623-53976efc",
+        "id_2": "ORD-86905639-614bdc29",
+        "request_id_1": "req_97aa2dd8-42e4-48b0-857f-48ba846f2af4",
+        "request_id_2": "req_9c9bee00-8cc3-4290-90cd-a12e929345bb",
         "stock_before": 10,
         "stock_after": 8,
         "db": {
-          "orders": 129,
-          "order_items": 129,
+          "orders": 194,
+          "order_items": 194,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-86274929-da4c8315",
+            "id": "ORD-86905639-614bdc29",
             "total": 230,
             "shipping_fee": 50,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":1}]"
@@ -361,7 +361,7 @@
         "finding": "لا يوجد idempotency key في createOrderContract — التكرار يُنشئ طلبين"
       },
       "status": "PASS",
-      "ms": 90
+      "ms": 82
     },
     {
       "id": "WF-011",
@@ -420,10 +420,10 @@
         "tamper_http": 422,
         "tamper_code": "VALIDATION_FAILED",
         "tamper_error": "items.0: Unrecognized key(s) in object: 'price'",
-        "request_id": "req_4d16352f-8a39-4a2a-85e6-b6de2f8198a6"
+        "request_id": "req_25a81953-3f6a-40b5-b157-c65615b0b3fc"
       },
       "status": "PASS",
-      "ms": 98
+      "ms": 115
     },
     {
       "id": "WF-016",
@@ -452,7 +452,7 @@
         },
         {
           "ok": true,
-          "detail": "request_id=req_5f66936a-0060-4c15-b8e1-c18678e03e4d للربط بالسجلات"
+          "detail": "request_id=req_aa2458db-6152-490e-9437-e72696035f0d للربط بالسجلات"
         },
         {
           "ok": true,
@@ -460,18 +460,18 @@
         },
         {
           "ok": true,
-          "detail": "طلبات DB الحقيقية 130 → 130 (لم يُكتب شيء)"
+          "detail": "طلبات DB الحقيقية 195 → 195 (لم يُكتب شيء)"
         }
       ],
       "actual": {
         "http": 503,
         "code": "SERVICE_UNAVAILABLE",
         "message": "قاعدة البيانات غير مربوطة",
-        "request_id": "req_5f66936a-0060-4c15-b8e1-c18678e03e4d",
+        "request_id": "req_aa2458db-6152-490e-9437-e72696035f0d",
         "read_http": 200,
         "read_products": 12,
-        "real_db_orders_before": 130,
-        "real_db_orders_after": 130
+        "real_db_orders_before": 195,
+        "real_db_orders_after": 195
       },
       "status": "PASS",
       "ms": 23
@@ -515,7 +515,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 130 → 130"
+          "detail": "عدد الطلبات 195 → 195"
         }
       ],
       "actual": {
@@ -527,11 +527,11 @@
         "delete_product": 401,
         "stock_before": 49,
         "stock_after": 49,
-        "orders_before": 130,
-        "orders_after": 130
+        "orders_before": 195,
+        "orders_after": 195
       },
       "status": "PASS",
-      "ms": 64
+      "ms": 63
     },
     {
       "id": "WF-018",
@@ -556,7 +556,7 @@
         },
         {
           "ok": true,
-          "detail": "أ) عدد الطلبات 130 → 130 (لا طلب)"
+          "detail": "أ) عدد الطلبات 195 → 195 (لا طلب)"
         },
         {
           "ok": true,
@@ -576,7 +576,7 @@
         },
         {
           "ok": true,
-          "detail": "ب) طلبات DB 130 → 131 (+1 فقط)"
+          "detail": "ب) طلبات DB 195 → 196 (+1 فقط)"
         },
         {
           "ok": true,
@@ -594,8 +594,8 @@
         "a_p1_before": 10,
         "a_p1_after": 10,
         "a_orders": [
-          130,
-          130
+          195,
+          195
         ],
         "b_http": [
           200,
@@ -608,20 +608,20 @@
         "b_stock_before": 5,
         "b_stock_after": 1,
         "b_orders_created": [
-          130,
-          131
+          195,
+          196
         ],
         "b_request_ids": [
-          "req_90a975e9-7c60-486f-ba8a-e0e70e051100",
-          "req_d81bbd29-ef44-4f94-b17c-32650bc81dd7"
+          "req_14d906a4-f3bb-49f7-a9f9-d5b874fc02d2",
+          "req_a0d5d216-f41e-4b04-a32d-08d458bbadbf"
         ],
         "db": {
-          "orders": 131,
-          "order_items": 131,
+          "orders": 196,
+          "order_items": 196,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-86275262-ca7c84dc",
+            "id": "ORD-86906082-8b5a932f",
             "total": 1000,
             "shipping_fee": 0,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
@@ -629,7 +629,7 @@
         }
       },
       "status": "PASS",
-      "ms": 154
+      "ms": 248
     },
     {
       "id": "WF-012",
@@ -669,7 +669,7 @@
         "resolved_size": "5 لتر"
       },
       "status": "PASS",
-      "ms": 303
+      "ms": 267
     },
     {
       "id": "WF-013",
@@ -720,7 +720,7 @@
         "expected": "أرخص *متاح* = 45 ج (منظف أرضيات مركز 1 لتر)، واستبعاد 30 ج لأن مخزونه 0"
       },
       "status": "PASS",
-      "ms": 182
+      "ms": 151
     },
     {
       "id": "WF-014",
@@ -778,7 +778,7 @@
         "mechanism": "localAnswer يرتب بالدرجة ثم يقطع عند 3؛ عند التعادل يفوز الأسبق في ترتيب الكتالوج (featured ثم rowid)، والصنفان المُدرجان أخيرًا فيُستبعدان رغم مطابقتهما"
       },
       "status": "PASS",
-      "ms": 85
+      "ms": 111
     },
     {
       "id": "WF-015",
@@ -815,13 +815,13 @@
         "code": null,
         "source": "local",
         "reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 جنيه\n\nتقدر تضيفهم للسلة وتكمل الطلب، والد",
-        "request_id": "req_a46ac345-5bd1-437c-a780-a2284517d4d2",
+        "request_id": "req_6dfd2d39-d24b-4f48-a73b-1aff2e33b965",
         "leaked_api_key": false,
         "leaked_stack": false,
         "provider_failure_mode": "fetch failed — انقطاع اتصال على مستوى TLS في بيئة الاختبار، لا رفض مفتاح؛ كلا المسارين يُنتجان نفس قرار التراجع"
       },
       "status": "PASS",
-      "ms": 58
+      "ms": 43
     },
     {
       "id": "WF-019",
@@ -842,7 +842,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 131 → 131 (لا تنفيذ من محادثة)"
+          "detail": "عدد الطلبات 196 → 196 (لا تنفيذ من محادثة)"
         },
         {
           "ok": true,
@@ -854,11 +854,11 @@
         "source": "local",
         "reply": "أهلاً بحضرتك في روفيده 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على 01095032221.",
         "fabricates_order_id": false,
-        "orders_before": 131,
-        "orders_after": 131
+        "orders_before": 196,
+        "orders_after": 196
       },
       "status": "PASS",
-      "ms": 18
+      "ms": 19
     },
     {
       "id": "WF-020",
@@ -875,7 +875,7 @@
         },
         {
           "ok": true,
-          "detail": "كوكيز صدر فعلًا: 1790586275951-sxdnCqYYfq…"
+          "detail": "كوكيز صدر فعلًا: 1790586906714-vd9T7gT0nW…"
         },
         {
           "ok": true,
@@ -896,7 +896,7 @@
       ],
       "actual": {
         "login_http": 200,
-        "cookie_value_on_the_wire": "1790586275951-sxdnCqYYfqlvk2wWevf9hjNZWMoocpva.IXVgGqexjLXVh2WT6cL2JuoTovsUqTiI74-gCyY4RB4",
+        "cookie_value_on_the_wire": "1790586906714-vd9T7gT0nW-URZCZK9F1iPccEhb4rc0c.6aizPVENRaebbiTnNWHH0xnfTXE9gl3DwBwDUBh59AI",
         "wire_contains_percent3A": false,
         "session_http": 200,
         "session_authenticated": true,
@@ -907,7 +907,7 @@
         "defect": true
       },
       "status": "PASS",
-      "ms": 57
+      "ms": 51
     },
     {
       "id": "WF-021",
@@ -920,7 +920,7 @@
       "checks": [
         {
           "ok": true,
-          "detail": "أنشئ طلب للتتبّع: ORD-86276004-b6558675"
+          "detail": "أنشئ طلب للتتبّع: ORD-86906769-7d88d028"
         },
         {
           "ok": true,
@@ -948,11 +948,11 @@
         }
       ],
       "actual": {
-        "order_id": "ORD-86276004-b6558675",
+        "order_id": "ORD-86906769-7d88d028",
         "http": 200,
         "body": {
           "ok": true,
-          "id": "ORD-86276004-b6558675",
+          "id": "ORD-86906769-7d88d028",
           "status": "جديد",
           "items": [
             {
@@ -960,15 +960,15 @@
               "qty": 1
             }
           ],
-          "created_at": "2026-09-28 09:04:36"
+          "created_at": "2026-09-28 09:15:06"
         },
-        "request_id": "req_0c2e08f1-7831-4d14-97c7-bc3acad8b6d5",
+        "request_id": "req_e158168b-e98a-4c57-9b99-dff43e2e3008",
         "leaks_full_phone": false,
         "leaks_address": false,
         "leaks_price": false
       },
       "status": "PASS",
-      "ms": 35
+      "ms": 42
     },
     {
       "id": "WF-022",
@@ -997,11 +997,11 @@
         },
         {
           "ok": true,
-          "detail": "سُجّلت محاولة فاشلة في التدقيق: 17 → 19"
+          "detail": "سُجّلت محاولة فاشلة في التدقيق: 27 → 29"
         }
       ],
       "actual": {
-        "order_id": "ORD-86276043-098c6622",
+        "order_id": "ORD-86906810-64595413",
         "wrong_last4_http": 404,
         "wrong_last4_error": "تعذر العثور على الطلب",
         "wrong_last4_code": "NOT_FOUND",
@@ -1009,12 +1009,12 @@
         "ghost_id_error": "تعذر العثور على الطلب",
         "messages_identical": true,
         "audit_track_failed": [
-          17,
-          19
+          27,
+          29
         ]
       },
       "status": "PASS",
-      "ms": 59
+      "ms": 56
     },
     {
       "id": "WF-023",
@@ -1042,11 +1042,11 @@
         "http": 404,
         "code": "NOT_FOUND",
         "error": "تعذر العثور على الطلب",
-        "request_id": "req_6b31daa6-e5ae-453c-949f-aa3edcf2b7d5",
+        "request_id": "req_7ab138fa-fc15-4432-b6a7-9125fe856cf2",
         "identical_to_enabled_failure": true
       },
       "status": "PASS",
-      "ms": 19
+      "ms": 15
     },
     {
       "id": "WF-024",
@@ -1099,7 +1099,7 @@
         "stock_delta": 8
       },
       "status": "PASS",
-      "ms": 260
+      "ms": 245
     },
     {
       "id": "WF-025",
@@ -1143,7 +1143,7 @@
         "leaks_tool_names": false
       },
       "status": "PASS",
-      "ms": 40
+      "ms": 37
     },
     {
       "id": "WF-006",
@@ -1164,23 +1164,23 @@
         },
         {
           "ok": true,
-          "detail": "request_id=req_9231d799-4299-4763-b1d0-a2338d1c2f7b"
+          "detail": "request_id=req_e17142ab-1df5-4e15-8578-7e7d522f1c17"
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 139 → 139 (بلا تغيير)"
+          "detail": "عدد الطلبات 204 → 204 (بلا تغيير)"
         }
       ],
       "actual": {
         "http": 413,
         "code": "PAYLOAD_TOO_LARGE",
         "error": "حجم الطلب كبير جدًا",
-        "request_id": "req_9231d799-4299-4763-b1d0-a2338d1c2f7b",
-        "orders_before": 139,
-        "orders_after": 139
+        "request_id": "req_e17142ab-1df5-4e15-8578-7e7d522f1c17",
+        "orders_before": 204,
+        "orders_after": 204
       },
       "status": "PASS",
-      "ms": 25
+      "ms": 15
     },
     {
       "id": "WF-007",
@@ -1212,9 +1212,9 @@
         "http": 422,
         "code": "VALIDATION_FAILED",
         "error": "جسم الطلب ليس JSON صالحًا",
-        "request_id": "req_5b0ff521-556b-4a26-911e-96f6c4b0b48c",
+        "request_id": "req_af1bfe8a-44e4-48c6-9304-bba285fbfac9",
         "leaks_parser_internals": false,
-        "body_excerpt": "{\"error\":\"جسم الطلب ليس JSON صالحًا\",\"code\":\"VALIDATION_FAILED\",\"request_id\":\"req_5b0ff521-556b-4a26-911e-96f6c4b0b48c\"}"
+        "body_excerpt": "{\"error\":\"جسم الطلب ليس JSON صالحًا\",\"code\":\"VALIDATION_FAILED\",\"request_id\":\"req_af1bfe8a-44e4-48c6-9304-bba285fbfac9\"}"
       },
       "status": "PASS",
       "ms": 15
@@ -1254,7 +1254,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 139 → 139 (بلا تغيير)"
+          "detail": "عدد الطلبات 204 → 204 (بلا تغيير)"
         }
       ],
       "actual": {
@@ -1280,11 +1280,11 @@
             "error": "customer: الطول الأدنى 2 أحرف"
           }
         },
-        "orders_before": 139,
-        "orders_after": 139
+        "orders_before": 204,
+        "orders_after": 204
       },
       "status": "PASS",
-      "ms": 66
+      "ms": 72
     },
     {
       "id": "WF-009",
@@ -1317,7 +1317,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 139 → 139"
+          "detail": "عدد الطلبات 204 → 204"
         }
       ],
       "actual": {
@@ -1333,11 +1333,11 @@
         },
         "stock_before": 50,
         "stock_after": 50,
-        "orders_before": 139,
-        "orders_after": 139
+        "orders_before": 204,
+        "orders_after": 204
       },
       "status": "PASS",
-      "ms": 95
+      "ms": 79
     },
     {
       "id": "WF-026",
@@ -1388,7 +1388,7 @@
         }
       },
       "status": "PASS",
-      "ms": 125
+      "ms": 87
     },
     {
       "id": "WF-027",
@@ -1421,10 +1421,10 @@
         "last_http": 429,
         "last_code": "RATE_LIMITED",
         "retry_after_seconds": 600,
-        "request_id": "req_1c7c8e7e-6584-4494-a205-5f0d1df55768"
+        "request_id": "req_881691ff-b634-4cf8-8a8c-6501a372db62"
       },
       "status": "PASS",
-      "ms": 727
+      "ms": 623
     },
     {
       "id": "WF-028",
@@ -1453,7 +1453,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 139 → 139"
+          "detail": "عدد الطلبات 204 → 204"
         }
       ],
       "actual": {
@@ -1467,11 +1467,11 @@
           "code": "VALIDATION_FAILED",
           "error": "items: الحد الأقصى 50 صنفًا"
         },
-        "orders_before": 139,
-        "orders_after": 139
+        "orders_before": 204,
+        "orders_after": 204
       },
       "status": "PASS",
-      "ms": 35
+      "ms": 24
     },
     {
       "id": "WF-029",
@@ -1484,19 +1484,19 @@
       "checks": [
         {
           "ok": true,
-          "detail": "200 /api/products — header=req_9da8fda8-9a91-40e7-9098-641922e590e9"
+          "detail": "200 /api/products — header=req_d2faebf6-26cc-4a07-931a-3f6bf4d45728"
         },
         {
           "ok": true,
-          "detail": "422 chat — header=req_66c73176-7513-48cb-b0a1-001953ec1480 body=req_66c73176-7513-48cb-b0a1-001953ec1480"
+          "detail": "422 chat — header=req_96302375-8fbe-46e6-af30-28390c8ec014 body=req_96302375-8fbe-46e6-af30-28390c8ec014"
         },
         {
           "ok": true,
-          "detail": "401 orders — header=req_70aeb69e-32a3-4e11-b5de-c6a31f2bec2d body=req_70aeb69e-32a3-4e11-b5de-c6a31f2bec2d"
+          "detail": "401 orders — header=req_bf3d230b-47a9-453c-a7cd-d5c31e34e075 body=req_bf3d230b-47a9-453c-a7cd-d5c31e34e075"
         },
         {
           "ok": true,
-          "detail": "409 conflict — header=req_28a401b3-af47-46ca-a743-b9b97cab3ff8 body=req_28a401b3-af47-46ca-a743-b9b97cab3ff8"
+          "detail": "409 conflict — header=req_e691d797-55f6-4847-be96-1b5873b29970 body=req_e691d797-55f6-4847-be96-1b5873b29970"
         },
         {
           "ok": true,
@@ -1507,28 +1507,28 @@
         "probes": [
           {
             "case": "200 /api/products",
-            "header": "req_9da8fda8-9a91-40e7-9098-641922e590e9",
+            "header": "req_d2faebf6-26cc-4a07-931a-3f6bf4d45728",
             "bodyId": null
           },
           {
             "case": "422 chat",
-            "header": "req_66c73176-7513-48cb-b0a1-001953ec1480",
-            "bodyId": "req_66c73176-7513-48cb-b0a1-001953ec1480"
+            "header": "req_96302375-8fbe-46e6-af30-28390c8ec014",
+            "bodyId": "req_96302375-8fbe-46e6-af30-28390c8ec014"
           },
           {
             "case": "401 orders",
-            "header": "req_70aeb69e-32a3-4e11-b5de-c6a31f2bec2d",
-            "bodyId": "req_70aeb69e-32a3-4e11-b5de-c6a31f2bec2d"
+            "header": "req_bf3d230b-47a9-453c-a7cd-d5c31e34e075",
+            "bodyId": "req_bf3d230b-47a9-453c-a7cd-d5c31e34e075"
           },
           {
             "case": "409 conflict",
-            "header": "req_28a401b3-af47-46ca-a743-b9b97cab3ff8",
-            "bodyId": "req_28a401b3-af47-46ca-a743-b9b97cab3ff8"
+            "header": "req_e691d797-55f6-4847-be96-1b5873b29970",
+            "bodyId": "req_e691d797-55f6-4847-be96-1b5873b29970"
           }
         ]
       },
       "status": "PASS",
-      "ms": 111
+      "ms": 94
     },
     {
       "id": "WF-030",
@@ -1556,12 +1556,12 @@
         "missing_route_http": 404,
         "missing_route_excerpt": "<!DOCTYPE html><html lang=\"ar\" dir=\"rtl\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet",
         "traversal_http": 404,
-        "traversal_excerpt": "{\"error\":\"هذه النقطة غير متاحة\",\"code\":\"NOT_FOUND\",\"request_id\":\"req_ba721615-f05c-4ddd-b770-17e99f723e7a\"}",
+        "traversal_excerpt": "{\"error\":\"هذه النقطة غير متاحة\",\"code\":\"NOT_FOUND\",\"request_id\":\"req_b853492e-3d27-43b2-830d-5bf057c968f1\"}",
         "real_leak": false,
         "dev_only_artifact_present": true
       },
       "status": "PASS",
-      "ms": 108
+      "ms": 57
     },
     {
       "id": "WF-031",
@@ -1615,7 +1615,52 @@
         "real_leak_prod": false
       },
       "status": "PASS",
-      "ms": 176
+      "ms": 44
+    },
+    {
+      "id": "WF-032",
+      "title": "تكافؤ dev/prod على محرّك الرد الاحتياطي — حارس البناء القديم",
+      "input": "نفس استعلام الدردشة على :3000 (dev) و:3003 (next start)",
+      "precondition": "نفس الكود؛ :3003 يُبنى من npm run build قبل التشغيل",
+      "expected_decision": "قرار واحد في البيئتين — لا يختلف المحرك بالوضع",
+      "expected_side_effect": "لا كتابة؛ قراءة فقط",
+      "evidence_required": "أول ترشيح في كل بيئة + هل خُطف السؤال بـFAQ في أيٍّ منهما",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "200 في البيئتين (dev=200, prod=200)"
+        },
+        {
+          "ok": true,
+          "detail": "dev لم يُخطف بـFAQ: true"
+        },
+        {
+          "ok": true,
+          "detail": "prod لم يُخطف بـFAQ: true — بناء قديم لو سقط هذا"
+        },
+        {
+          "ok": true,
+          "detail": "أول ترشيح متطابق (dev=«منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه»، prod=«منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه»)"
+        }
+      ],
+      "actual": {
+        "query": "هات أرخص منظف أرضيات متاح",
+        "dev": {
+          "http": 200,
+          "source": "local",
+          "first_recommendation": "منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه",
+          "faq_hijack": false
+        },
+        "prod": {
+          "http": 200,
+          "source": "local",
+          "first_recommendation": "منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه",
+          "faq_hijack": false
+        },
+        "identical_first_recommendation": true
+      },
+      "status": "PASS",
+      "ms": 31
     }
   ]
 }

@@ -12,12 +12,20 @@
  */
 
 import { createClient } from "@libsql/client";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
+
+/**
+ * حفظ كوكيز جلسة الإدارة بين التشغيلات.
+ *
+ * خارج المستودع عمدًا — انظر التعليق في `adminCookie`.
+ */
+const COOKIE_CACHE = join(tmpdir(), "aborof-whatif-admin-cookie");
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:3000";
 const NODB_BASE = process.env.NODB_BASE ?? "http://127.0.0.1:3001";
@@ -67,6 +75,23 @@ async function login(base = BASE) {
 
 /** دخول الإدارة مع التقاط كوكيز الجلسة فعليًا. */
 async function adminCookie(base = BASE) {
+  // حد المعدل على الدخول 3 محاولات / 10 دقائق، وإعادة تشغيل المختبر كانت
+  // تستهلكه كاملة فتفشل الجولة كلها بـ 429 قبل أن تبدأ. لذلك تُحفظ الجلسة
+  // بين التشغيلات وتُختبر صلاحيتها قبل الاعتماد عليها.
+  //
+  // موضع الحفظ مقصود: مجلد مؤقت *خارج* المستودع. كوكيز جلسة الإدارة سرّ،
+  // ولا يجوز أن يقترب من Git ولو سهوًا عبر `git add -A`.
+  try {
+    const cached = readFileSync(COOKIE_CACHE, "utf8").trim();
+    if (cached) {
+      const probe = await fetch(base + "/api/admin/session", { headers: { cookie: cached } });
+      const j = await probe.json().catch(() => ({}));
+      if (probe.ok && j?.authenticated) return cached;
+    }
+  } catch {
+    /* لا جلسة محفوظة أو انتهت — ندخل من جديد */
+  }
+
   const res = await fetch(base + "/api/admin/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -76,7 +101,13 @@ async function adminCookie(base = BASE) {
   const raw = res.headers.getSetCookie?.() ?? [];
   const pairs = raw.map((c) => c.split(";")[0]);
   if (!pairs.length) throw new Error("admin login returned no cookies");
-  return pairs.join("; ");
+  const cookie = pairs.join("; ");
+  try {
+    writeFileSync(COOKIE_CACHE, cookie, { mode: 0o600 });
+  } catch {
+    /* الفشل في التخزين المؤقت ليس قاتلًا — الجولة الحالية تعمل */
+  }
+  return cookie;
 }
 
 let COOKIE = "";
@@ -1821,6 +1852,66 @@ await scenario(
       ],
     };
   }
+);
+
+// ---------------------------------------------------------------- WF-032
+await scenario(
+    {
+      id: "WF-032",
+      title: "تكافؤ dev/prod على محرّك الرد الاحتياطي — حارس البناء القديم",
+      input: "نفس استعلام الدردشة على :3000 (dev) و:3003 (next start)",
+      precondition: "نفس الكود؛ :3003 يُبنى من npm run build قبل التشغيل",
+      expected_decision: "قرار واحد في البيئتين — لا يختلف المحرك بالوضع",
+      expected_side_effect: "لا كتابة؛ قراءة فقط",
+      evidence_required: "أول ترشيح في كل بيئة + هل خُطف السؤال بـFAQ في أيٍّ منهما",
+    },
+    /**
+     * لماذا هذا السيناريو موجود:
+     *
+     * WF-012/013/014 تُقاس كلها على `:3000` (dev). ولو نُسي `npm run build`
+     * بعد إصلاح، لبقي بناء الإنتاج على السلوك القديم وظلّ المختبر أخضر —
+     * وقد حدث هذا فعلًا: بعد إصلاح D-4/D-5 أعاد `:3003` القديم جواب الدفع
+     * الخاطئ نفسه بينما `:3000` يُرشّح المنتجات.
+     *
+     * لذلك يُقاس القرار في البيئتين ويُشترط تطابقه. أي بناء قديم يُسقط هذا
+     * الفحص فورًا بدل أن يختبئ خلف مصفوفة خضراء.
+     */
+    async (rec) => {
+      const query = "هات أرخص منظف أرضيات متاح";
+      const ask = async (base, label) => {
+        const r = await fetch(base + "/api/chat", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-for": `${RUN}-wf032-${label}`,
+          },
+          body: JSON.stringify({ messages: [{ role: "user", content: query }] }),
+        });
+        const j = await r.json().catch(() => ({}));
+        const reply = String(j?.reply ?? "");
+        return {
+          http: r.status,
+          source: j?.source ?? null,
+          first_recommendation: reply.split("\n").find((l) => l.includes("•"))?.replace("•", "").trim() ?? null,
+          // خطف FAQ هو العيب نفسه: جواب عن الدفع وبلا أي سعر.
+          faq_hijack: /فودافون كاش|الدفع عند الاستلام/.test(reply) && !/\d+\s*جنيه/.test(reply),
+        };
+      };
+
+      const [dev, prod] = [await ask(BASE, "dev"), await ask(PROD_BASE, "prod")];
+      rec.actual = { query, dev, prod, identical_first_recommendation: dev.first_recommendation === prod.first_recommendation };
+      return {
+        checks: [
+          check(dev.http === 200 && prod.http === 200, `200 في البيئتين (dev=${dev.http}, prod=${prod.http})`),
+          check(!dev.faq_hijack, `dev لم يُخطف بـFAQ: ${!dev.faq_hijack}`),
+          check(!prod.faq_hijack, `prod لم يُخطف بـFAQ: ${!prod.faq_hijack} — بناء قديم لو سقط هذا`),
+          check(
+            dev.first_recommendation === prod.first_recommendation,
+            `أول ترشيح متطابق (dev=«${dev.first_recommendation}»، prod=«${prod.first_recommendation}»)`
+          ),
+        ],
+      };
+    }
 );
 
 // ------------------------------------------------------------------ الملخّص
