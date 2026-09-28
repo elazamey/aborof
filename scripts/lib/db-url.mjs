@@ -132,11 +132,22 @@ export function parseAuthValue(value) {
 export function interpretProbeStatus(status, body = "") {
   const code = Number(status);
   const hint = String(body || "").replace(/\s+/g, " ").slice(0, 120);
-  if (code === 200) return { ok: true, verdict: "الاتصال ناجح (HTTP 200)" };
-  if (code === 401 || code === 403) return { ok: false, verdict: `الرمز مرفوض أو غير كافٍ (HTTP ${code}) — أنشئ توكنًا جديدًا Full access` };
-  if (code === 404) return { ok: false, verdict: "لا قاعدة بهذا الاسم على المؤسسة (HTTP 404) — القاعدة غير موجودة أو اسمها مختلف" };
-  if (code === 400) return { ok: false, verdict: `الخادم رفض الطلب (HTTP 400)${hint ? ` — ${hint}` : ""} — تحقّق من صيغة الرابط` };
-  return { ok: false, verdict: `استجابة غير متوقعة (HTTP ${code || "بلا رمز"})${hint ? ` — ${hint}` : ""}` };
+  if (code === 200) return { ok: true, code: null, verdict: "الاتصال ناجح (HTTP 200)" };
+  if (code === 401 || code === 403) {
+    // `empty JWT` مع طلب موثّق يعني أن الرمز المضبوط لم يصل أصلًا (مسافات/
+    // اقتباس/ترويسة ضائعة) — وهو علاج مختلف عن «رمز مرفوض الصلاحية».
+    if (/empty\s*JWT/i.test(String(body || ""))) {
+      return {
+        ok: false,
+        code: "TURSO_AUTH_401_EMPTY_JWT",
+        verdict: `الرمز المضبوط لم يصل للخادم (HTTP ${code} — empty JWT) — تحقق من المسافات/الاقتباس وأعد الضبط عبر apply-turso-secrets.sh`,
+      };
+    }
+    return { ok: false, code: "TURSO_AUTH_401", verdict: `الرمز مرفوض أو غير كافٍ (HTTP ${code}) — أنشئ توكنًا جديدًا Full access` };
+  }
+  if (code === 404) return { ok: false, code: "TURSO_DB_NOT_FOUND", verdict: "لا قاعدة بهذا الاسم على المؤسسة (HTTP 404) — القاعدة غير موجودة أو اسمها مختلف" };
+  if (code === 400) return { ok: false, code: "TURSO_REQUEST_REJECTED", verdict: `الخادم رفض الطلب (HTTP 400)${hint ? ` — ${hint}` : ""} — تحقّق من صيغة الرابط` };
+  return { ok: false, code: "TURSO_UNEXPECTED_STATUS", verdict: `استجابة غير متوقعة (HTTP ${code || "بلا رمز"})${hint ? ` — ${hint}` : ""}` };
 }
 
 /**

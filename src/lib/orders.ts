@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { db, ensureSchema } from "@/lib/db";
+import { db, ensureSchema, mapDatabaseWriteError } from "@/lib/db";
 import { Errors } from "@/lib/errors";
 import { calculateShipping } from "@/lib/shipping";
 import { STORE, type Product } from "@/lib/seed";
@@ -18,6 +18,17 @@ export interface VerifiedItem {
  * يتيمة: الأصناف والمخزون والطلب تتحرك معًا أو لا تحدث إطلاقًا.
  */
 export async function createOrder(
+  input: CreateOrderInput,
+  products: Product[]
+): Promise<{ id: string; subtotal: number; shipping: number; total: number }> {
+  try {
+    return await createOrderInner(input, products);
+  } catch (error) {
+    mapDatabaseWriteError("create order", error);
+  }
+}
+
+async function createOrderInner(
   input: CreateOrderInput,
   products: Product[]
 ): Promise<{ id: string; subtotal: number; shipping: number; total: number }> {
@@ -93,17 +104,31 @@ export async function createOrder(
 }
 
 export async function listOrders(limit = 200) {
-  const c = db();
-  if (!c) return [];
-  await ensureSchema();
-  const r = await c.execute(
-    "SELECT id,customer,phone,address,governorate,items,total,shipping_fee,payment,transfer_ref,receipt_url,status,note,created_at FROM orders ORDER BY created_at DESC LIMIT ?",
-    [limit]
-  );
-  return r.rows.map((x) => ({ ...x }));
+  // قراءة إدارية بلا بديل بذرة: الفشل هنا 503 صريح لا 500 خام ولا قائمة فارغة
+  // صامتة تُخفي العطل عن الإدارة.
+  try {
+    const c = db();
+    if (!c) return [];
+    await ensureSchema();
+    const r = await c.execute(
+      "SELECT id,customer,phone,address,governorate,items,total,shipping_fee,payment,transfer_ref,receipt_url,status,note,created_at FROM orders ORDER BY created_at DESC LIMIT ?",
+      [limit]
+    );
+    return r.rows.map((x) => ({ ...x }));
+  } catch (error) {
+    mapDatabaseWriteError("list orders", error);
+  }
 }
 
 export async function updateOrderStatus(input: OrderStatusInput): Promise<void> {
+  try {
+    return await updateOrderStatusInner(input);
+  } catch (error) {
+    mapDatabaseWriteError("update order status", error);
+  }
+}
+
+async function updateOrderStatusInner(input: OrderStatusInput): Promise<void> {
   const c = db();
   if (!c) throw Errors.serviceUnavailable("قاعدة البيانات غير مربوطة");
   await ensureSchema();

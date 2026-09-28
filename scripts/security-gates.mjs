@@ -132,6 +132,13 @@ for (const file of files) {
       /SECRET|PASSWORD|TOKEN|KEY/.test(src.match(/console\.(log|error|warn)\([^)]*process\.env\.([A-Z_]+)/)?.[1] ?? "")) {
     problems.push(`${rel}: لا تطبع قيم البيئة الحساسة في السجلات.`);
   }
+
+  // 7) رمز Turso server-only دائمًا: أي NEXT_PUBLIC_TURSO_* سيُضمَّن في حزمة
+  //    المتصفح وقت البناء — ممنوع بنيويًا. القناة الوحيدة المشروعة:
+  //    المتصفح ← /api ← الخادم ← Turso (ويحرس الحزمة المبنية أيضًا scan-bundle-secrets).
+  if (/NEXT_PUBLIC_TURSO_[A-Z_]*/.test(src)) {
+    problems.push(`${rel}: NEXT_PUBLIC_TURSO_* ممنوع — رمز القاعدة server-only ولا يظهر في حزمة العميل أبدًا.`);
+  }
 }
 
 /**

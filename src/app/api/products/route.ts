@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
-import { getProducts, db, ensureSchema } from "@/lib/db";
+import { getProducts, db, ensureSchema, mapDatabaseWriteError } from "@/lib/db";
 import { isAdminRequest } from "@/lib/auth";
 import { productUpsertContract, firstZodIssue } from "@/lib/validation/contracts";
 import { upsertProductSearch, removeProductSearch } from "@/lib/search";
@@ -23,37 +23,42 @@ export const POST = apiHandler("/api/products/admin-post", async (request) => {
 
   const c = db();
   if (!c) throw Errors.serviceUnavailable("قاعدة البيانات غير مربوطة");
-  await ensureSchema();
 
   const id = p.id || "p" + Date.now().toString().slice(-7);
   const featured = p.featured === true || p.featured === 1 ? 1 : 0;
-  await c.execute({
-    sql: `INSERT INTO products (id,name,description,price,old_price,category,image,stock,featured)
+  // أي فشل خام من القاعدة (401/مهلة/انقطاع) يُترجم إلى 503 محكوم — لا 500 خام.
+  try {
+    await ensureSchema();
+    await c.execute({
+      sql: `INSERT INTO products (id,name,description,price,old_price,category,image,stock,featured)
           VALUES (?,?,?,?,?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,
           price=excluded.price,old_price=excluded.old_price,category=excluded.category,
           image=excluded.image,stock=excluded.stock,featured=excluded.featured`,
-    args: [
-      id,
-      p.name.trim(),
-      (p.description ?? "").trim(),
-      p.price,
-      p.old_price,
-      (p.category ?? "").trim(),
-      p.image || "🧴",
-      p.stock,
-      featured,
-    ],
-  });
-  await c.execute({
-    sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
-    args: [
-      p.id ? "product_update" : "product_create",
-      "product",
-      id,
-      JSON.stringify({ name: p.name.trim(), price: p.price, stock: p.stock }),
-    ],
-  });
+      args: [
+        id,
+        p.name.trim(),
+        (p.description ?? "").trim(),
+        p.price,
+        p.old_price,
+        (p.category ?? "").trim(),
+        p.image || "🧴",
+        p.stock,
+        featured,
+      ],
+    });
+    await c.execute({
+      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
+      args: [
+        p.id ? "product_update" : "product_create",
+        "product",
+        id,
+        JSON.stringify({ name: p.name.trim(), price: p.price, stock: p.stock }),
+      ],
+    });
+  } catch (error) {
+    mapDatabaseWriteError("product upsert", error);
+  }
   // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الكتابة الأساسية (سقوط آمن).
   try {
     const product: Product = {
@@ -82,12 +87,16 @@ export const DELETE = apiHandler("/api/products/admin-delete", async (request) =
 
   const c = db();
   if (!c) throw Errors.serviceUnavailable("قاعدة البيانات غير مربوطة");
-  await ensureSchema();
-  await c.execute({ sql: "DELETE FROM products WHERE id=?", args: [id] });
-  await c.execute({
-    sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
-    args: ["product_delete", "product", id, "{}"],
-  });
+  try {
+    await ensureSchema();
+    await c.execute({ sql: "DELETE FROM products WHERE id=?", args: [id] });
+    await c.execute({
+      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
+      args: ["product_delete", "product", id, "{}"],
+    });
+  } catch (error) {
+    mapDatabaseWriteError("product delete", error);
+  }
   // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الحذف الأساسي (سقوط آمن).
   try {
     await removeProductSearch(c, id);

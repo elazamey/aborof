@@ -1,7 +1,7 @@
 import { createClient, type Client } from "@libsql/client";
 import { SEED_PRODUCTS, type Product } from "@/lib/seed";
 import { runMigrations } from "@/lib/db/migrate";
-import { Errors, redactSecrets } from "@/lib/errors";
+import { DomainError, Errors, redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 
 let _client: Client | null = null;
@@ -146,6 +146,19 @@ export async function getProducts(): Promise<Product[]> {
 export async function getProduct(id: string): Promise<Product | null> {
   const all = await getProducts();
   return all.find((p) => String(p.id) === String(id)) ?? null;
+}
+
+/**
+ * تعيين أخطاء **الكتابة** على القاعدة إلى استجابة محكومة:
+ *  - `DomainError` (تعارض/تحقق/غير موجود/...) يمر كما هو — قرار عمل لا عطل بنية.
+ *  - أي خطأ خام من المزود (401/مهلة/DNS/انقطاع) يُسجَّل منقّحًا ويُترجم إلى
+ *    `503 SERVICE_UNAVAILABLE` — فعطل القاعدة لا يظهر أبدًا كـ `500` خام.
+ * القراءة لها عقدها الخاص (السقوط الآمن للبذرة)؛ هذه للكتابة فقط.
+ */
+export function mapDatabaseWriteError(operation: string, error: unknown): never {
+  if (error instanceof DomainError) throw error;
+  console.error(`db: ${operation} failed:`, redactSecrets(String((error as Error)?.message ?? error)));
+  throw Errors.serviceUnavailable("تعذّر تنفيذ العملية على قاعدة البيانات.");
 }
 
 export async function getFaq(): Promise<{ question: string; answer: string }[]> {

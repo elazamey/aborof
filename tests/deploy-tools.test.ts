@@ -135,6 +135,17 @@ describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كش�
     assert.match(interpretProbeStatus(500).verdict, /استجابة غير متوقعة/);
   });
 
+  test("كل حكم خام يحمل كودًا ثابتًا — و401 بجسم empty-JWT كود مستقل", () => {
+    assert.equal(interpretProbeStatus(200).code, null);
+    assert.equal(interpretProbeStatus(401).code, "TURSO_AUTH_401");
+    assert.equal(interpretProbeStatus(404).code, "TURSO_DB_NOT_FOUND");
+    assert.equal(interpretProbeStatus(400, "x").code, "TURSO_REQUEST_REJECTED");
+    assert.equal(interpretProbeStatus(500).code, "TURSO_UNEXPECTED_STATUS");
+    const empty = interpretProbeStatus(401, '{"error":"Unauthorized: empty JWT token"}');
+    assert.equal(empty.code, "TURSO_AUTH_401_EMPTY_JWT");
+    assert.match(empty.verdict, /لم يصل للخادم/);
+  });
+
   test("التشخيص يذكر طول المضيف وشكل المقاطع بالأطوال فقط — لا أسماء ولا قيم", () => {
     const shape = describeDatabaseUrl("https://app.turso.tech/elazamey/databases/aborof");
     assert.equal(shape.hostLength, 14);
@@ -164,6 +175,9 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
     assert.match(res.stdout, /\| conn \|/);
     assert.match(res.stdout, /conn-token-shape/);
     assert.match(res.stdout, /رابط في حقل الرمز/);
+    assert.match(res.stdout, /\[TURSO_TOKEN_MALFORMED\]/);
+    assert.match(res.stdout, /\| conn-url-shape \|/);
+    assert.match(res.stdout, /^FINAL: BLOCKED$/m);
     assert.doesNotMatch(res.stdout + res.stderr, /is not defined/);
     assert.doesNotMatch(res.stdout, /example-db-example/, "لا يُطبع الرابط ولا الرمز");
   });
@@ -180,7 +194,11 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
     assert.equal(res.status, 1, "صفوف حمراء تعني 1");
     assert.match(res.stdout, /\| conn-token-shape \|/);
     assert.match(res.stdout, /الصيغة سليمة/);
+    assert.match(res.stdout, /\| conn-url-shape \|/);
     assert.match(res.stdout, /\| conn-cause \|/);
+    assert.match(res.stdout, /\[TURSO_UNREACHABLE\]/);
+    assert.match(res.stdout, /\[TURSO_CONN_FAILED\]/);
+    assert.match(res.stdout, /^FINAL: BLOCKED$/m);
     assert.doesNotMatch(res.stdout + res.stderr, /is not defined/);
     assert.doesNotMatch(res.stdout + res.stderr, /no-such-db-xyz123/, "لا يُطبع المضيف كاملًا");
     assert.doesNotMatch(res.stdout + res.stderr, /c2lnbmF0dXJl/, "لا يُطبع أي جزء من الرمز");
@@ -198,6 +216,9 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
     assert.equal(res.status, 1);
     assert.match(res.stdout, /\| conn \|/);
     assert.match(res.stdout, /تعذّرت تهيئة عميل libsql/);
+    assert.match(res.stdout, /\[TURSO_CLIENT_INIT_FAILED\]/);
+    assert.match(res.stdout, /\[TURSO_URL_INVALID\]/);
+    assert.match(res.stdout, /^FINAL: BLOCKED$/m);
     assert.doesNotMatch(res.stdout + res.stderr, /not-a-real-url-xyz789/, "رسالة الخطأ يجب أن تُنقّح");
     assert.doesNotMatch(res.stdout + res.stderr, /c2lnbmF0dXJl/, "لا يُطبع أي جزء من الرمز");
   });
@@ -466,6 +487,110 @@ describe("src/lib/db — إعداد معطوب لا يُسقط المسار بـ
   });
 });
 
+describe("src/lib/db — الحالة B: فشل وقت الاستعلام (401/شبكة) لا يُنتج 500 خامًا", () => {
+  // العقد الصريح المطلوب: قرّاء الكتالوج يسقطون للبذرة (200)، وكتّاب الطلبات
+  // يترجمون الفشل إلى 503 محكوم — والخام (500) مرفوض في الحالتين.
+  // الاختبارات تحاكي Turso الحقيقي: `POST /v2/pipeline` + `Bearer` ثم `401`.
+  let savedUrl: string | undefined;
+  let savedToken: string | undefined;
+
+  beforeEach(() => {
+    savedUrl = process.env.TURSO_DATABASE_URL;
+    savedToken = process.env.TURSO_AUTH_TOKEN;
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
+    setDbClientForTest(null);
+  });
+  afterEach(() => {
+    if (savedUrl === undefined) delete process.env.TURSO_DATABASE_URL;
+    else process.env.TURSO_DATABASE_URL = savedUrl;
+    if (savedToken === undefined) delete process.env.TURSO_AUTH_TOKEN;
+    else process.env.TURSO_AUTH_TOKEN = savedToken;
+    setDbClientForTest(null);
+  });
+
+  test("رفض 401 من الخادم ⇒ getProducts يسقط للبذرة (والترويسة وصلت فعلًا)", async () => {
+    const { start401Stub } = await import("./stub-helpers");
+    const stub = await start401Stub();
+    const client = createClient({ url: stub.url, authToken: "stub-token-value" });
+    setDbClientForTest(client);
+    try {
+      const { getProducts } = await import("../src/lib/db");
+      const products = await getProducts();
+      assert.deepEqual(products, SEED_PRODUCTS);
+      assert.ok(stub.seen.count > 0, "العميل يجب أن يرسل الطلب فعلًا قبل السقوط");
+      assert.ok(
+        stub.seen.auth?.startsWith("Bearer "),
+        "ترويسة التفويض يجب أن تصل للخادم (يحاكي طلبًا موثّقًا مرفوضًا)"
+      );
+    } finally {
+      setDbClientForTest(null);
+      client.close();
+      await stub.close();
+    }
+  });
+
+  test("تعذّر الوصول (DNS/شبكة) ⇒ getProducts وgetFaq يسقطان للبدائل", async () => {
+    const { UNREACHABLE_LIBSQL_URL } = await import("./stub-helpers");
+    const client = createClient({ url: UNREACHABLE_LIBSQL_URL, authToken: "x" });
+    setDbClientForTest(client);
+    try {
+      const { getProducts, getFaq } = await import("../src/lib/db");
+      assert.deepEqual(await getProducts(), SEED_PRODUCTS);
+      const faq = await getFaq();
+      assert.ok(Array.isArray(faq) && faq.length > 0);
+    } finally {
+      setDbClientForTest(null);
+      client.close();
+    }
+  });
+
+  test("mapDatabaseWriteError: يمرّر DomainError ويترجم الخام إلى 503", async () => {
+    const { mapDatabaseWriteError } = await import("../src/lib/db");
+    const { DomainError, Errors } = await import("../src/lib/errors");
+    // قرار عمل (تعارض مخزون) يمر كما هو — لا يُقنَّع بخطأ بنية.
+    const conflict = Errors.conflict("غير متاح");
+    assert.throws(() => mapDatabaseWriteError("op", conflict), (e: unknown) => e === conflict);
+    // خام المزود (401 وقت الكتابة) ⇒ 503 محكوم.
+    assert.throws(
+      () => mapDatabaseWriteError("op", new Error("SERVER_ERROR: Server returned HTTP status 401")),
+      (e: unknown) =>
+        e instanceof DomainError &&
+        e.code === "SERVICE_UNAVAILABLE" &&
+        (e as { status?: number }).status === 503
+    );
+  });
+
+  test("createOrder مع قاعدة ترفض 401 ⇒ يرمي 503 لا 500 خامًا", async () => {
+    const { start401Stub } = await import("./stub-helpers");
+    const { DomainError } = await import("../src/lib/errors");
+    const stub = await start401Stub();
+    const client = createClient({ url: stub.url, authToken: "stub-token-value" });
+    setDbClientForTest(client);
+    try {
+      const { createOrder } = await import("../src/lib/orders");
+      const { createOrderContract } = await import("../src/lib/validation/contracts");
+      // الدخل عبر العقد نفسه (يطبّق القيم الافتراضية كما يفعل المسار).
+      const input = createOrderContract.parse({
+        customer: "محمد أحمد",
+        phone: "01095032221",
+        address: "شارع طويل بما يكفي لعنوان التوصيل",
+        governorate: "القاهرة",
+        payment: "vodafone_cash",
+        items: [{ id: "p1", qty: 1 }],
+      });
+      await assert.rejects(
+        () => createOrder(input, SEED_PRODUCTS),
+        (e: unknown) => e instanceof DomainError && e.code === "SERVICE_UNAVAILABLE"
+      );
+    } finally {
+      setDbClientForTest(null);
+      client.close();
+      await stub.close();
+    }
+  });
+});
+
 describe("scripts/scan-bundle-secrets — حاجز تسريب حزمة العميل", () => {
   test("اسم سر خادم في الأثر المبنيّ = تسريب (بلا حاجة لقيمة)", () => {
     const hits = scanTextForSecrets('const x = process.env.ADMIN_SESSION_SECRET;');
@@ -540,6 +665,16 @@ describe("scripts/security-gates — عزل العميل/الخادم", () => {
     for (const root of roots) if (fs.existsSync(root)) walk(root);
     assert.deepEqual(offenders, [], `مكوّنات عميل تستورد وحدات خادم: ${offenders.join(", ")}`);
   });
+
+  test("البوابة نفسها خضراء على الشجرة الحالية (تُنفَّذ لا تُعاد كتابتها)", () => {
+    const res = spawnSync("node", ["scripts/security-gates.mjs"], { encoding: "utf8" });
+    assert.equal(res.status, 0, res.stderr || res.stdout);
+  });
+
+  test("قاعدة NEXT_PUBLIC_TURSO_* حاضرة في البوابة (الرمز server-only دائمًا)", () => {
+    const gate = fs.readFileSync("scripts/security-gates.mjs", "utf8");
+    assert.match(gate, /NEXT_PUBLIC_TURSO_/, "حذف القاعدة صامتًا يجب أن يفشل هذا الاختبار");
+  });
 });
 
 describe("scripts/verify-turso — تقرير آلي", () => {
@@ -548,12 +683,18 @@ describe("scripts/verify-turso — تقرير آلي", () => {
     await runMigrations(client);
     client.close();
 
-    const out = JSON.parse(runVerifyTurso(url)) as { ok: boolean; rows: { id: string; ok: boolean }[] };
+    const out = JSON.parse(runVerifyTurso(url)) as {
+      ok: boolean;
+      verdict: string;
+      rows: { id: string; ok: boolean; code: string | null }[];
+    };
     assert.equal(out.ok, true, JSON.stringify(out.rows));
+    assert.equal(out.verdict, "PASS");
     assert.deepEqual(
       out.rows.map((r) => r.id),
       ["conn", "mig-table", "mig-parity", "row-7", "row-8", "row-9", "tables"]
     );
+    assert.ok(out.rows.every((r) => r.code === null), "الصفوف الخضراء بلا أكواد");
   });
 
   test("غياب order_items (فشل P0) يُسقط الفحص بكود خروج 1", async () => {
@@ -572,9 +713,15 @@ describe("scripts/verify-turso — تقرير آلي", () => {
       stdout = e.stdout ?? "";
     }
     assert.equal(exitCode, 1, "كان يجب أن يفشل الفحص");
-    const parsed = JSON.parse(stdout) as { ok: boolean; rows: { id: string; ok: boolean }[] };
+    const parsed = JSON.parse(stdout) as {
+      ok: boolean;
+      verdict: string;
+      rows: { id: string; ok: boolean; code: string | null }[];
+    };
     assert.equal(parsed.ok, false);
+    assert.equal(parsed.verdict, "BLOCKED");
     assert.equal(parsed.rows.find((r) => r.id === "row-7")?.ok, false);
+    assert.equal(parsed.rows.find((r) => r.id === "row-7")?.code, "ROW7_ORDER_ITEMS_MISSING");
   });
 
   test("انحراف فهرس FTS5 عن الكتالوج يُكتشف (الصف 9)", async () => {
@@ -639,6 +786,17 @@ describe(".github/workflows/deploy.yml — بوابة النشر", () => {
     assert.match(workflow, /::error::vercel pull فشل/, "فشل vercel pull يجب أن يُبث كتعليق");
     assert.match(workflow, /::error::vercel build فشل/, "فشل vercel build يجب أن يُبث كتعليق");
     assert.match(workflow, /::error::vercel deploy فشل/, "فشل vercel deploy يجب أن يُبث كتعليق");
+  });
+
+  test("البناء لا يشغّل هجرة ولا بذرة (الهجرات وقت التشغيل عبر ensureSchema فقط)", () => {
+    // نمط `migrate && build` خطير: يخلط النشر بتغيير القاعدة. البوابة هنا تمنعه
+    // بنيويًا — أي هجرة وقت البناء تُفشل الاختبار (ومن ثم CI) فورًا.
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")) as { scripts: Record<string, string> };
+    for (const name of ["build", "postinstall", "preinstall"]) {
+      const cmd = pkg.scripts[name];
+      if (!cmd) continue;
+      assert.doesNotMatch(cmd, /migrat|seed/i, `السكربت ${name} يجب ألا يلمس قاعدة البيانات`);
+    }
   });
 });
 

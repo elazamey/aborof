@@ -15,9 +15,19 @@
  *                           لا رابط اتصال، تُشتق `<db>-<org>.turso.io` وتُجرَّب
  *                           فعلًا قبل استخدامها — بدل إسقاط كل الصفوف التابعة.
  *
- * الصفوف: conn · conn-token-shape (صيغة الرمز دائمًا) · conn-cause (السبب الخام
- * الموثّق عند فشل الاتصال: 401 رمز مرفوض مقابل 404 لا قاعدة) · ثم الهجرات
- * والصفوف 7–9 عند نجاح الاتصال.
+ * الصفوف: conn · conn-token-shape (صيغة الرمز دائمًا) · conn-url-shape (صيغة
+ * الرابط دائمًا) · conn-cause (السبب الخام الموثّق عند فشل الاتصال: 401 رمز
+ * مرفوض مقابل 404 لا قاعدة) · ثم الهجرات والصفوف 7–9 عند نجاح الاتصال.
+ *
+ * كل صف أحمر يحمل كودًا ثابتًا (`[TURSO_AUTH_401]`) للبحث الآلي، ويُطبع حكم
+ * ختامي صريح `FINAL: PASS|BLOCKED` (وفي `--json`: `verdict` + `code` لكل صف).
+ * المفردات: TURSO_URL_MISSING · TURSO_TOKEN_MISSING · TURSO_TOKEN_EMPTY ·
+ * TURSO_URL_INVALID · TURSO_URL_DASHBOARD · TURSO_TOKEN_MALFORMED ·
+ * TURSO_CLIENT_INIT_FAILED · TURSO_CONN_FAILED · TURSO_DERIVED_FAILED ·
+ * TURSO_AUTH_401 · TURSO_AUTH_401_EMPTY_JWT · TURSO_DB_NOT_FOUND ·
+ * TURSO_REQUEST_REJECTED · TURSO_UNREACHABLE · TURSO_UNEXPECTED_STATUS ·
+ * MIGRATION_TABLE_MISSING · MIGRATION_MISMATCH · ROW7_ORDER_ITEMS_MISSING ·
+ * ROW8_FTS_MISSING · ROW9_FTS_OUT_OF_SYNC · TABLES_INCOMPLETE.
  *
  * كود الخروج: 0 = كل الفحوص خضراء، 1 = فشل حاجب، 2 = تهيئة الفحص ناقصة.
  */
@@ -41,7 +51,7 @@ const allowDashboardUrl =
 if (!url) {
   console.error(
     [
-      "❌ TURSO_DATABASE_URL غير مُعيَّن.",
+      "❌ [TURSO_URL_MISSING] TURSO_DATABASE_URL غير مُعيَّن.",
       "شغّل بأسرار الإنتاج (لا تُكتب في ملف متتبَّع ولا في سجل الأوامر):",
       "  TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... node scripts/verify-turso.mjs",
       "أو بلا أسرار على نسخة محلية للتحقق من منطق الفحص: TURSO_DATABASE_URL=file:/tmp/aborof-check.db",
@@ -54,13 +64,17 @@ const secrets = [url, authToken];
 const local = url.startsWith("file:");
 let effectiveUrl = url;
 if (!local && !authToken) {
-  console.error("❌ TURSO_AUTH_TOKEN مطلوب لأي رابط غير محلي (libsql:// أو https://).");
+  console.error("❌ [TURSO_TOKEN_MISSING] TURSO_AUTH_TOKEN مطلوب لأي رابط غير محلي (libsql:// أو https://).");
+  process.exit(2);
+}
+if (!local && !authToken.trim()) {
+  console.error("❌ [TURSO_TOKEN_EMPTY] TURSO_AUTH_TOKEN مسافات فقط — الصقه كاملًا بلا هوامش أو أعد الضبط عبر apply-turso-secrets.sh.");
   process.exit(2);
 }
 
 const rows = [];
-function record(id, label, ok, detail) {
-  rows.push({ id, label, ok, detail });
+function record(id, label, ok, detail, code = null) {
+  rows.push({ id, label, ok, detail, code: code ?? null });
 }
 
 /** تصنيف خطأ محاولة اتصال — تصنيف فقط، بلا طباعة قيمة الرابط ولا الرمز. */
@@ -109,7 +123,7 @@ async function diagnoseEndpoint() {
 
 async function probeHttpEndpoint(candidateUrl, token) {
   const origin = originForHttpProbe(candidateUrl);
-  if (!origin) return { ok: false, verdict: "رابط غير قابل للفحص عبر HTTP" };
+  if (!origin) return { ok: false, code: "TURSO_UNREACHABLE", verdict: "رابط غير قابل للفحص عبر HTTP" };
   try {
     const res = await fetch(`${origin}/v2/pipeline`, {
       method: "POST",
@@ -126,7 +140,7 @@ async function probeHttpEndpoint(candidateUrl, token) {
     return interpretProbeStatus(res.status, redact(body, [...secrets, candidateUrl]));
   } catch (error) {
     const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidateUrl]);
-    return { ok: false, verdict: `تعذّر الوصول للخادم (شبكة/DNS) — ${raw}` };
+    return { ok: false, code: "TURSO_UNREACHABLE", verdict: `تعذّر الوصول للخادم (شبكة/DNS) — ${raw}` };
   }
 }
 
@@ -181,15 +195,19 @@ async function attemptDerivedConnection() {
 /** يطبع الجدول (أو JSON) مرة واحدة — يستدعيه المسار العادي ومسار فشل الاتصال. */
 function render() {
   const failed = rows.filter((r) => !r.ok);
+  const verdict = failed.length === 0 ? "PASS" : "BLOCKED";
   if (asJson) {
-    console.log(JSON.stringify({ ok: failed.length === 0, local, rows }, null, 2));
+    console.log(JSON.stringify({ ok: failed.length === 0, verdict, local, rows }, null, 2));
     return;
   }
   console.log(`# فحص Turso — ${local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}\n`);
   console.log("| # | الفحص | النتيجة | التفصيل |");
   console.log("|---|---|---|---|");
   for (const row of rows) {
-    console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${row.detail.replace(/\|/g, "\\|")} |`);
+    // الكود الثابت لاحق قابل للبحث الآلي ([TURSO_AUTH_401]) — يظهر على الصفوف
+    // الحمراء فقط، والتفصيل العربي يبقى الحكم المقروء للبشر.
+    const detail = row.ok || !row.code ? row.detail : `${row.detail} [${row.code}]`;
+    console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${detail.replace(/\|/g, "\\|")} |`);
   }
   console.log(
     failed.length === 0
@@ -199,6 +217,8 @@ function render() {
   if (!local) {
     console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. التطبيق نفسه يشغّل الهجرات عند أول طلب (`ensureSchema`).");
   }
+  // الحكم الختامي الصريح للبوابة — يقرأه البشر والآلات على حد سواء.
+  console.log(`FINAL: ${verdict}`);
 }
 
 /**
@@ -224,7 +244,57 @@ function recordTokenShape() {
       false,
       authParts.shape.scheme
         ? `ليست رمز JWT بل قيمة تبدأ بـ ${authParts.shape.scheme}:// (النقطتان في الموضع ${authParts.shape.colonOffset} من ${authParts.shape.length} حرفًا) — رابط في حقل الرمز · **انقل الرابط إلى TURSO_DATABASE_URL ورمز JWT إلى TURSO_AUTH_TOKEN**`
-        : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا Full access**`
+        : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا Full access**`,
+      "TURSO_TOKEN_MALFORMED"
+    );
+  }
+}
+
+/**
+ * صف صيغة الرابط — نظير صف الرمز: يميّز «رابط اتصال سليم» من «قيمة موضعية/
+ * رابط لوحة/بلا مخطّط» قبل أي حكم على المصادقة. يُسجَّل للقواعد غير المحلية
+ * فقط (فحص الملف المحلي له عقد صفوف ثابت — انظر اختبار «تقرير آلي»).
+ */
+function recordUrlShape() {
+  if (local) return;
+  const shape = describeDatabaseUrl(url);
+  let host = "";
+  try {
+    host = new URL(String(url).replace(/^(libsql|turso|wss?):\/\//i, "https://")).hostname.toLowerCase();
+  } catch {
+    host = "";
+  }
+  const dashboard = ["app.turso.tech", "www.turso.tech", "turso.tech"].includes(host);
+  if (shape.hasPlaceholder) {
+    record(
+      "conn-url-shape",
+      "صيغة قيمة TURSO_DATABASE_URL",
+      false,
+      `قيمة موضعية غير مستبدلة (${shape.scheme} · طول ${shape.length}) — انسخ الرابط من زر Connect في لوحة Turso`,
+      "TURSO_URL_INVALID"
+    );
+  } else if (dashboard) {
+    record(
+      "conn-url-shape",
+      "صيغة قيمة TURSO_DATABASE_URL",
+      false,
+      `رابط لوحة تحكم لا رابط اتصال (${shape.scheme} · مقاطع المسار ${shape.pathShape}) — انسخ الرابط من زر Connect`,
+      "TURSO_URL_DASHBOARD"
+    );
+  } else if (shape.scheme === "بلا مخطّط" || shape.kind === "رابط غير قابل للتحليل") {
+    record(
+      "conn-url-shape",
+      "صيغة قيمة TURSO_DATABASE_URL",
+      false,
+      `بلا مخطّط صالح (طول ${shape.length}) — الصيغة المطلوبة libsql://<db>-<org>.turso.io`,
+      "TURSO_URL_INVALID"
+    );
+  } else {
+    record(
+      "conn-url-shape",
+      "صيغة قيمة TURSO_DATABASE_URL",
+      true,
+      `${shape.scheme} · ${shape.kind} · المضيف ${shape.hostMasked} (طول ${shape.hostLength})`
     );
   }
 }
@@ -238,11 +308,13 @@ try {
 } catch (error) {
   const details = await diagnoseEndpoint();
   recordTokenShape();
+  recordUrlShape();
   record(
     "conn",
     "الاتصال بقاعدة البيانات (SELECT 1)",
     false,
-    [`تعذّرت تهيئة عميل libsql من القيمة المضبوطة: ${redact(String(error?.message ?? error), secrets)}`, ...details].join(" · ")
+    [`تعذّرت تهيئة عميل libsql من القيمة المضبوطة: ${redact(String(error?.message ?? error), secrets)}`, ...details].join(" · "),
+    "TURSO_CLIENT_INIT_FAILED"
   );
   render();
   process.exit(1);
@@ -256,12 +328,14 @@ try {
     connected = true;
     record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : `libsql متصل (${describeDatabaseUrl(effectiveUrl).kind})`);
     recordTokenShape();
+    recordUrlShape();
   } catch (error) {
     // الفشل هنا يوقف الفحوص التابعة (لا معنى لها بلا اتصال) لكنه **لا يمنع
     // طباعة الجدول**: الجدول نفسه هو الدليل، فيُضاف إليه وصف بنية الرابط
     // واستجابة أصله. لا يُطبع الرابط ولا الرمز — الوصف كله عبر `redact`.
     const details = await diagnoseEndpoint();
     recordTokenShape();
+    recordUrlShape();
 
     // ترميم مُعلَن (بعلم صريح): قيمة لوحة تحكم بدل رابط اتصال.
     if (allowDashboardUrl) {
@@ -279,12 +353,12 @@ try {
           `متصل عبر ترميم مؤقت (${derived.label}) ⇒ القاعدة والرمز **سليمان**؛ المشكلة في مكان القيم لا في القاعدة · **صحّح TURSO_DATABASE_URL/TURSO_AUTH_TOKEN في الإعدادات لإزالة الترميم**`
         );
       } else {
-        record("conn-derived", "اشتقاق رابط الاتصال من قيمة لوحة التحكم", false, derived.note);
+        record("conn-derived", "اشتقاق رابط الاتصال من قيمة لوحة التحكم", false, derived.note, "TURSO_DERIVED_FAILED");
       }
     }
 
     if (!connected) {
-      record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "));
+      record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "), "TURSO_CONN_FAILED");
       // السبب الخام **الموثّق**: عميل libsql يغلّف 401 و404 و400 في SERVER_ERROR
       // واحدة بلا حكم، وفحص الأصل أعلاه بلا ترويسة مصادقة (401 متوقعة منه دائمًا).
       // هذا الصف يرسل الطلب نفسه **مع الرمز المضبوط** فيميّز «رمز مرفوض (401 —
@@ -298,7 +372,8 @@ try {
           cause.ok,
           cause.ok
             ? `${cause.verdict} — لكن عميل libsql فشل على الزوج نفسه؛ راجع نص خطأ صف conn`
-            : cause.verdict
+            : cause.verdict,
+          cause.ok ? null : cause.code
         );
       }
     }
@@ -324,7 +399,7 @@ try {
     }
     record("mig-table", "جدول schema_migrations موجود", true, `${applied.size} هجرة مسجّلة`);
   } catch (error) {
-    record("mig-table", "جدول schema_migrations موجود", false, `غير موجود — لم تُشغَّل الهجرات على هذه القاعدة (${redact(String(error?.message ?? error), secrets)})`);
+    record("mig-table", "جدول schema_migrations موجود", false, `غير موجود — لم تُشغَّل الهجرات على هذه القاعدة (${redact(String(error?.message ?? error), secrets)})`, "MIGRATION_TABLE_MISSING");
   }
 
   // 3) تطابق الهجرات: كل هجرة في المستودع مسجّلة في القاعدة بنفس البصمة.
@@ -343,15 +418,17 @@ try {
       if (!expected.some((m) => m.version === version)) problems.push(`${version}: مسجَّلة في القاعدة وغير موجودة في المستودع`);
     }
   }
+  const parityOk = migrationsTable && problems.length === 0;
   record(
     "mig-parity",
     "تطابق الهجرات (المستودع ↔ القاعدة)",
-    migrationsTable && problems.length === 0,
+    parityOk,
     migrationsTable
       ? problems.length
         ? problems.join(" | ")
         : `متطابقة: ${expected.map((m) => `${m.version}_${m.name}`).join(", ")}`
-      : "تعذّر الفحص: لا يوجد جدول هجرات"
+      : "تعذّر الفحص: لا يوجد جدول هجرات",
+    parityOk ? null : "MIGRATION_MISMATCH"
   );
 
   // 4) الصف 7: order_items موجودة (تثبيت إصلاح P0 بعد الدمج).
@@ -362,12 +439,12 @@ try {
     const c = await db.execute("SELECT COUNT(*) AS n FROM order_items");
     orderItemsCount = Number(c.rows[0]?.n ?? 0);
   }
-  record("row-7", "الصف 7 — SELECT COUNT(*) FROM order_items", hasOrderItems, hasOrderItems ? `${orderItemsCount} صفًا بلا خطأ no such table` : "الجدول غير موجود (إصلاح P0 لم يُفعَّل)");
+  record("row-7", "الصف 7 — SELECT COUNT(*) FROM order_items", hasOrderItems, hasOrderItems ? `${orderItemsCount} صفًا بلا خطأ no such table` : "الجدول غير موجود (إصلاح P0 لم يُفعَّل)", hasOrderItems ? null : "ROW7_ORDER_ITEMS_MISSING");
 
   // 5) الصف 8: جدول FTS5 الافتراضي product_search موجود (هجرة 0002).
   const search = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='product_search'");
   const hasSearch = search.rows.length > 0;
-  record("row-8", "الصف 8 — وجود product_search (هجرة 0002/FTS5)", hasSearch, hasSearch ? "الجدول الافتراضي موجود" : "غير موجود — هجرة 0002 لم تُطبَّق على هذه البيئة");
+  record("row-8", "الصف 8 — وجود product_search (هجرة 0002/FTS5)", hasSearch, hasSearch ? "الجدول الافتراضي موجود" : "غير موجود — هجرة 0002 لم تُطبَّق على هذه البيئة", hasSearch ? null : "ROW8_FTS_MISSING");
 
   // 6) الصف 9: الفهرس متزامن مع الكتالوج.
   let productsCount = null;
@@ -379,9 +456,9 @@ try {
     productsCount = Number(p.rows[0]?.n ?? 0);
     searchCount = Number(s.rows[0]?.n ?? 0);
     synced = productsCount === searchCount;
-    record("row-9", "الصف 9 — COUNT(product_search) = COUNT(products)", synced, `products=${productsCount} / product_search=${searchCount}`);
+    record("row-9", "الصف 9 — COUNT(product_search) = COUNT(products)", synced, `products=${productsCount} / product_search=${searchCount}`, synced ? null : "ROW9_FTS_OUT_OF_SYNC");
   } else {
-    record("row-9", "الصف 9 — COUNT(product_search) = COUNT(products)", false, "غير قابل للفحص: product_search غائب");
+    record("row-9", "الصف 9 — COUNT(product_search) = COUNT(products)", false, "غير قابل للفحص: product_search غائب", "ROW9_FTS_OUT_OF_SYNC");
   }
 
   // 7) سياق مساعد: الجداول الأساسية الأخرى (بلا حكم على النجاح).
@@ -389,7 +466,7 @@ try {
   const names = tables.rows.map((r) => String(r.name));
   const essentials = ["products", "orders", "order_items", "faq", "chat_logs", "admin_audit_log", "rate_limit_counters"];
   const missingEssentials = essentials.filter((t) => !names.includes(t));
-  record("tables", "الجداول الأساسية للمتجر", missingEssentials.length === 0, missingEssentials.length ? `ناقصة: ${missingEssentials.join(", ")}` : `${essentials.length} جدولًا حاضرًا`);
+  record("tables", "الجداول الأساسية للمتجر", missingEssentials.length === 0, missingEssentials.length ? `ناقصة: ${missingEssentials.join(", ")}` : `${essentials.length} جدولًا حاضرًا`, missingEssentials.length ? "TABLES_INCOMPLETE" : null);
 
   render();
   process.exit(rows.filter((r) => !r.ok).length === 0 ? 0 : 1);
