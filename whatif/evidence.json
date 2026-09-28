@@ -1,34 +1,34 @@
 {
-  "run": "run8",
+  "run": "run10",
   "base": "http://127.0.0.1:3000",
   "nodb_base": "http://127.0.0.1:3001",
-  "generated_at": "2026-09-28T08:14:31.879Z",
+  "generated_at": "2026-09-28T08:20:29.270Z",
   "baseline": {
-    "orders": 31,
-    "order_items": 31,
+    "orders": 57,
+    "order_items": 57,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-83026799-a9f141f5",
-      "total": 1000,
-      "shipping_fee": 0,
-      "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
+      "id": "ORD-83499980-038665d6",
+      "total": 120,
+      "shipping_fee": 50,
+      "items": "[{\"id\":\"p3\",\"name\":\"سائل غسيل أطباق ليمون 2 لتر\",\"price\":70,\"qty\":1}]"
     }
   },
   "final_db": {
-    "orders": 44,
-    "order_items": 44,
+    "orders": 70,
+    "order_items": 70,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-83271549-7c3bd6a3",
+      "id": "ORD-83628122-1c2dd6ca",
       "total": 120,
       "shipping_fee": 50,
       "items": "[{\"id\":\"p3\",\"name\":\"سائل غسيل أطباق ليمون 2 لتر\",\"price\":70,\"qty\":1}]"
     }
   },
   "totals": {
-    "PASS": 16,
+    "PASS": 26,
     "FAIL": 5
   },
   "scenarios": [
@@ -76,10 +76,10 @@
       ],
       "actual": {
         "http": 200,
-        "request_id": "req_32aad85a-7725-4fcd-8c4e-ac9db36ffa14",
+        "request_id": "req_580b0a54-7568-4b9d-b58f-0269bff07c0f",
         "body": {
           "ok": true,
-          "id": "ORD-83270108-cc1ee317",
+          "id": "ORD-83627015-81fa026c",
           "subtotal": 3600,
           "shipping": 0,
           "total": 3600
@@ -87,12 +87,12 @@
         "stock_before": 50,
         "stock_after": 30,
         "db": {
-          "orders": 32,
-          "order_items": 32,
+          "orders": 58,
+          "order_items": 58,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-83270108-cc1ee317",
+            "id": "ORD-83627015-81fa026c",
             "total": 3600,
             "shipping_fee": 0,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":20}]"
@@ -100,7 +100,7 @@
         }
       },
       "status": "PASS",
-      "ms": 62
+      "ms": 75
     },
     {
       "id": "WF-002",
@@ -133,7 +133,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 32 → 32 (بلا تغيير)"
+          "detail": "عدد الطلبات 58 → 58 (بلا تغيير)"
         },
         {
           "ok": true,
@@ -146,17 +146,17 @@
         "chat_reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 ج",
         "http": 409,
         "code": "CONFLICT",
-        "request_id": "req_35d4d0ae-0c8c-408c-8d1c-6814ae637a71",
+        "request_id": "req_280b4e97-077c-45ec-801f-52f29c9119f5",
         "body": {
           "error": "أحد المنتجات لم يعد متاحًا",
           "code": "CONFLICT",
-          "request_id": "req_35d4d0ae-0c8c-408c-8d1c-6814ae637a71"
+          "request_id": "req_280b4e97-077c-45ec-801f-52f29c9119f5"
         },
-        "orders_before": 32,
-        "orders_after": 32
+        "orders_before": 58,
+        "orders_after": 58
       },
       "status": "PASS",
-      "ms": 46
+      "ms": 38
     },
     {
       "id": "WF-003",
@@ -189,21 +189,21 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 32 → 32 (لم يُنشأ طلب)"
+          "detail": "عدد الطلبات 58 → 58 (لم يُنشأ طلب)"
         }
       ],
       "actual": {
         "http": 409,
         "code": "CONFLICT",
         "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-        "request_id": "req_4028b4fa-1fad-4c0b-878f-e07bc9e904ed",
+        "request_id": "req_db27870b-5bb9-472b-aca1-a871c048b603",
         "stock_before": 7,
         "stock_after": 7,
-        "orders_before": 32,
-        "orders_after": 32
+        "orders_before": 58,
+        "orders_after": 58
       },
       "status": "PASS",
-      "ms": 46
+      "ms": 47
     },
     {
       "id": "WF-004",
@@ -232,7 +232,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 32 → 32"
+          "detail": "عدد الطلبات 58 → 58"
         },
         {
           "ok": true,
@@ -243,13 +243,13 @@
         "http": 409,
         "code": "CONFLICT",
         "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-        "request_id": "req_39a4baa2-062f-447f-b7c7-5166f49db331",
+        "request_id": "req_97f911c3-94a8-48ec-be35-496d53ef948b",
         "stock_before": 0,
         "stock_after": 0,
-        "orders_after": 32
+        "orders_after": 58
       },
       "status": "PASS",
-      "ms": 79
+      "ms": 42
     },
     {
       "id": "WF-005",
@@ -274,7 +274,7 @@
         },
         {
           "ok": true,
-          "detail": "request_id=req_a9d35b1b-b129-4475-89f1-33056e57356f"
+          "detail": "request_id=req_ee85e24c-8224-48cb-ad09-2c51b168af12"
         },
         {
           "ok": true,
@@ -290,23 +290,23 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 32 → 32 (بلا تغيير)"
+          "detail": "عدد الطلبات 58 → 58 (بلا تغيير)"
         }
       ],
       "actual": {
         "chat_http": 422,
         "chat_code": "VALIDATION_FAILED",
         "chat_error": "Unrecognized key(s) in object: 'message'",
-        "chat_request_id": "req_a9d35b1b-b129-4475-89f1-33056e57356f",
+        "chat_request_id": "req_ee85e24c-8224-48cb-ad09-2c51b168af12",
         "order_http": 422,
         "order_code": "VALIDATION_FAILED",
         "order_error": "items: السلة فارغة",
-        "order_request_id": "req_129751da-e3fe-44be-b05e-a61eb4804a46",
-        "orders_before": 32,
-        "orders_after": 32
+        "order_request_id": "req_097f2d3e-334a-460e-8932-8a24d080c955",
+        "orders_before": 58,
+        "orders_after": 58
       },
       "status": "PASS",
-      "ms": 42
+      "ms": 29
     },
     {
       "id": "WF-010",
@@ -323,7 +323,7 @@
         },
         {
           "ok": true,
-          "detail": "رقما الطلبين مختلفان: ORD-83270375-16b51f9a , ORD-83270396-d42b69e7"
+          "detail": "رقما الطلبين مختلفان: ORD-83627233-95233884 , ORD-83627285-ad266519"
         },
         {
           "ok": true,
@@ -341,19 +341,19 @@
       "actual": {
         "http_1": 200,
         "http_2": 200,
-        "id_1": "ORD-83270375-16b51f9a",
-        "id_2": "ORD-83270396-d42b69e7",
-        "request_id_1": "req_bd162b48-f2f0-491b-a3a0-cbabcc15ba26",
-        "request_id_2": "req_de9e13f8-c85d-4e2d-9628-468fa7467c39",
+        "id_1": "ORD-83627233-95233884",
+        "id_2": "ORD-83627285-ad266519",
+        "request_id_1": "req_49121b61-2cb0-4b99-bc75-61f9142e481c",
+        "request_id_2": "req_73060dde-8a66-4a6a-9a9f-af5bf10bb8a2",
         "stock_before": 10,
         "stock_after": 8,
         "db": {
-          "orders": 34,
-          "order_items": 34,
+          "orders": 60,
+          "order_items": 60,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-83270396-d42b69e7",
+            "id": "ORD-83627285-ad266519",
             "total": 230,
             "shipping_fee": 50,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":1}]"
@@ -362,7 +362,7 @@
         "finding": "لا يوجد idempotency key في createOrderContract — التكرار يُنشئ طلبين"
       },
       "status": "PASS",
-      "ms": 71
+      "ms": 141
     },
     {
       "id": "WF-011",
@@ -421,10 +421,10 @@
         "tamper_http": 422,
         "tamper_code": "VALIDATION_FAILED",
         "tamper_error": "items.0: Unrecognized key(s) in object: 'price'",
-        "request_id": "req_e4201717-ff85-413d-b022-ffd1468ad32a"
+        "request_id": "req_20da2a2d-f7b3-4006-bf17-5f087b26beba"
       },
       "status": "PASS",
-      "ms": 128
+      "ms": 58
     },
     {
       "id": "WF-016",
@@ -453,7 +453,7 @@
         },
         {
           "ok": true,
-          "detail": "request_id=req_31cbc8ea-1ba0-45a3-9329-773288047c20 للربط بالسجلات"
+          "detail": "request_id=req_e27fb8ab-b284-471e-b7e5-c0603a912001 للربط بالسجلات"
         },
         {
           "ok": true,
@@ -461,21 +461,21 @@
         },
         {
           "ok": true,
-          "detail": "طلبات DB الحقيقية 35 → 35 (لم يُكتب شيء)"
+          "detail": "طلبات DB الحقيقية 61 → 61 (لم يُكتب شيء)"
         }
       ],
       "actual": {
         "http": 503,
         "code": "SERVICE_UNAVAILABLE",
         "message": "قاعدة البيانات غير مربوطة",
-        "request_id": "req_31cbc8ea-1ba0-45a3-9329-773288047c20",
+        "request_id": "req_e27fb8ab-b284-471e-b7e5-c0603a912001",
         "read_http": 200,
         "read_products": 12,
-        "real_db_orders_before": 35,
-        "real_db_orders_after": 35
+        "real_db_orders_before": 61,
+        "real_db_orders_after": 61
       },
       "status": "PASS",
-      "ms": 108
+      "ms": 29
     },
     {
       "id": "WF-017",
@@ -516,7 +516,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 35 → 35"
+          "detail": "عدد الطلبات 61 → 61"
         }
       ],
       "actual": {
@@ -528,11 +528,11 @@
         "delete_product": 401,
         "stock_before": 49,
         "stock_after": 49,
-        "orders_before": 35,
-        "orders_after": 35
+        "orders_before": 61,
+        "orders_after": 61
       },
       "status": "PASS",
-      "ms": 82
+      "ms": 65
     },
     {
       "id": "WF-018",
@@ -557,7 +557,7 @@
         },
         {
           "ok": true,
-          "detail": "أ) عدد الطلبات 35 → 35 (لا طلب)"
+          "detail": "أ) عدد الطلبات 61 → 61 (لا طلب)"
         },
         {
           "ok": true,
@@ -577,7 +577,7 @@
         },
         {
           "ok": true,
-          "detail": "ب) طلبات DB 35 → 36 (+1 فقط)"
+          "detail": "ب) طلبات DB 61 → 62 (+1 فقط)"
         },
         {
           "ok": true,
@@ -595,8 +595,8 @@
         "a_p1_before": 10,
         "a_p1_after": 10,
         "a_orders": [
-          35,
-          35
+          61,
+          61
         ],
         "b_http": [
           200,
@@ -609,20 +609,20 @@
         "b_stock_before": 5,
         "b_stock_after": 1,
         "b_orders_created": [
-          35,
-          36
+          61,
+          62
         ],
         "b_request_ids": [
-          "req_77b56577-8641-4968-a01b-030facc36e14",
-          "req_3ea20d4a-d970-4ec3-8d2f-b27c56fb862e"
+          "req_bc90144c-5e2b-4a84-b726-6d87c2d2882a",
+          "req_15183c95-4472-4493-9dc3-24662a21e9f9"
         ],
         "db": {
-          "orders": 36,
-          "order_items": 36,
+          "orders": 62,
+          "order_items": 62,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-83270811-b2536c3b",
+            "id": "ORD-83627566-c46a55f6",
             "total": 1000,
             "shipping_fee": 0,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
@@ -630,7 +630,7 @@
         }
       },
       "status": "PASS",
-      "ms": 101
+      "ms": 90
     },
     {
       "id": "WF-012",
@@ -670,7 +670,7 @@
         "resolved_size": "كلاهما (بلا حسم)"
       },
       "status": "FAIL",
-      "ms": 89
+      "ms": 72
     },
     {
       "id": "WF-013",
@@ -715,7 +715,7 @@
         "expected": "أرخص *متاح* = 45 ج (منظف أرضيات مركز 1 لتر)، واستبعاد 30 ج لأن مخزونه 0"
       },
       "status": "FAIL",
-      "ms": 55
+      "ms": 32
     },
     {
       "id": "WF-014",
@@ -771,7 +771,7 @@
         "mechanism": "localAnswer يرتب بالدرجة ثم يقطع عند 3؛ عند التعادل يفوز الأسبق في ترتيب الكتالوج (featured ثم rowid)، والصنفان المُدرجان أخيرًا فيُستبعدان رغم مطابقتهما"
       },
       "status": "FAIL",
-      "ms": 57
+      "ms": 48
     },
     {
       "id": "WF-015",
@@ -808,13 +808,13 @@
         "code": null,
         "source": "local",
         "reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 جنيه\n\nتقدر تضيفهم للسلة وتكمل الطلب، والد",
-        "request_id": "req_29e78373-6d41-42c4-99f1-b04ce75d6878",
+        "request_id": "req_77286543-1473-41be-9cf8-a48419e6581d",
         "leaked_api_key": false,
         "leaked_stack": false,
         "provider_failure_mode": "fetch failed — انقطاع اتصال على مستوى TLS في بيئة الاختبار، لا رفض مفتاح؛ كلا المسارين يُنتجان نفس قرار التراجع"
       },
       "status": "PASS",
-      "ms": 105
+      "ms": 59
     },
     {
       "id": "WF-019",
@@ -835,7 +835,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 36 → 36 (لا تنفيذ من محادثة)"
+          "detail": "عدد الطلبات 62 → 62 (لا تنفيذ من محادثة)"
         },
         {
           "ok": true,
@@ -847,11 +847,11 @@
         "source": "local",
         "reply": "أهلاً بحضرتك في روفيده 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على 01095032221.",
         "fabricates_order_id": false,
-        "orders_before": 36,
-        "orders_after": 36
+        "orders_before": 62,
+        "orders_after": 62
       },
       "status": "PASS",
-      "ms": 47
+      "ms": 31
     },
     {
       "id": "WF-020",
@@ -868,7 +868,7 @@
         },
         {
           "ok": true,
-          "detail": "كوكيز صدر فعلًا: 1790583271219%3ATihwOQUe…"
+          "detail": "كوكيز صدر فعلًا: 1790583627844%3A_0U2eu_C…"
         },
         {
           "ok": true,
@@ -889,7 +889,7 @@
       ],
       "actual": {
         "login_http": 200,
-        "cookie_value_on_the_wire": "1790583271219%3ATihwOQUeXIzdBA7b9y1aYRDNkghYfr_N.CDZxgvgXiqITEbrcEDGyYVODDajAm6UECUboujUiLRY",
+        "cookie_value_on_the_wire": "1790583627844%3A_0U2eu_C0Ouyb0qc1Od-W6jpONMPfmoP.7EAMDGlwhwG4kJUEaeuLH871cW-ubwtwQ_ri_JBCwKQ",
         "wire_contains_percent3A": true,
         "session_http": 200,
         "session_authenticated": false,
@@ -902,7 +902,7 @@
         "defect": true
       },
       "status": "FAIL",
-      "ms": 71
+      "ms": 43
     },
     {
       "id": "WF-021",
@@ -915,7 +915,7 @@
       "checks": [
         {
           "ok": true,
-          "detail": "أنشئ طلب للتتبّع: ORD-83271283-ca7cf6d1"
+          "detail": "أنشئ طلب للتتبّع: ORD-83627889-ef284495"
         },
         {
           "ok": true,
@@ -943,11 +943,11 @@
         }
       ],
       "actual": {
-        "order_id": "ORD-83271283-ca7cf6d1",
+        "order_id": "ORD-83627889-ef284495",
         "http": 200,
         "body": {
           "ok": true,
-          "id": "ORD-83271283-ca7cf6d1",
+          "id": "ORD-83627889-ef284495",
           "status": "جديد",
           "items": [
             {
@@ -955,15 +955,15 @@
               "qty": 1
             }
           ],
-          "created_at": "2026-09-28 08:14:31"
+          "created_at": "2026-09-28 08:20:27"
         },
-        "request_id": "req_ccca3d4c-871c-4069-875d-5337b7ec79dc",
+        "request_id": "req_755ae16d-a429-4b5e-9994-2360c5930ea8",
         "leaks_full_phone": false,
         "leaks_address": false,
         "leaks_price": false
       },
       "status": "PASS",
-      "ms": 48
+      "ms": 34
     },
     {
       "id": "WF-022",
@@ -992,11 +992,11 @@
         },
         {
           "ok": true,
-          "detail": "سُجّلت محاولة فاشلة في التدقيق: 1 → 3"
+          "detail": "سُجّلت محاولة فاشلة في التدقيق: 5 → 7"
         }
       ],
       "actual": {
-        "order_id": "ORD-83271323-e656925c",
+        "order_id": "ORD-83627922-31579573",
         "wrong_last4_http": 404,
         "wrong_last4_error": "تعذر العثور على الطلب",
         "wrong_last4_code": "NOT_FOUND",
@@ -1004,12 +1004,12 @@
         "ghost_id_error": "تعذر العثور على الطلب",
         "messages_identical": true,
         "audit_track_failed": [
-          1,
-          3
+          5,
+          7
         ]
       },
       "status": "PASS",
-      "ms": 55
+      "ms": 48
     },
     {
       "id": "WF-023",
@@ -1037,11 +1037,11 @@
         "http": 404,
         "code": "NOT_FOUND",
         "error": "تعذر العثور على الطلب",
-        "request_id": "req_b4ab1dfd-b780-4f57-a11a-0f72fdb8a096",
+        "request_id": "req_23816ca3-fe62-4b94-bdb3-50bc74d30c9f",
         "identical_to_enabled_failure": true
       },
       "status": "PASS",
-      "ms": 16
+      "ms": 13
     },
     {
       "id": "WF-024",
@@ -1094,7 +1094,7 @@
         "stock_delta": 8
       },
       "status": "PASS",
-      "ms": 206
+      "ms": 177
     },
     {
       "id": "WF-025",
@@ -1138,7 +1138,479 @@
         "leaks_tool_names": false
       },
       "status": "FAIL",
-      "ms": 288
+      "ms": 24
+    },
+    {
+      "id": "WF-006",
+      "title": "جسم أكبر من الحد المسموح",
+      "input": "POST /api/orders بحقل note حجمه ~40KB (الحد 32_000 بايت)",
+      "precondition": "MAX_BODY_BYTES = 32_000 على /api/orders",
+      "expected_decision": "PAYLOAD_TOO_LARGE قبل أي تحليل أو تحقق",
+      "expected_side_effect": "413، لا طلب، لا كتابة",
+      "evidence_required": "413 + code + request_id + ثبات عدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "HTTP 413 (المتوقع 413)"
+        },
+        {
+          "ok": true,
+          "detail": "code=PAYLOAD_TOO_LARGE"
+        },
+        {
+          "ok": true,
+          "detail": "request_id=req_ec93c8e5-a153-4d17-a4d5-2e4673ffd90d"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 70 → 70 (بلا تغيير)"
+        }
+      ],
+      "actual": {
+        "http": 413,
+        "code": "PAYLOAD_TOO_LARGE",
+        "error": "حجم الطلب كبير جدًا",
+        "request_id": "req_ec93c8e5-a153-4d17-a4d5-2e4673ffd90d",
+        "orders_before": 70,
+        "orders_after": 70
+      },
+      "status": "PASS",
+      "ms": 13
+    },
+    {
+      "id": "WF-007",
+      "title": "جسم ليس JSON صالحًا",
+      "input": "POST /api/orders بنص مشوَّه: '{\"customer\": ' ",
+      "precondition": "لا شيء",
+      "expected_decision": "VALIDATION_FAILED — لا يُسرَّب خطأ المحلّل الداخلي",
+      "expected_side_effect": "422 برسالة عربية آمنة، لا stack ولا SyntaxError",
+      "evidence_required": "422 + code + غياب SyntaxError/stack عن الرد",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "HTTP 422 (المتوقع 422)"
+        },
+        {
+          "ok": true,
+          "detail": "code=VALIDATION_FAILED"
+        },
+        {
+          "ok": true,
+          "detail": "رسالة عربية آمنة: «جسم الطلب ليس JSON صالحًا»"
+        },
+        {
+          "ok": true,
+          "detail": "لا خطأ محلّل داخلي ولا stack في الرد"
+        }
+      ],
+      "actual": {
+        "http": 422,
+        "code": "VALIDATION_FAILED",
+        "error": "جسم الطلب ليس JSON صالحًا",
+        "request_id": "req_191f234d-2b00-4654-9746-7ea4cd6344a6",
+        "leaks_parser_internals": false,
+        "body_excerpt": "{\"error\":\"جسم الطلب ليس JSON صالحًا\",\"code\":\"VALIDATION_FAILED\",\"request_id\":\"req_191f234d-2b00-4654-9746-7ea4cd6344a6\"}"
+      },
+      "status": "PASS",
+      "ms": 19
+    },
+    {
+      "id": "WF-008",
+      "title": "تجاوز حدود أطوال الحقول",
+      "input": "customer بطول 121، address بطول 501، note بطول 501 (الحدود 120/500/500)",
+      "precondition": "عقود trimmed(min,max) في contracts.ts",
+      "expected_decision": "422 لكل حقل متجاوز، برسالة تسمّي الحد",
+      "expected_side_effect": "لا طلب",
+      "evidence_required": "422 + رسائل تسمّي الحقول + ثبات عدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "customer → HTTP 422 (المتوقع 422) — «customer: الطول الأقصى 120 حرفًا»"
+        },
+        {
+          "ok": true,
+          "detail": "address → HTTP 422 (المتوقع 422) — «address: الطول الأقصى 500 حرفًا»"
+        },
+        {
+          "ok": true,
+          "detail": "note → HTTP 422 (المتوقع 422) — «note: الطول الأقصى 500 حرفًا»"
+        },
+        {
+          "ok": true,
+          "detail": "customer_short → HTTP 422 (المتوقع 422) — «customer: الطول الأدنى 2 أحرف»"
+        },
+        {
+          "ok": true,
+          "detail": "رسالة customer تسمّي الحد 120: «customer: الطول الأقصى 120 حرفًا»"
+        },
+        {
+          "ok": true,
+          "detail": "رسالة address تسمّي الحد 500: «address: الطول الأقصى 500 حرفًا»"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 70 → 70 (بلا تغيير)"
+        }
+      ],
+      "actual": {
+        "cases": {
+          "customer": {
+            "http": 422,
+            "code": "VALIDATION_FAILED",
+            "error": "customer: الطول الأقصى 120 حرفًا"
+          },
+          "address": {
+            "http": 422,
+            "code": "VALIDATION_FAILED",
+            "error": "address: الطول الأقصى 500 حرفًا"
+          },
+          "note": {
+            "http": 422,
+            "code": "VALIDATION_FAILED",
+            "error": "note: الطول الأقصى 500 حرفًا"
+          },
+          "customer_short": {
+            "http": 422,
+            "code": "VALIDATION_FAILED",
+            "error": "customer: الطول الأدنى 2 أحرف"
+          }
+        },
+        "orders_before": 70,
+        "orders_after": 70
+      },
+      "status": "PASS",
+      "ms": 55
+    },
+    {
+      "id": "WF-009",
+      "title": "هاتف غير صالح ومحافظة خارج القائمة",
+      "input": "phone='abcdef 12345' ثم governorate='أطلنطس'",
+      "precondition": "regex /^[0-9+\\s()-]{8,30}$/ وقائمة GOVERNORATES",
+      "expected_decision": "422 في الحالتين — لا يُنشأ طلب بعنوان غير قابل للتوصيل",
+      "expected_side_effect": "لا طلب، لا خصم مخزون",
+      "evidence_required": "422 + رسائل محددة + ثبات المخزون وعدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "هاتف غير صالح → HTTP 422 (المتوقع 422)"
+        },
+        {
+          "ok": true,
+          "detail": "رسالة تسمّي الهاتف: «phone: رقم هاتف غير صالح»"
+        },
+        {
+          "ok": true,
+          "detail": "محافظة خارج القائمة → HTTP 422"
+        },
+        {
+          "ok": true,
+          "detail": "رسالة تسمّي المحافظة: «اختر المحافظة من القائمة»"
+        },
+        {
+          "ok": true,
+          "detail": "المخزون 50 → 50 (لم يُخصم)"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 70 → 70"
+        }
+      ],
+      "actual": {
+        "bad_phone": {
+          "http": 422,
+          "code": "VALIDATION_FAILED",
+          "error": "phone: رقم هاتف غير صالح"
+        },
+        "bad_governorate": {
+          "http": 422,
+          "code": "VALIDATION_FAILED",
+          "error": "اختر المحافظة من القائمة"
+        },
+        "stock_before": 50,
+        "stock_after": 50,
+        "orders_before": 70,
+        "orders_after": 70
+      },
+      "status": "PASS",
+      "ms": 54
+    },
+    {
+      "id": "WF-026",
+      "title": "رؤوس الأمان مطبّقة على كل الاستجابات",
+      "input": "GET / و /api/products و /api/orders (401) و POST /api/chat",
+      "precondition": "middleware + buildSecurityHeaders",
+      "expected_decision": "رؤوس موحّدة على النجاح والخطأ معًا",
+      "expected_side_effect": "لا استجابة عارية من الرؤوس",
+      "evidence_required": " presence الرؤوس الثمانية على المسارات الأربعة",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "GET / (200) — ناقص: لا شيء، CSP: true"
+        },
+        {
+          "ok": true,
+          "detail": "GET /api/products (200) — ناقص: لا شيء، CSP: true"
+        },
+        {
+          "ok": true,
+          "detail": "GET /api/orders (401) — ناقص: لا شيء، CSP: true"
+        },
+        {
+          "ok": true,
+          "detail": "POST /api/chat (200) — ناقص: لا شيء، CSP: true"
+        }
+      ],
+      "actual": {
+        "GET /": {
+          "status": 200,
+          "missing": [],
+          "csp_present": true
+        },
+        "GET /api/products": {
+          "status": 200,
+          "missing": [],
+          "csp_present": true
+        },
+        "GET /api/orders": {
+          "status": 401,
+          "missing": [],
+          "csp_present": true
+        },
+        "POST /api/chat": {
+          "status": 200,
+          "missing": [],
+          "csp_present": true
+        }
+      },
+      "status": "PASS",
+      "ms": 131
+    },
+    {
+      "id": "WF-027",
+      "title": "حد المعدل على الدردشة — 30 محاولة / 10 دقائق",
+      "input": "31 طلب POST /api/chat من نفس هوية العميل",
+      "precondition": "rateLimit(req,'chat',30,10min)",
+      "expected_decision": "الثلاثون يمر، الحادي والثلاثون 429",
+      "expected_side_effect": "لا رد بعد تجاوز الحد، مع retry_after_seconds",
+      "evidence_required": "عدد 200 = 30 ثم 429 + retry_after_seconds",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "عدد المقبول = 30 (المتوقع 30)"
+        },
+        {
+          "ok": true,
+          "detail": "الحادي والثلاثون → HTTP 429 (المتوقع 429)"
+        },
+        {
+          "ok": true,
+          "detail": "code=RATE_LIMITED"
+        },
+        {
+          "ok": true,
+          "detail": "retry_after_seconds=600"
+        }
+      ],
+      "actual": {
+        "accepted": 30,
+        "last_http": 429,
+        "last_code": "RATE_LIMITED",
+        "retry_after_seconds": 600,
+        "request_id": "req_fc99331b-adeb-463c-8eb1-4443859d2253"
+      },
+      "status": "PASS",
+      "ms": 587
+    },
+    {
+      "id": "WF-028",
+      "title": "قيمة غير مسموحة في حقل مُعدَّد وحد الأصناف",
+      "input": "payment='bitcoin' ثم items من 51 صنفًا (الحد 50)",
+      "precondition": "z.enum(['cod','vodafone_cash']) و items.max(50)",
+      "expected_decision": "422 في الحالتين",
+      "expected_side_effect": "لا طلب",
+      "evidence_required": "422 + رسائل محددة + ثبات عدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "payment غير مسموح → HTTP 422 (المتوقع 422)"
+        },
+        {
+          "ok": true,
+          "detail": "code=VALIDATION_FAILED"
+        },
+        {
+          "ok": true,
+          "detail": "51 صنفًا → HTTP 422 (المتوقع 422)"
+        },
+        {
+          "ok": true,
+          "detail": "الرسالة تسمّي الحد 50: «items: الحد الأقصى 50 صنفًا»"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 70 → 70"
+        }
+      ],
+      "actual": {
+        "bad_payment": {
+          "http": 422,
+          "code": "VALIDATION_FAILED",
+          "error": "payment: Invalid enum value. Expected 'cod' | 'vodafone_cash', received 'bitcoin'"
+        },
+        "too_many_items": {
+          "http": 422,
+          "code": "VALIDATION_FAILED",
+          "error": "items: الحد الأقصى 50 صنفًا"
+        },
+        "orders_before": 70,
+        "orders_after": 70
+      },
+      "status": "PASS",
+      "ms": 30
+    },
+    {
+      "id": "WF-029",
+      "title": "X-Request-Id على النجاح والخطأ معًا",
+      "input": "200 على /api/products و422 على /api/chat و401 على /api/orders و409 على طلب مرفوض",
+      "precondition": "apiHandler يضبط X-Request-Id ويظهر request_id في جسم الخطأ",
+      "expected_decision": "معرّف قابل للربط بالسجلات في كل استجابة",
+      "expected_side_effect": "لا استجابة بلا معرّف",
+      "evidence_required": "رأس + جسم متطابقان في كل حالة",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "200 /api/products — header=req_2f53029d-f996-44c7-9f6b-966b37d9b0ab"
+        },
+        {
+          "ok": true,
+          "detail": "422 chat — header=req_9b1ef99d-c920-4199-b8e1-b1d3512f5582 body=req_9b1ef99d-c920-4199-b8e1-b1d3512f5582"
+        },
+        {
+          "ok": true,
+          "detail": "401 orders — header=req_995d19f9-cb1f-4cdb-abea-04cd7c2586a5 body=req_995d19f9-cb1f-4cdb-abea-04cd7c2586a5"
+        },
+        {
+          "ok": true,
+          "detail": "409 conflict — header=req_c8002014-00e8-4d9a-80f7-abcae6ca761c body=req_c8002014-00e8-4d9a-80f7-abcae6ca761c"
+        },
+        {
+          "ok": true,
+          "detail": "كل المعرّفات بالصيغة req_ القابلة للبحث في السجلات"
+        }
+      ],
+      "actual": {
+        "probes": [
+          {
+            "case": "200 /api/products",
+            "header": "req_2f53029d-f996-44c7-9f6b-966b37d9b0ab",
+            "bodyId": null
+          },
+          {
+            "case": "422 chat",
+            "header": "req_9b1ef99d-c920-4199-b8e1-b1d3512f5582",
+            "bodyId": "req_9b1ef99d-c920-4199-b8e1-b1d3512f5582"
+          },
+          {
+            "case": "401 orders",
+            "header": "req_995d19f9-cb1f-4cdb-abea-04cd7c2586a5",
+            "bodyId": "req_995d19f9-cb1f-4cdb-abea-04cd7c2586a5"
+          },
+          {
+            "case": "409 conflict",
+            "header": "req_c8002014-00e8-4d9a-80f7-abcae6ca761c",
+            "bodyId": "req_c8002014-00e8-4d9a-80f7-abcae6ca761c"
+          }
+        ]
+      },
+      "status": "PASS",
+      "ms": 64
+    },
+    {
+      "id": "WF-030",
+      "title": "مسار غير موجود — 404 بلا تسريب",
+      "input": "GET /api/does-not-exist و GET /api/orders/../admin/diagnostics",
+      "precondition": "لا شيء",
+      "expected_decision": "404 موحّد، لا stack ولا كشف بنية",
+      "expected_side_effect": "لا كتابة",
+      "evidence_required": "404 + غياب stack/مسارات داخلية عن الرد",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "مسار غير موجود → HTTP 404 (المتوقع 404)"
+        },
+        {
+          "ok": true,
+          "detail": "لا stack حقيقي ولا مسار نظام مطلق في أيٍّ من الردّين"
+        },
+        {
+          "ok": true,
+          "detail": "محاولة اجتياز المسار → HTTP 404 (لا وصول)"
+        }
+      ],
+      "actual": {
+        "missing_route_http": 404,
+        "missing_route_excerpt": "<!DOCTYPE html><html lang=\"ar\" dir=\"rtl\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet",
+        "traversal_http": 404,
+        "traversal_excerpt": "{\"error\":\"التشخيص معطل في بيئة الإنتاج\",\"code\":\"DIAGNOSTICS_DISABLED\",\"request_id\":\"req_85f94469-71e8-4421-87c4-d3487f671d06\"}",
+        "real_leak": false,
+        "dev_only_artifact_present": true
+      },
+      "status": "PASS",
+      "ms": 67
+    },
+    {
+      "id": "WF-031",
+      "title": "بناء الإنتاج لا يسرّب ما يسرّبه وضع التطوير",
+      "input": "GET /api/does-not-exist على :3000 (dev) مقابل :3003 (next start)",
+      "precondition": "نفس الكود؛ :3003 يعمل من npm run build",
+      "expected_decision": "آثار أدوات التطوير تظهر في dev وتختفي في الإنتاج",
+      "expected_side_effect": "لا stack ولا مسار نظام في الحالتين",
+      "evidence_required": "قائمة التطابقات لكل بيئة + حجم الردّين",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "404 في البيئتين (dev=404, prod=404)"
+        },
+        {
+          "ok": true,
+          "detail": "لا تسريب حقيقي في dev: [\"node_modules\",\"next-devtools\",\"hmr-client\"]"
+        },
+        {
+          "ok": true,
+          "detail": "لا تسريب حقيقي في prod: []"
+        },
+        {
+          "ok": true,
+          "detail": "آثار التطوير مقصورة على dev (dev=3، prod=0)"
+        }
+      ],
+      "actual": {
+        "environments": {
+          "dev": {
+            "http": 404,
+            "bytes": 16877,
+            "matches": [
+              "node_modules",
+              "next-devtools",
+              "hmr-client"
+            ]
+          },
+          "prod": {
+            "http": 404,
+            "bytes": 12132,
+            "matches": []
+          }
+        },
+        "dev_only_artifacts": [
+          "node_modules",
+          "next-devtools",
+          "hmr-client"
+        ],
+        "real_leak_dev": false,
+        "real_leak_prod": false
+      },
+      "status": "PASS",
+      "ms": 74
     }
   ]
 }

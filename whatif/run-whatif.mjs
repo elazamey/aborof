@@ -24,6 +24,8 @@ const NODB_BASE = process.env.NODB_BASE ?? "http://127.0.0.1:3001";
 const AIFAIL_BASE = process.env.AIFAIL_BASE ?? "http://127.0.0.1:3002";
 /** نفس نسخة :3002 لكن بعلم تتبُّع الطلبات مفعّل — تُستخدم لمسار التتبّع. */
 const TRACK_BASE = process.env.TRACK_BASE ?? AIFAIL_BASE;
+/** نسخة إنتاجية (`npm run build && next start`) لمقارنة التسريب dev مقابل prod. */
+const PROD_BASE = process.env.PROD_BASE ?? "http://127.0.0.1:3003";
 const TRACK_DB_URL = process.env.WHATIF_TRACK_DB_URL ?? `file:${join(ROOT, "..", "whatif-aifail", "local-aifail.db")}`;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "dev-local-pass-12345";
 const DB_URL = process.env.WHATIF_DB_URL ?? `file:${join(ROOT, "local.db")}`;
@@ -1391,6 +1393,454 @@ await scenario(
         check(
           !/search_products|lookup_faq|shipping_estimate|store_info/.test(diag.text + mcp.text),
           "لا أسماء أدوات مسرّبة"
+        ),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-006
+await scenario(
+  {
+    id: "WF-006",
+    title: "جسم أكبر من الحد المسموح",
+    input: "POST /api/orders بحقل note حجمه ~40KB (الحد 32_000 بايت)",
+    precondition: "MAX_BODY_BYTES = 32_000 على /api/orders",
+    expected_decision: "PAYLOAD_TOO_LARGE قبل أي تحليل أو تحقق",
+    expected_side_effect: "413، لا طلب، لا كتابة",
+    evidence_required: "413 + code + request_id + ثبات عدد الطلبات",
+  },
+  async (rec) => {
+    const before = (await dbFacts()).orders;
+    const r = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p3", qty: 1 }], { note: "ا".repeat(40_000) }),
+      xff: `${RUN}-wf006`,
+    });
+    const after = (await dbFacts()).orders;
+    rec.actual = {
+      http: r.status,
+      code: r.json?.code,
+      error: r.json?.error,
+      request_id: r.requestId,
+      orders_before: before,
+      orders_after: after,
+    };
+    return {
+      checks: [
+        check(r.status === 413, `HTTP ${r.status} (المتوقع 413)`),
+        check(r.json?.code === "PAYLOAD_TOO_LARGE", `code=${r.json?.code}`),
+        check(typeof r.requestId === "string" && r.requestId.length > 0, `request_id=${r.requestId}`),
+        check(after === before, `عدد الطلبات ${before} → ${after} (بلا تغيير)`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-007
+await scenario(
+  {
+    id: "WF-007",
+    title: "جسم ليس JSON صالحًا",
+    input: "POST /api/orders بنص مشوَّه: '{\"customer\": ' ",
+    precondition: "لا شيء",
+    expected_decision: "VALIDATION_FAILED — لا يُسرَّب خطأ المحلّل الداخلي",
+    expected_side_effect: "422 برسالة عربية آمنة، لا stack ولا SyntaxError",
+    evidence_required: "422 + code + غياب SyntaxError/stack عن الرد",
+  },
+  async (rec) => {
+    const res = await fetch(BASE + "/api/orders", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": `${RUN}-wf007` },
+      body: '{"customer": ',
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+    rec.actual = {
+      http: res.status,
+      code: json?.code,
+      error: json?.error,
+      request_id: res.headers.get("x-request-id"),
+      leaks_parser_internals: /SyntaxError|Unexpected end of JSON|at Object\./.test(text),
+      body_excerpt: text.slice(0, 200),
+    };
+    return {
+      checks: [
+        check(res.status === 422, `HTTP ${res.status} (المتوقع 422)`),
+        check(json?.code === "VALIDATION_FAILED", `code=${json?.code}`),
+        check(/JSON/.test(json?.error ?? ""), `رسالة عربية آمنة: «${json?.error}»`),
+        check(
+          !/SyntaxError|Unexpected end of JSON|at Object\./.test(text),
+          "لا خطأ محلّل داخلي ولا stack في الرد"
+        ),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-008
+await scenario(
+  {
+    id: "WF-008",
+    title: "تجاوز حدود أطوال الحقول",
+    input: "customer بطول 121، address بطول 501، note بطول 501 (الحدود 120/500/500)",
+    precondition: "عقود trimmed(min,max) في contracts.ts",
+    expected_decision: "422 لكل حقل متجاوز، برسالة تسمّي الحد",
+    expected_side_effect: "لا طلب",
+    evidence_required: "422 + رسائل تسمّي الحقول + ثبات عدد الطلبات",
+  },
+  async (rec) => {
+    const before = (await dbFacts()).orders;
+    const cases = [
+      ["customer", order([{ id: "p3", qty: 1 }], { customer: "ا".repeat(121) })],
+      ["address", order([{ id: "p3", qty: 1 }], { address: "ا".repeat(501) })],
+      ["note", order([{ id: "p3", qty: 1 }], { note: "ا".repeat(501) })],
+      ["customer_short", order([{ id: "p3", qty: 1 }], { customer: "ا" })],
+    ];
+    const out = {};
+    for (const [name, body] of cases) {
+      const r = await req(BASE, "POST", "/api/orders", { body, xff: `${RUN}-wf008-${name}` });
+      out[name] = { http: r.status, code: r.json?.code, error: r.json?.error };
+    }
+    const after = (await dbFacts()).orders;
+    rec.actual = { cases: out, orders_before: before, orders_after: after };
+    return {
+      checks: [
+        ...Object.entries(out).map(([name, v]) =>
+          check(v.http === 422, `${name} → HTTP ${v.http} (المتوقع 422) — «${v.error}»`)
+        ),
+        check(/120/.test(out.customer.error ?? ""), `رسالة customer تسمّي الحد 120: «${out.customer.error}»`),
+        check(/500/.test(out.address.error ?? ""), `رسالة address تسمّي الحد 500: «${out.address.error}»`),
+        check(after === before, `عدد الطلبات ${before} → ${after} (بلا تغيير)`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-009
+await scenario(
+  {
+    id: "WF-009",
+    title: "هاتف غير صالح ومحافظة خارج القائمة",
+    input: "phone='abcdef 12345' ثم governorate='أطلنطس'",
+    precondition: "regex /^[0-9+\\s()-]{8,30}$/ وقائمة GOVERNORATES",
+    expected_decision: "422 في الحالتين — لا يُنشأ طلب بعنوان غير قابل للتوصيل",
+    expected_side_effect: "لا طلب، لا خصم مخزون",
+    evidence_required: "422 + رسائل محددة + ثبات المخزون وعدد الطلبات",
+  },
+  async (rec) => {
+    await setProduct("p3", { stock: 50 });
+    const stockBefore = await stockOf("p3");
+    const before = (await dbFacts()).orders;
+
+    const badPhone = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p3", qty: 1 }], { phone: "abcdef 12345" }),
+      xff: `${RUN}-wf009a`,
+    });
+    const badGov = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p3", qty: 1 }], { governorate: "أطلنطس" }),
+      xff: `${RUN}-wf009b`,
+    });
+    const stockAfter = await stockOf("p3");
+    const after = (await dbFacts()).orders;
+    rec.actual = {
+      bad_phone: { http: badPhone.status, code: badPhone.json?.code, error: badPhone.json?.error },
+      bad_governorate: { http: badGov.status, code: badGov.json?.code, error: badGov.json?.error },
+      stock_before: stockBefore,
+      stock_after: stockAfter,
+      orders_before: before,
+      orders_after: after,
+    };
+    return {
+      checks: [
+        check(badPhone.status === 422, `هاتف غير صالح → HTTP ${badPhone.status} (المتوقع 422)`),
+        check(/هاتف/.test(badPhone.json?.error ?? ""), `رسالة تسمّي الهاتف: «${badPhone.json?.error}»`),
+        check(badGov.status === 422, `محافظة خارج القائمة → HTTP ${badGov.status}`),
+        check(/المحافظة/.test(badGov.json?.error ?? ""), `رسالة تسمّي المحافظة: «${badGov.json?.error}»`),
+        check(stockAfter === stockBefore, `المخزون ${stockBefore} → ${stockAfter} (لم يُخصم)`),
+        check(after === before, `عدد الطلبات ${before} → ${after}`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-026
+await scenario(
+  {
+    id: "WF-026",
+    title: "رؤوس الأمان مطبّقة على كل الاستجابات",
+    input: "GET / و /api/products و /api/orders (401) و POST /api/chat",
+    precondition: "middleware + buildSecurityHeaders",
+    expected_decision: "رؤوس موحّدة على النجاح والخطأ معًا",
+    expected_side_effect: "لا استجابة عارية من الرؤوس",
+    evidence_required: " presence الرؤوس الثمانية على المسارات الأربعة",
+  },
+  async (rec) => {
+    const targets = [
+      ["GET", "/", undefined],
+      ["GET", "/api/products", undefined],
+      ["GET", "/api/orders", undefined],
+      ["POST", "/api/chat", { messages: [{ role: "user", content: "أهلاً" }] }],
+    ];
+    const required = [
+      "strict-transport-security",
+      "x-content-type-options",
+      "x-frame-options",
+      "referrer-policy",
+      "permissions-policy",
+      "cross-origin-opener-policy",
+      "x-dns-prefetch-control",
+    ];
+    const out = {};
+    for (const [method, path, body] of targets) {
+      const res = await fetch(BASE + path, {
+        method,
+        headers: {
+          ...(body ? { "content-type": "application/json" } : {}),
+          "x-forwarded-for": `${RUN}-wf026${path}`,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const h = {};
+      for (const k of required) h[k] = res.headers.get(k);
+      h["csp"] = res.headers.get("content-security-policy-report-only") ?? res.headers.get("content-security-policy");
+      out[`${method} ${path}`] = { status: res.status, missing: required.filter((k) => !h[k]), csp_present: Boolean(h.csp) };
+    }
+    rec.actual = out;
+    return {
+      checks: Object.entries(out).map(
+        ([label, v]) =>
+          check(
+            v.missing.length === 0 && v.csp_present,
+            `${label} (${v.status}) — ناقص: ${v.missing.length ? v.missing.join(",") : "لا شيء"}، CSP: ${v.csp_present}`
+          )
+      ),
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-027
+await scenario(
+  {
+    id: "WF-027",
+    title: "حد المعدل على الدردشة — 30 محاولة / 10 دقائق",
+    input: "31 طلب POST /api/chat من نفس هوية العميل",
+    precondition: "rateLimit(req,'chat',30,10min)",
+    expected_decision: "الثلاثون يمر، الحادي والثلاثون 429",
+    expected_side_effect: "لا رد بعد تجاوز الحد، مع retry_after_seconds",
+    evidence_required: "عدد 200 = 30 ثم 429 + retry_after_seconds",
+  },
+  async (rec) => {
+    const xff = `${RUN}-wf027`;
+    let ok = 0;
+    let last = null;
+    for (let i = 0; i < 31; i++) {
+      const r = await req(BASE, "POST", "/api/chat", {
+        body: { messages: [{ role: "user", content: "السعر كام؟" }] },
+        xff,
+      });
+      if (r.status === 200) ok++;
+      last = r;
+    }
+    rec.actual = {
+      accepted: ok,
+      last_http: last.status,
+      last_code: last.json?.code,
+      retry_after_seconds: last.json?.retry_after_seconds,
+      request_id: last.requestId,
+    };
+    return {
+      checks: [
+        check(ok === 30, `عدد المقبول = ${ok} (المتوقع 30)`),
+        check(last.status === 429, `الحادي والثلاثون → HTTP ${last.status} (المتوقع 429)`),
+        check(last.json?.code === "RATE_LIMITED", `code=${last.json?.code}`),
+        check(Number(last.json?.retry_after_seconds) > 0, `retry_after_seconds=${last.json?.retry_after_seconds}`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-028
+await scenario(
+  {
+    id: "WF-028",
+    title: "قيمة غير مسموحة في حقل مُعدَّد وحد الأصناف",
+    input: "payment='bitcoin' ثم items من 51 صنفًا (الحد 50)",
+    precondition: "z.enum(['cod','vodafone_cash']) و items.max(50)",
+    expected_decision: "422 في الحالتين",
+    expected_side_effect: "لا طلب",
+    evidence_required: "422 + رسائل محددة + ثبات عدد الطلبات",
+  },
+  async (rec) => {
+    const before = (await dbFacts()).orders;
+    const badPayment = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p3", qty: 1 }], { payment: "bitcoin" }),
+      xff: `${RUN}-wf028a`,
+    });
+    const tooMany = await req(BASE, "POST", "/api/orders", {
+      body: order(Array.from({ length: 51 }, (_, i) => ({ id: "p3", qty: 1, _i: i })).map(({ _i, ...x }) => x)),
+      xff: `${RUN}-wf028b`,
+    });
+    const after = (await dbFacts()).orders;
+    rec.actual = {
+      bad_payment: { http: badPayment.status, code: badPayment.json?.code, error: badPayment.json?.error },
+      too_many_items: { http: tooMany.status, code: tooMany.json?.code, error: tooMany.json?.error },
+      orders_before: before,
+      orders_after: after,
+    };
+    return {
+      checks: [
+        check(badPayment.status === 422, `payment غير مسموح → HTTP ${badPayment.status} (المتوقع 422)`),
+        check(badPayment.json?.code === "VALIDATION_FAILED", `code=${badPayment.json?.code}`),
+        check(tooMany.status === 422, `51 صنفًا → HTTP ${tooMany.status} (المتوقع 422)`),
+        check(/50/.test(tooMany.json?.error ?? ""), `الرسالة تسمّي الحد 50: «${tooMany.json?.error}»`),
+        check(after === before, `عدد الطلبات ${before} → ${after}`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-029
+await scenario(
+  {
+    id: "WF-029",
+    title: "X-Request-Id على النجاح والخطأ معًا",
+    input: "200 على /api/products و422 على /api/chat و401 على /api/orders و409 على طلب مرفوض",
+    precondition: "apiHandler يضبط X-Request-Id ويظهر request_id في جسم الخطأ",
+    expected_decision: "معرّف قابل للربط بالسجلات في كل استجابة",
+    expected_side_effect: "لا استجابة بلا معرّف",
+    evidence_required: "رأس + جسم متطابقان في كل حالة",
+  },
+  async (rec) => {
+    const probes = [];
+    const a = await fetch(BASE + "/api/products", { headers: { "x-forwarded-for": `${RUN}-wf029a` } });
+    probes.push({ case: "200 /api/products", header: a.headers.get("x-request-id"), bodyId: null });
+
+    const b = await req(BASE, "POST", "/api/chat", { body: { nope: 1 }, xff: `${RUN}-wf029b` });
+    probes.push({ case: `422 chat`, header: b.requestId, bodyId: b.json?.request_id });
+
+    const c = await req(BASE, "GET", "/api/orders", { xff: `${RUN}-wf029c` });
+    probes.push({ case: `401 orders`, header: c.requestId, bodyId: c.json?.request_id });
+
+    await setProduct("p3", { stock: 0 });
+    const d = await req(BASE, "POST", "/api/orders", {
+      body: order([{ id: "p3", qty: 5 }]),
+      xff: `${RUN}-wf029d`,
+    });
+    probes.push({ case: `409 conflict`, header: d.requestId, bodyId: d.json?.request_id });
+    await setProduct("p3", { stock: 80 });
+
+    rec.actual = { probes };
+    return {
+      checks: [
+        ...probes.map((p) =>
+          check(
+            Boolean(p.header) && (p.bodyId == null || p.bodyId === p.header),
+            `${p.case} — header=${p.header}${p.bodyId ? ` body=${p.bodyId}` : ""}`
+          )
+        ),
+        check(
+          probes.every((p) => p.header && p.header.startsWith("req_")),
+          "كل المعرّفات بالصيغة req_ القابلة للبحث في السجلات"
+        ),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-030
+await scenario(
+  {
+    id: "WF-030",
+    title: "مسار غير موجود — 404 بلا تسريب",
+    input: "GET /api/does-not-exist و GET /api/orders/../admin/diagnostics",
+    precondition: "لا شيء",
+    expected_decision: "404 موحّد، لا stack ولا كشف بنية",
+    expected_side_effect: "لا كتابة",
+    evidence_required: "404 + غياب stack/مسارات داخلية عن الرد",
+  },
+  async (rec) => {
+    const a = await fetch(BASE + "/api/does-not-exist", { headers: { "x-forwarded-for": `${RUN}-wf030a` } });
+    const at = await a.text();
+    const b = await fetch(BASE + "/api/orders/../admin/diagnostics", {
+      headers: { "x-forwarded-for": `${RUN}-wf030b` },
+      redirect: "manual",
+    });
+    const bt = await b.text();
+    // تسريب حقيقي = مسار نظام مطلق أو إطار stack.
+    // أما `node_modules` داخل اسم chunk فهو أثر وضع التطوير (next-devtools /
+    // hmr-client) وليس تسريبًا؛ قيس على بناء الإنتاج في WF-031 بدل خلطه هنا.
+    const REAL_LEAK = /at\s+[\w$.]+\s*\(|\/home\/user\/|\.ts:\d+:\d+/;
+    const DEV_ARTIFACT = /next-devtools|hmr-client|node_modules_next_dist/;
+    rec.actual = {
+      missing_route_http: a.status,
+      missing_route_excerpt: at.slice(0, 160),
+      traversal_http: b.status,
+      traversal_excerpt: bt.slice(0, 160),
+      real_leak: REAL_LEAK.test(at + bt),
+      dev_only_artifact_present: DEV_ARTIFACT.test(at + bt),
+    };
+    return {
+      checks: [
+        check(a.status === 404, `مسار غير موجود → HTTP ${a.status} (المتوقع 404)`),
+        check(!REAL_LEAK.test(at + bt), "لا stack حقيقي ولا مسار نظام مطلق في أيٍّ من الردّين"),
+        check(b.status === 404 || b.status === 308 || b.status === 401, `محاولة اجتياز المسار → HTTP ${b.status} (لا وصول)`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-031
+await scenario(
+  {
+    id: "WF-031",
+    title: "بناء الإنتاج لا يسرّب ما يسرّبه وضع التطوير",
+    input: "GET /api/does-not-exist على :3000 (dev) مقابل :3003 (next start)",
+    precondition: "نفس الكود؛ :3003 يعمل من npm run build",
+    expected_decision: "آثار أدوات التطوير تظهر في dev وتختفي في الإنتاج",
+    expected_side_effect: "لا stack ولا مسار نظام في الحالتين",
+    evidence_required: "قائمة التطابقات لكل بيئة + حجم الردّين",
+  },
+  async (rec) => {
+    const pats = {
+      "at Object.": /at\s+[\w$.]+\s*\(/,
+      node_modules: /node_modules/,
+      ".ts:L:C": /\.ts:\d+:\d+/,
+      "/home/user": /\/home\/user\//,
+      "next-devtools": /next-devtools/,
+      "hmr-client": /hmr-client/,
+    };
+    const out = {};
+    for (const [label, base] of [["dev", BASE], ["prod", PROD_BASE]]) {
+      const r = await fetch(base + "/api/does-not-exist", {
+        headers: { "x-forwarded-for": `${RUN}-wf031-${label}` },
+      });
+      const t = await r.text();
+      out[label] = {
+        http: r.status,
+        bytes: t.length,
+        matches: Object.entries(pats).filter(([, p]) => p.test(t)).map(([n]) => n),
+      };
+    }
+    const realLeak = (v) => v.matches.some((m) => ["at Object.", ".ts:L:C", "/home/user"].includes(m));
+    rec.actual = {
+      environments: out,
+      dev_only_artifacts: out.dev.matches.filter((m) => !out.prod.matches.includes(m)),
+      real_leak_dev: realLeak(out.dev),
+      real_leak_prod: realLeak(out.prod),
+    };
+    return {
+      checks: [
+        check(out.dev.http === 404 && out.prod.http === 404, `404 في البيئتين (dev=${out.dev.http}, prod=${out.prod.http})`),
+        check(!realLeak(out.dev), `لا تسريب حقيقي في dev: ${JSON.stringify(out.dev.matches)}`),
+        check(!realLeak(out.prod), `لا تسريب حقيقي في prod: ${JSON.stringify(out.prod.matches)}`),
+        check(
+          out.dev.matches.length > out.prod.matches.length,
+          `آثار التطوير مقصورة على dev (dev=${out.dev.matches.length}، prod=${out.prod.matches.length})`
         ),
       ],
     };
