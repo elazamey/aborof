@@ -143,7 +143,7 @@ export function interpretProbeStatus(status, body = "") {
         verdict: `الرمز المضبوط لم يصل للخادم (HTTP ${code} — empty JWT) — تحقق من المسافات/الاقتباس وأعد الضبط عبر apply-turso-secrets.sh`,
       };
     }
-    return { ok: false, code: "TURSO_AUTH_401", verdict: `الرمز مرفوض أو غير كافٍ (HTTP ${code}) — أنشئ توكنًا جديدًا Full access` };
+    return { ok: false, code: "TURSO_AUTH_401", verdict: `الرمز مرفوض أو غير كافٍ (HTTP ${code}) — أنشئ توكنًا جديدًا بصلاحية قاعدة واحدة ومدة محدودة (انظر docs/ops/secret-rotation.md)` };
   }
   if (code === 404) return { ok: false, code: "TURSO_DB_NOT_FOUND", verdict: "لا قاعدة بهذا الاسم على المؤسسة (HTTP 404) — القاعدة غير موجودة أو اسمها مختلف" };
   if (code === 400) return { ok: false, code: "TURSO_REQUEST_REJECTED", verdict: `الخادم رفض الطلب (HTTP 400)${hint ? ` — ${hint}` : ""} — تحقّق من صيغة الرابط` };
@@ -165,4 +165,33 @@ export function originForHttpProbe(url) {
   } catch {
     return null;
   }
+}
+
+/**
+ * فصل الاعتمادات حسب الدور (عقد docs/ops/secret-rotation.md):
+ * كل مستهلك يفضّل متغيره الخاص ويسقط على الرمز المشترك القديم مع إعلان
+ * السقوط — فيبقى الإعداد القديم يعمل، لكن المالك يُدفَع للفصل تدريجيًا.
+ *   - الدور `ci`: مجسّ الأدلة  → `TURSO_AUTH_TOKEN_CI`
+ *   - الدور `prod`: تشغيل Vercel → `TURSO_AUTH_TOKEN_PROD`
+ *   - الدور `preview`: معاينات Vercel → `TURSO_AUTH_TOKEN_PREVIEW`
+ * البديل دائمًا `TURSO_AUTH_TOKEN`. دالة نقية (تأخذ `env` حقنًا) لتُختبَر
+ * بلا لمس `process.env` الحقيقي. القيمة تُعاد خامًا (بلا تشذيب) — التشذيب
+ * والتحقق من الفراغ مسؤولية المستدعي كما قبل.
+ *
+ * @returns {{ token: string|null, source: string|null, fallback: boolean }}
+ */
+export function resolveTursoToken(env, role) {
+  const scoped = { ci: "TURSO_AUTH_TOKEN_CI", prod: "TURSO_AUTH_TOKEN_PROD", preview: "TURSO_AUTH_TOKEN_PREVIEW" }[role];
+  const legacy = "TURSO_AUTH_TOKEN";
+  const get = (name) => {
+    const v = env?.[name];
+    return typeof v === "string" && v.length > 0 ? v : null;
+  };
+  if (scoped) {
+    const token = get(scoped);
+    if (token !== null) return { token, source: scoped, fallback: false };
+  }
+  const token = get(legacy);
+  if (token !== null) return { token, source: legacy, fallback: true };
+  return { token: null, source: null, fallback: false };
 }

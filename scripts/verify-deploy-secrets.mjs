@@ -33,7 +33,8 @@ const SECRETS = [
   { name: "VERCEL_ORG_ID", level: "required", why: "معرّف الفريق المستهدف للنشر" },
   { name: "VERCEL_PROJECT_ID", level: "required", why: "معرّف المشروع الإنتاجي المستهدف" },
   { name: "TURSO_DATABASE_URL", level: "required", why: "اتصال قاعدة الإنتاج (Actions + Vercel runtime)" },
-  { name: "TURSO_AUTH_TOKEN", level: "required", why: "رمز قاعدة الإنتاج (Actions + Vercel runtime)" },
+  { name: "TURSO_AUTH_TOKEN_CI", level: "optional", why: "رمز المجسّ (المفضل — إلزاميته عبر مجموعة «واحد على الأقل» أدناه)" },
+  { name: "TURSO_AUTH_TOKEN", level: "optional", why: "الرمز المشترك القديم — بديل انتقالي للمجسّ (إلزاميته عبر المجموعة)" },
   { name: "ADMIN_PASSWORD", level: "required", why: "دخول لوحة الإدارة (Vercel runtime) — 12 حرفًا على الأقل" },
   { name: "ADMIN_SESSION_SECRET", level: "required", why: "توقيع الجلسات فقط (Vercel runtime) — 32 حرفًا على الأقل" },
   { name: "DIAGNOSTICS_KEY", level: "optional", why: "مفتاح مستقل تمامًا عن ADMIN_SESSION_SECRET — لتفعيل التشخيص فقط" },
@@ -59,6 +60,7 @@ const VARIABLES = [
 
 /** مجموعات «واحد على الأقل» (one-of). */
 const ONE_OF = [
+  { group: "رمز Turso للمجسّ (TURSO_AUTH_TOKEN_CI أو TURSO_AUTH_TOKEN المشترك كبديل انتقالي)", names: ["TURSO_AUTH_TOKEN_CI", "TURSO_AUTH_TOKEN"], level: "required" },
   { group: "مزود الدردشة (GEMINI_API_KEY أو GROQ_API_KEY)", names: ["GEMINI_API_KEY", "GROQ_API_KEY"], level: "optional" },
   { group: "مزود NIM (NVIDIA_NIM_API_KEY أو NVIDIA_API_KEY)", names: ["NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"], level: "optional" },
 ];
@@ -175,6 +177,11 @@ const missingSecretNames = SECRETS.filter((s) => !secrets.has(s.name) && !ONE_OF
 if (!allForbidden) {
   for (const secret of SECRETS) {
     if (!secrets.has(secret.name) && secret.level === "required") blocking.push(`سر إلزامي غائب: ${secret.name}`);
+  }
+  for (const group of ONE_OF) {
+    if (group.level === "required" && !group.names.some((n) => secrets.has(n))) {
+      blocking.push(`مجموعة إلزامية غائبة: ${group.group}`);
+    }
   }
   for (const variable of VARIABLES) {
     const found = variables.get(variable.name);
@@ -303,12 +310,13 @@ for (const variable of VARIABLES) {
 console.log("\n## مجموعات «واحد على الأقل»\n");
 for (const group of ONE_OF) {
   const present = group.names.filter((n) => secrets.has(n));
-  const icon = present.length ? "✅" : "⚠️";
-  console.log(`- ${icon} ${group.group}: ${present.length ? present.map((n) => `\`${n}\``).join(", ") : "لا شيء (المزود غير متاح — سلوك مقصود لا يكسر السلسلة)"}`);
+  const icon = present.length ? "✅" : group.level === "required" ? "❌" : "⚠️";
+  const absentNote = group.level === "required" ? "لا شيء (نقص حاجب — اضبط أحد الاسمين)" : "لا شيء (المزود غير متاح — سلوك مقصود لا يكسر السلسلة)";
+  console.log(`- ${icon} ${group.group}: ${present.length ? present.map((n) => `\`${n}\``).join(", ") : absentNote}`);
 }
 
 console.log("\n## تنبيهات واجبة المراجعة اليدوية\n");
-console.log("- أسرار Actions لا تنتقل تلقائيًا إلى Runtime في Vercel: تأكد من وجود `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` في Vercel Project → Settings → Environment Variables (Production).");
+console.log("- أسرار Actions لا تنتقل تلقائيًا إلى Runtime في Vercel: تأكد من وجود `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN_PROD` (المفضل، أو `TURSO_AUTH_TOKEN` المشترك كبديل انتقالي) و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` في Vercel Project → Settings → Environment Variables (Production).");
 console.log("- تأكد أن `ADMIN_SESSION_SECRET` يختلف عن `DIAGNOSTICS_KEY` (القيم غير قابلة للقراءة من GitHub، والفحص إلزامي قبل النشر).");
 console.log("- وظيفة النشر مرتبطة بـ `environment: production`؛ الأسماء غير حساسة لحالة الأحرف، وتقرأ الوظيفة نطاق البيئة ثم نطاق المستودع.");
 console.log("- `VERCEL_DEPLOY_ENABLED` يُقرأ داخل خطوة (وظيفة Deploy gate) لأن GitHub لا يوفر متغيرات البيئة في شروط `if` على مستوى الوظيفة.");

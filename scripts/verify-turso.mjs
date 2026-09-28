@@ -17,20 +17,24 @@
  *
  * الصفوف: conn · conn-token-shape (صيغة الرمز دائمًا) · conn-url-shape (صيغة
  * الرابط دائمًا) · conn-cause (السبب الخام الموثّق عند فشل الاتصال: 401 رمز
- * مرفوض مقابل 404 لا قاعدة) · ثم الهجرات والصفوف 7–9 عند نجاح الاتصال.
+ * مرفوض مقابل 404 لا قاعدة) · ثم الهجرات وهوية القاعدة والصفوف 7–9 عند نجاح
+ * الاتصال.
  *
  * كل صف أحمر يحمل كودًا ثابتًا (`[TURSO_AUTH_401]`) للبحث الآلي، ويُطبع حكم
- * ختامي صريح `FINAL: PASS|BLOCKED` (وفي `--json`: `verdict` + `code` لكل صف).
+ * ختامي صريح `FINAL: PASS|BLOCKED` (وفي `--json`: `verdict` + `code` لكل صف،
+ * و`code: null` على الصفوف الخضراء).
  * المفردات: TURSO_URL_MISSING · TURSO_TOKEN_MISSING · TURSO_TOKEN_EMPTY ·
  * TURSO_URL_INVALID · TURSO_URL_DASHBOARD · TURSO_TOKEN_MALFORMED ·
  * TURSO_CLIENT_INIT_FAILED · TURSO_CONN_FAILED · TURSO_DERIVED_FAILED ·
  * TURSO_AUTH_401 · TURSO_AUTH_401_EMPTY_JWT · TURSO_DB_NOT_FOUND ·
  * TURSO_REQUEST_REJECTED · TURSO_UNREACHABLE · TURSO_UNEXPECTED_STATUS ·
- * MIGRATION_TABLE_MISSING · MIGRATION_MISMATCH · ROW7_ORDER_ITEMS_MISSING ·
+ * MIGRATION_TABLE_MISSING · MIGRATION_MISMATCH · DB_IDENTITY_FORKED ·
+ * DB_IDENTITY_EMPTY · ROW7_ORDER_ITEMS_MISSING ·
  * ROW8_FTS_MISSING · ROW9_FTS_OUT_OF_SYNC · TABLES_INCOMPLETE.
  *
  * كود الخروج: 0 = كل الفحوص خضراء، 1 = فشل حاجب، 2 = تهيئة الفحص ناقصة.
  */
+import { createHash } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
 import {
@@ -39,10 +43,20 @@ import {
   interpretProbeStatus,
   originForHttpProbe,
   parseAuthValue,
+  resolveTursoToken,
 } from "./lib/db-url.mjs";
 
 const url = process.env.TURSO_DATABASE_URL;
-const authToken = process.env.TURSO_AUTH_TOKEN;
+// المجسّ يستهلك الدور `ci` من عقد الفصل (TURSO_AUTH_TOKEN_CI)، ويسقط على
+// الرمز المشترك القديم مع إعلان السقوط — لا بصمت. انظر secret-rotation.md.
+const resolvedToken = resolveTursoToken(process.env, "ci");
+const authToken = resolvedToken.token;
+const tokenSource = resolvedToken.source;
+if (resolvedToken.fallback && url && !String(url).startsWith("file:")) {
+  console.error(
+    "⚠️ TURSO_AUTH_TOKEN_CI غير مضبوط — المجسّ يستخدم الرمز المشترك TURSO_AUTH_TOKEN؛ افصل الاعتمادات (docs/ops/secret-rotation.md)."
+  );
+}
 const asJson = process.argv.includes("--json");
 // ترميم الإعدادات (رابط لوحة تحكم بدل رابط اتصال، أو رابط في حقل الرمز) — بعلم صريح.
 const allowDashboardUrl =
@@ -64,7 +78,7 @@ const secrets = [url, authToken];
 const local = url.startsWith("file:");
 let effectiveUrl = url;
 if (!local && !authToken) {
-  console.error("❌ [TURSO_TOKEN_MISSING] TURSO_AUTH_TOKEN مطلوب لأي رابط غير محلي (libsql:// أو https://).");
+  console.error("❌ [TURSO_TOKEN_MISSING] TURSO_AUTH_TOKEN_CI (أو TURSO_AUTH_TOKEN المشترك كبديل) مطلوب لأي رابط غير محلي (libsql:// أو https://).");
   process.exit(2);
 }
 if (!local && !authToken.trim()) {
@@ -235,7 +249,7 @@ function recordTokenShape() {
       "conn-token-shape",
       "صيغة قيمة TURSO_AUTH_TOKEN",
       true,
-      `JWT بثلاثة مقاطع (طول ${authParts.shape.length}) — الصيغة سليمة؛ أي رفض بعده سببه الصلاحية/الانتهاء/القاعدة الخطأ لا الصيغة`
+      `JWT بثلاثة مقاطع (طول ${authParts.shape.length}) من ${tokenSource ?? "—"} — الصيغة سليمة؛ أي رفض بعده سببه الصلاحية/الانتهاء/القاعدة الخطأ لا الصيغة`
     );
   } else {
     record(
@@ -244,7 +258,7 @@ function recordTokenShape() {
       false,
       authParts.shape.scheme
         ? `ليست رمز JWT بل قيمة تبدأ بـ ${authParts.shape.scheme}:// (النقطتان في الموضع ${authParts.shape.colonOffset} من ${authParts.shape.length} حرفًا) — رابط في حقل الرمز · **انقل الرابط إلى TURSO_DATABASE_URL ورمز JWT إلى TURSO_AUTH_TOKEN**`
-        : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا Full access**`,
+        : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا بصلاحية قاعدة واحدة ومدة محدودة (docs/ops/secret-rotation.md)**`,
       "TURSO_TOKEN_MALFORMED"
     );
   }
@@ -430,6 +444,48 @@ try {
       : "تعذّر الفحص: لا يوجد جدول هجرات",
     parityOk ? null : "MIGRATION_MISMATCH"
   );
+
+  // 3ب) هوية القاعدة المتصلة: «هل هذه قاعدتنا؟» لا «هل هي بنفس الإصدار؟».
+  // التمييز مقصود: التأخر بهجرة (deploy pending) تُغطّيه mig-parity بالحجب،
+  // أما هذا الصف فيحجب فقط على بصمتَي «قاعدة خطأ» اللتين لا لبس فيهما:
+  //   - FORKED: نفس رقم الإصدار ببصمة SQL مختلفة — القاعدة هُجّرت من تاريخ
+  //     مستودع آخر (قاعدة خطأ أو تاريخ مُعاد كتابته)، لا مجرد إصدار أقدم.
+  //   - EMPTY على قاعدة عارية: لا جدول هجرات ولا جداول متجر — قاعدة
+  //     جديدة/أجنبية لا يمكن أن تكون قاعدة الإنتاج الحاملة للبيانات.
+  // ما عداهما (مطابقة، تأخر، نسب غير مختوم على قاعدة حية) يمرّ بملاحظة —
+  // والحجب على التأخر يبقى مسؤولية mig-parity وحدها.
+  let identityOk = true;
+  let identityCode = null;
+  let identityDetail = "";
+  const appliedVersions = [...applied.keys()].sort();
+  const forked = expected.filter((m) => applied.has(m.version) && applied.get(m.version).checksum !== m.checksum);
+  if (forked.length > 0) {
+    identityOk = false;
+    identityCode = "DB_IDENTITY_FORKED";
+    identityDetail = `نسب متشعّب: ${forked.map((m) => `${m.version}_${m.name}`).join(", ")} بنفس الرقم وبصمة مختلفة عن المستودع — هذه ليست قاعدة هذا المستودع`;
+  } else if (appliedVersions.length === 0) {
+    const probe = await db.execute(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('products','orders','order_items')"
+    );
+    const appTables = Number(probe.rows[0]?.n ?? 0);
+    if (appTables === 0) {
+      identityOk = false;
+      identityCode = "DB_IDENTITY_EMPTY";
+      identityDetail = "لا نسب هجرات ولا جداول متجر — القاعدة المتصلة عارية/أجنبية لا يمكن أن تكون قاعدة الإنتاج";
+    } else {
+      identityDetail = `نسب غير مختوم على قاعدة حية (${appTables} من جداول المتجر حاضرة) — اختم النسب بتشغيل الهجرات`;
+    }
+  } else {
+    const fp = createHash("sha256")
+      .update(appliedVersions.map((v) => `${v}:${applied.get(v).checksum}`).join("|"))
+      .digest("hex")
+      .slice(0, 12);
+    const behind = expected.filter((m) => !applied.has(m.version)).length;
+    identityDetail = behind === 0
+      ? `النسب موثّق: ${appliedVersions.join(",")} ‏(fp ${fp})`
+      : `نفس القاعدة متأخرة بـ ${behind}: المطبَّق ${appliedVersions.join(",")} ‏(fp ${fp}) — النشر معلَّق، والحجب في mig-parity`;
+  }
+  record("db-identity", "هوية القاعدة المتصلة (بصمة النسب)", identityOk, identityDetail, identityCode);
 
   // 4) الصف 7: order_items موجودة (تثبيت إصلاح P0 بعد الدمج).
   const orderItems = await db.execute("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='order_items'");

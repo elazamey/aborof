@@ -29,7 +29,7 @@
 | `VERCEL_ORG_ID` | Secret | قيمة `orgId` من مشروع Vercel أو إعدادات الفريق |
 | `VERCEL_PROJECT_ID` | Secret | قيمة `projectId` من مشروع Vercel |
 | `TURSO_DATABASE_URL` | Secret | رابط قاعدة Turso |
-| `TURSO_AUTH_TOKEN` | Secret | رمز Turso |
+| `TURSO_AUTH_TOKEN_CI` | Secret | رمز Turso للمجسّ (المفضّل — أو `TURSO_AUTH_TOKEN` المشترك كبديل انتقالي) |
 | `ADMIN_PASSWORD` | Secret | كلمة مرور الإدارة القوية (12 حرفًا على الأقل) |
 | `ADMIN_SESSION_SECRET` | Secret | سر عشوائي لتوقيع الجلسات فقط، لا يقل عن 32 حرفًا |
 | `GEMINI_API_KEY` أو `GROQ_API_KEY` | Secret اختياري | مفتاح مزود الدردشة |
@@ -57,7 +57,7 @@
 
 > ⚠️ **`VERCEL_TOKEN` لا يُملأ من `~/.vercel/auth.json`:** توكن `vercel login` هو OAuth قصير العمر (`expiresAt` خلال ساعات + `refreshToken`) وموضعه في CLI الحديث تحت `com.vercel.cli` داخل `XDG_DATA_HOME` — يصلح للنشر من جهازك، ولا يصلح سرًّا دائمًا. أنشئ رمزًا من **Vercel → Account Settings → Tokens** بصلاحية Full access على الفريق. فحص الرمز في `deploy.yml` يستدعي `api.vercel.com/v2/user`، و`404: User not found` تعني رمزًا مصادَقًا عليه لكنه ملغى/غير موجود (استبدله)، بينما `403` تعني صلاحية ناقصة على الفريق.
 
-يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel. إن غاب `TURSO_DATABASE_URL` عن بيئة Production فالموقع يظل يعرض المنتجات من البذرة المحلية بينما يفشل كل إنشاء طلب بـ `503` (انظر «قراءة نتائج الـ Smoke بلا لبس» أعلاه).
+يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN_PROD` (المفضّل، أو `TURSO_AUTH_TOKEN` المشترك كبديل انتقالي) و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel. إن غاب `TURSO_DATABASE_URL` عن بيئة Production فالموقع يظل يعرض المنتجات من البذرة المحلية بينما يفشل كل إنشاء طلب بـ `503` (انظر «قراءة نتائج الـ Smoke بلا لبس» أعلاه).
 
 ## التفعيل والتحقق
 
@@ -69,7 +69,7 @@
 
 - [ ] كل الأسرار في جدول «النشر التلقائي» مضافة في **Settings → Secrets and variables → Actions** (نطاق البيئة `production` أو نطاق المستودع).
 - [ ] متغيرات الـ Runtime مضافة أيضًا في **Vercel Project → Settings → Environment Variables** لبيئة Production، فهي لا تنتقل تلقائيًا من GitHub:
-  - `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN`؛
+  - `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN_PROD` (أو `TURSO_AUTH_TOKEN` المشترك انتقاليًا)؛
   - `ADMIN_PASSWORD` (12 حرفًا على الأقل وفق سياسة كلمات المرور)؛
   - `ADMIN_SESSION_SECRET` (32 حرفًا على الأقل، لتوقيع الجلسات فقط)؛
   - اختياري: `DIAGNOSTICS_ENABLED=true` مع `DIAGNOSTICS_KEY` **مستقل تمامًا**، و`CSP_ENFORCE=true`.
@@ -95,7 +95,7 @@
 | 7 | على قاعدة Turso: `SELECT COUNT(*) FROM order_items;` | استعلام ناجح بلا خطأ «no such table» | إصلاح P0 لم يُفعَّل (راجع «إصلاح قاعدة البيانات P0» في نهاية الملف) |
 | 8 | على قاعدة Turso: `SELECT name FROM sqlite_master WHERE type='table' AND name='product_search';` | يظهر الصف `product_search` | هجرة `0002` (FTS5) لم تُطبَّق على البيئة الحيّة |
 | 9 | على قاعدة Turso: `SELECT COUNT(*) FROM product_search;` | يساوي `SELECT COUNT(*) FROM products;` | الفهرس غير متزامن مع الكتالوج؛ يكفي أول عملية/طلب بعد التجهيز لأن المزامنة في نهاية `runMigrations` (وأعد النشر إن بقيت الفجوة) |
-| 10 | `POST /api/orders` بطلي مستخدِم تجريبي | `200 {ok:true,...}` وخفض المخزون وظهور `order_items` | فشل كتابة الطلب: راجع الربط `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` |
+| 10 | `POST /api/orders` بطلي مستخدِم تجريبي | `200 {ok:true,...}` وخفض المخزون وظهور `order_items` | فشل كتابة الطلب: راجع الربط `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN_PROD` |
 | 11 | `POST /api/orders` ثانية بعد الخطوة 10 | `200` بلا أخطاء تكرار معرف أو فقدان أصناف | مشكلة في المعاملة المركّبة (خصم + طلب + أصناف) |
 | 12 | `POST /api/chat` بسؤال «منظف أرضيات» مع تفعيل `ENABLE_AI_AGENT` و`ENABLE_MCP_TOOLS` | رد يحمل بطاقات منتجات مطابقة | FTS5 أو طبقة الأدوات عاطلة؛ راجع سجل النشر |
 | 13 | `POST /api/orders/track` برقم الطلب من الخطوة 10 وآخر 4 أرقام من هاتفه **مع** `ENABLE_ORDER_TRACKING=true` | `200` مع `{ok:true,status:"جديد",items:[…]}` بلا هاتف كامل ولا عنوان | قناة التتبع عاطلة أو المعرّفات غير صحيحة |
@@ -147,11 +147,22 @@ npm run front:check     # 22 فحصًا: الحدود الأربعة، ميتا�
 | الأمر | ما يفحصه | ملاحظة |
 |---|---|---|
 | `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
-| `bash scripts/apply-turso-secrets.sh` | يضبط `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` في المكانين معًا (GitHub بيئة `production` + Vercel Production) بعد تحقق شكلي: يرفض رابط لوحة التحكم ويرفض رابطًا في حقل الرمز | القيم من متغيرات البيئة أو مدخل مخفي، **ولا تُطبع أبدًا** وتُمرَّر عبر `stdin`؛ `--dry-run` يعرض ما سيُفعل بلا تنفيذ |
-| `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
+| `bash scripts/apply-turso-secrets.sh` | يضبط `TURSO_DATABASE_URL` ورمزي `TURSO_AUTH_TOKEN_PROD`/`TURSO_AUTH_TOKEN_CI` في المكانين معًا (GitHub بيئة `production` + Vercel Production) بعد تحقق شكلي: يرفض رابط لوحة التحكم ويرفض رابطًا في حقل الرمز | القيم من متغيرات البيئة أو مدخل مخفي، **ولا تُطبع أبدًا** وتُمرَّر عبر `stdin`؛ `--dry-run` يعرض ما سيُفعل بلا تنفيذ |
+| `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN_CI=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + بصمة هوية القاعدة + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا رمز يقبل `file:` للتحقق المحلي |
 | `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 و**15 و16 و16b و17** (صفحة منتج حقيقية، منع 404 الناعم، مسار غير موجود، ملفات robots/sitemap/manifest/icon) + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--chat-probe` للصف 12، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط (لا يعمل على localhost عن قصد) |
 | `npm run security:bundle` | فحص ما ينزّله المتصفح فعلاً (`.next/static`): أسماء وقيم أسرار الخادم | يُشغَّل آليًا بعد `npm run build` في `quality.yml` و`deploy.yml` |
 | `npm run routes:inventory` | جرد المسارات وبواباتها (نفس بوابة CI) | يفشل إن غاب أي مسار مطلوب |
+
+## عقد التشغيل (docs/ops)
+
+النشر أعلاه يُوصِل الكود؛ والعقد أدناه يُبقي الإنتاج حيًّا بعده:
+
+| الوثيقة | متى تُقرأ |
+|---|---|
+| [`PRODUCTION-CONTRACT.md`](docs/ops/PRODUCTION-CONTRACT.md) | القواعد الملزمة: فصل الاعتمادات، الهجرات الإضافية، المجسّ اليومي، قواعد الدمج، سلّم الأعطال |
+| [`INCIDENT-RUNBOOK.md`](docs/ops/INCIDENT-RUNBOOK.md) | عند أي صف أحمر: الفرز الأول ثم جدول القرار بالكود ثم شروط الإغلاق |
+| [`secret-rotation.md`](docs/ops/secret-rotation.md) | إصدار/تدوير أي رمز Turso + سجل الرموز الحيّة (أي رمز بلا قيد = خرق) |
+| [`DISASTER-RECOVERY.md`](docs/ops/DISASTER-RECOVERY.md) | النسخ والاستعادة على خدش أولًا + التدريب الربع سنوي |
 
 ### قراءة نتائج الـ Smoke بلا لبس
 

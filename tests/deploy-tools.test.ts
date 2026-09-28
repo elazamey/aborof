@@ -14,7 +14,9 @@ import {
   interpretProbeStatus,
   originForHttpProbe,
   parseAuthValue,
+  resolveTursoToken,
 } from "../scripts/lib/db-url.mjs";
+import { resolveAppToken } from "../src/lib/db/token";
 import {
   isSafeBaseUrl,
   classifySecurityHeaders,
@@ -696,7 +698,7 @@ describe("scripts/verify-turso — تقرير آلي", () => {
     assert.equal(out.verdict, "PASS");
     assert.deepEqual(
       out.rows.map((r) => r.id),
-      ["conn", "mig-table", "mig-parity", "row-7", "row-8", "row-9", "tables"]
+      ["conn", "mig-table", "mig-parity", "db-identity", "row-7", "row-8", "row-9", "tables"]
     );
     assert.ok(out.rows.every((r) => r.code === null), "الصفوف الخضراء بلا أكواد");
   });
@@ -891,5 +893,235 @@ describe("smoke — الواجهة المنشورة (الصفوف 15–17)", () 
     const row15 = findings.find((f) => f.id === "15");
     assert.equal(row15?.ok, false);
     assert.match(String(row15?.actual), /3763750452/);
+  });
+});
+
+describe("فصل الاعتمادات — resolveTursoToken (السكربتات) و resolveAppToken (التشغيل)", () => {
+  test("المجسّ (ci) يفضّل TURSO_AUTH_TOKEN_CI على المشترك", () => {
+    const r = resolveTursoToken({ TURSO_AUTH_TOKEN_CI: "ci-token", TURSO_AUTH_TOKEN: "legacy" }, "ci");
+    assert.deepEqual(r, { token: "ci-token", source: "TURSO_AUTH_TOKEN_CI", fallback: false });
+  });
+
+  test("أدوار prod/preview تفضّل متغيرها الخاص", () => {
+    assert.equal(resolveTursoToken({ TURSO_AUTH_TOKEN_PROD: "p", TURSO_AUTH_TOKEN: "l" }, "prod").source, "TURSO_AUTH_TOKEN_PROD");
+    assert.equal(
+      resolveTursoToken({ TURSO_AUTH_TOKEN_PREVIEW: "v", TURSO_AUTH_TOKEN: "l" }, "preview").source,
+      "TURSO_AUTH_TOKEN_PREVIEW"
+    );
+  });
+
+  test("غياب المفصول يسقط على المشترك مع إعلان fallback (لا بصمت)", () => {
+    const r = resolveTursoToken({ TURSO_AUTH_TOKEN: "legacy" }, "ci");
+    assert.deepEqual(r, { token: "legacy", source: "TURSO_AUTH_TOKEN", fallback: true });
+  });
+
+  test("الغياب الكامل يعيد null بلا سقوط", () => {
+    assert.deepEqual(resolveTursoToken({}, "ci"), { token: null, source: null, fallback: false });
+  });
+
+  test("تشغيل التطبيق يفضّل TURSO_AUTH_TOKEN_PROD ثم المشترك", () => {
+    assert.deepEqual(resolveAppToken({ TURSO_AUTH_TOKEN_PROD: "p", TURSO_AUTH_TOKEN: "l" }), {
+      token: "p",
+      source: "TURSO_AUTH_TOKEN_PROD",
+      fallback: false,
+    });
+    assert.deepEqual(resolveAppToken({ TURSO_AUTH_TOKEN: "l" }), {
+      token: "l",
+      source: "TURSO_AUTH_TOKEN",
+      fallback: true,
+    });
+    assert.deepEqual(resolveAppToken({}), { token: null, source: null, fallback: false });
+  });
+
+  test("قاعدتا src وscripts متطابقتان سلوكيًا للدور prod (مصدران، حقيقة واحدة)", () => {
+    const envs = [
+      { TURSO_AUTH_TOKEN_PROD: "p", TURSO_AUTH_TOKEN: "l" },
+      { TURSO_AUTH_TOKEN: "l" },
+      {},
+    ];
+    for (const env of envs) {
+      assert.deepEqual(resolveTursoToken(env, "prod"), resolveAppToken(env));
+    }
+  });
+});
+
+describe("scripts/verify-turso — صف هوية القاعدة (db-identity)", () => {
+  type Row = { id: string; ok: boolean; detail: string; code: string | null };
+  type Report = { ok: boolean; verdict: string; rows: Row[] };
+
+  function runReport(url: string): { exitCode: number; report: Report } {
+    try {
+      return { exitCode: 0, report: JSON.parse(runVerifyTurso(url)) as Report };
+    } catch (error) {
+      const e = error as { status?: number; stdout?: string };
+      return { exitCode: e.status ?? 0, report: JSON.parse(e.stdout ?? "{}") as Report };
+    }
+  }
+
+  test("قاعدة مهاجَرة: النسب موثّق ببصمة وcode:null", async () => {
+    const { client, url } = fileClient("aborof-identity-ok");
+    await runMigrations(client);
+    client.close();
+    const { exitCode, report } = runReport(url);
+    assert.equal(exitCode, 0);
+    const row = report.rows.find((r) => r.id === "db-identity");
+    assert.equal(row?.ok, true);
+    assert.equal(row?.code, null);
+    assert.match(String(row?.detail), /النسب موثّق/);
+    assert.match(String(row?.detail), /fp [0-9a-f]{12}/);
+  });
+
+  test("تشعّب النسب (نفس الرقم ببصمة مختلفة) يحجب بـ DB_IDENTITY_FORKED", async () => {
+    const { client, url } = fileClient("aborof-identity-fork");
+    await runMigrations(client);
+    await client.execute("UPDATE schema_migrations SET checksum='00' WHERE version='0001'");
+    client.close();
+    const { exitCode, report } = runReport(url);
+    assert.equal(exitCode, 1);
+    assert.equal(report.verdict, "BLOCKED");
+    const row = report.rows.find((r) => r.id === "db-identity");
+    assert.equal(row?.ok, false);
+    assert.equal(row?.code, "DB_IDENTITY_FORKED");
+  });
+
+  test("قاعدة عارية (بلا نسب ولا جداول متجر) تحجب بـ DB_IDENTITY_EMPTY", async () => {
+    const { client, url } = fileClient("aborof-identity-empty");
+    client.close();
+    const { exitCode, report } = runReport(url);
+    assert.equal(exitCode, 1);
+    assert.equal(report.verdict, "BLOCKED");
+    const row = report.rows.find((r) => r.id === "db-identity");
+    assert.equal(row?.ok, false);
+    assert.equal(row?.code, "DB_IDENTITY_EMPTY");
+  });
+
+  test("التأخر بهجرة: نفس القاعدة تمرّ في db-identity بينما mig-parity تحجب (سؤالان مختلفان)", async () => {
+    const { client, url } = fileClient("aborof-identity-behind");
+    await runMigrations(client);
+    await client.execute("DELETE FROM schema_migrations WHERE version='0002'");
+    client.close();
+    const { exitCode, report } = runReport(url);
+    assert.equal(exitCode, 1, "الحجب يأتي من mig-parity");
+    assert.equal(report.verdict, "BLOCKED");
+    // نفس القاعدة (لا تشعّب ولا عراء) ⇒ صف الهوية أخضر بملاحظة التأخر.
+    assert.equal(report.rows.find((r) => r.id === "db-identity")?.ok, true);
+    assert.match(String(report.rows.find((r) => r.id === "db-identity")?.detail), /متأخرة/);
+    // لكنها ليست بنفس الإصدار ⇒ صف التطابق أحمر.
+    assert.equal(report.rows.find((r) => r.id === "mig-parity")?.ok, false);
+  });
+});
+
+describe("قفل عدم الكتابة في مجسّ الأدلة", () => {
+  test("verify-turso.mjs لا ينفّذ إلا SELECT (كل SQL حرفي يبدأ بـ SELECT)", () => {
+    const src = fs.readFileSync("scripts/verify-turso.mjs", "utf8");
+    const verbs = [...src.matchAll(/\.execute\(\s*["'`]([A-Za-z]+)/g)].map((m) => m[1].toUpperCase());
+    assert.ok(verbs.length > 5, "الحارس نفسه يجب أن يجد مواقع التنفيذ — وإلا فهو يمرّر بصمت");
+    assert.ok(verbs.every((v) => v === "SELECT"), `أفعال غير SELECT في المجسّ: ${verbs.join(",")}`);
+    const payloadVerbs = [...src.matchAll(/sql:\s*["'`]([A-Za-z]+)/g)].map((m) => m[1].toUpperCase());
+    assert.ok(payloadVerbs.every((v) => v === "SELECT"), `حمولة hrana غير SELECT: ${payloadVerbs.join(",")}`);
+  });
+
+  test("المجسّ لا يستخدم .batch ولا يستورد مشغّل الهجرات", () => {
+    const src = fs.readFileSync("scripts/verify-turso.mjs", "utf8");
+    assert.doesNotMatch(src, /\.batch\(/);
+    assert.doesNotMatch(src, /runMigrations/);
+  });
+
+  test("غلاف CI يشغّل الـ smoke بلا أي علم طافر (GET فقط)", () => {
+    const src = fs.readFileSync("scripts/probe-turso-ci.sh", "utf8");
+    const line = src.split("\n").find((l) => l.includes("smoke-production.mjs") && !l.trim().startsWith("#"));
+    assert.ok(line, "سطر استدعاء الـ smoke مفقود من الغلاف");
+    assert.doesNotMatch(line, /--allow-mutations|--orders-body|--track|--admin-probe|--chat-probe/);
+  });
+});
+
+describe(".github/workflows/turso-evidence.yml — المجسّ المجدول والتنبيه", () => {
+  const workflow = fs.readFileSync(".github/workflows/turso-evidence.yml", "utf8");
+
+  test("جدولة يومية (schedule + cron)", () => {
+    assert.match(workflow, /schedule:\s*\n(\s*#.*\n|\s*\n)*\s*- cron: ".+ .+ .+ .+ .+"/);
+  });
+
+  test("وظيفة تنبيه مقصورة على التشغيل المجدول (always + schedule + قضية turso-probe)", () => {
+    assert.match(workflow, /probe-alert:/);
+    assert.match(workflow, /always\(\) && github\.event_name == 'schedule'/);
+    assert.match(workflow, /turso-probe/);
+    assert.match(workflow, /gh issue (create|close|edit)/);
+  });
+
+  test("وظيفة التنبيه بأقل صلاحية (issues: write فقط)", () => {
+    const alert = workflow.slice(workflow.indexOf("probe-alert:"));
+    assert.match(alert, /permissions:\s*\n(\s*#.*\n)*\s*issues: write/);
+    assert.doesNotMatch(alert, /contents: write|pull-requests: write/);
+  });
+
+  test("وظيفتا الفحص تمرّران رمز CI مع بقاء المشترك بديلًا", () => {
+    const ciCount = (workflow.match(/TURSO_AUTH_TOKEN_CI: \$\{\{ secrets\.TURSO_AUTH_TOKEN_CI \}\}/g) ?? []).length;
+    assert.ok(ciCount >= 2, `رمز CI يُمرَّر في ${ciCount} مواضع فقط`);
+    assert.match(workflow, /TURSO_AUTH_TOKEN: \$\{\{ secrets\.TURSO_AUTH_TOKEN \}\}/);
+  });
+
+  test("الحكم يُصدَّر كمخرج والتقرير JSON يُرفع قطعة أثرية", () => {
+    assert.match(workflow, /echo "verdict=.*>> "\$GITHUB_OUTPUT"/);
+    assert.match(workflow, /upload-artifact@v4/);
+    assert.match(workflow, /retention-days: 90/);
+  });
+});
+
+describe(".github/workflows/quality.yml — حاجز التسريب يغطي الأسماء المفصولة", () => {
+  test("نمط grep يطابق TURSO_AUTH_TOKEN_PROD/CI/PREVIEW لا الاسم القديم وحده", () => {
+    const quality = fs.readFileSync(".github/workflows/quality.yml", "utf8");
+    assert.match(quality, /TURSO_AUTH_TOKEN\(_PROD\|_CI\|_PREVIEW\)\?=\[A-Za-z0-9_-\]\{20,\}/);
+  });
+});
+
+describe("scripts/apply-turso-secrets — فصل الرموز", () => {
+  const run = (env: Record<string, string>, args: string[] = ["--dry-run"], extraPath = "") =>
+    spawnSync("bash", ["scripts/apply-turso-secrets.sh", ...args], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...env,
+        ...(extraPath ? { PATH: `${extraPath}:${process.env.PATH ?? "/usr/bin:/bin"}` } : {}),
+      },
+    });
+  const GOOD_URL = "libsql://aborof-elazamey.turso.io";
+  const PROD_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwcm9kIn0.c2lnbmF0dXJlLXByb2Q";
+  const CI_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaSJ9.c2lnbmF0dXJlLWNp";
+
+  // بدائل وهمية لـ gh/vercel: خطة --dry-run تُبنى فقط للأدوات الموجودة على
+  // PATH، والبدائل تجعل ظهور سطور GitHub وVercel حتميًا في كل البيئات.
+  function stubBin(): string {
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "aborof-bin-"));
+    for (const name of ["gh", "vercel"]) {
+      const p = path.join(dir, name);
+      fs.writeFileSync(p, "#!/bin/sh\nexit 0\n");
+      fs.chmodSync(p, 0o755);
+    }
+    return dir;
+  }
+
+  test("رمزان مفصولان: الخطة تذكر الاسمين الجديدين بلا تحذير مشترك وبلا تسريب", () => {
+    const res = run(
+      { TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN_PROD: PROD_TOKEN, TURSO_AUTH_TOKEN_CI: CI_TOKEN },
+      ["--dry-run"],
+      stubBin()
+    );
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /TURSO_AUTH_TOKEN_PROD: JWT \(طول/);
+    assert.match(res.stdout, /TURSO_AUTH_TOKEN_CI: +JWT \(طول/);
+    assert.match(res.stdout, /gh secret set TURSO_AUTH_TOKEN_CI/);
+    assert.match(res.stdout, /vercel env add TURSO_AUTH_TOKEN_PROD/);
+    assert.doesNotMatch(res.stdout + res.stderr, /مشترك انتقالي/);
+    assert.doesNotMatch(res.stdout + res.stderr, /c2lnbmF0dXJl/);
+    assert.doesNotMatch(res.stdout, /aborof-elazamey/, "لا يُطبع المضيف كاملًا");
+  });
+
+  test("رمز مشترك وحيد: يعمل مع تحذير مُعلَن (لا بصمت)", () => {
+    const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN: PROD_TOKEN });
+    assert.equal(res.status, 0);
+    assert.match(res.stderr, /TURSO_AUTH_TOKEN_PROD غير مضبوط/);
+    assert.match(res.stderr, /TURSO_AUTH_TOKEN_CI غير مضبوط/);
+    assert.match(res.stdout, /مشترك انتقالي/);
   });
 });

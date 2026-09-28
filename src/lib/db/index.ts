@@ -1,12 +1,14 @@
 import { createClient, type Client } from "@libsql/client";
 import { SEED_PRODUCTS, type Product } from "@/lib/seed";
 import { runMigrations } from "@/lib/db/migrate";
+import { resolveAppToken } from "@/lib/db/token";
 import { DomainError, Errors, redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 
 let _client: Client | null = null;
 let _ready: Promise<void> | null = null;
 let _clientOverride: Client | null = null;
+let _tokenFallbackWarned = false;
 
 export function hasDB() {
   return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL?.trim());
@@ -20,10 +22,19 @@ export function db(): Client | null {
   const databaseUrl = process.env.TURSO_DATABASE_URL?.trim();
   if (!databaseUrl) return null;
   if (!_client) {
+    // فصل الاعتمادات: التشغيل يفضّل TURSO_AUTH_TOKEN_PROD ويسقط على المشترك
+    // مع تحذير واحد — الإعداد القديم يبقى يعمل لكنه مُعلَن كدَين ترحيل.
+    const resolved = resolveAppToken(process.env);
+    if (resolved.fallback && !_tokenFallbackWarned) {
+      _tokenFallbackWarned = true;
+      console.warn(
+        "db: TURSO_AUTH_TOKEN_PROD غير مضبوط — يُستخدم الرمز المشترك TURSO_AUTH_TOKEN؛ افصل الاعتمادات (docs/ops/secret-rotation.md)."
+      );
+    }
     try {
       _client = createClient({
         url: databaseUrl,
-        authToken: process.env.TURSO_AUTH_TOKEN?.trim(),
+        authToken: resolved.token?.trim(),
       });
     } catch {
       // إعداد معطوب (لا مخطّط صالح ولا مضيف): DomainError لا خام المزود، فيُترجم

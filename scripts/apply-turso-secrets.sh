@@ -4,13 +4,19 @@
 #   1. GitHub: أسرار بيئة `production` (التي يقرأها مجسّ `turso-evidence.yml`).
 #   2. Vercel: متغيرات بيئة Production (التي يقرأها الموقع وقت التشغيل).
 #
+# فصل الاعتمادات (عقد docs/ops/secret-rotation.md): التشغيل يأخذ رمز PROD
+# والمجسّ يأخذ رمز CI — قيَمًا مختلفة بصلاحيات مختلفة. يقبل السكربت الرمزين
+# منفصلين، وإن غاب أحدهما سقط على الرمز المشترك القديم مع تحذير مُعلَن
+# (لا بصمت) — فالإعداد القديم يبقى يعمل أثناء الترحيل.
+#
 # مبادئ أمنية غير قابلة للتفاوض في هذا الملف:
 #   - لا تُطبع أي قيمة سرية أبدًا؛ المعروض وصف شكلي (النوع/طول المضيف/طول الرمز).
 #   - لا تُمرَّر القيم كوسائط سطر أوامر (تظهر في `ps`)؛ تُمرَّر عبر stdin فقط.
 #   - التحقق شكلي قبل اللمس: رابط `libsql://` حقيقي، ورمز JWT (`eyJ…` بثلاثة مقاطع).
 #
 # الاستخدام:
-#   TURSO_DATABASE_URL='libsql://…' TURSO_AUTH_TOKEN='eyJ…' bash scripts/apply-turso-secrets.sh
+#   TURSO_DATABASE_URL='libsql://…' TURSO_AUTH_TOKEN_PROD='eyJ…' TURSO_AUTH_TOKEN_CI='eyJ…' bash scripts/apply-turso-secrets.sh
+#   TURSO_DATABASE_URL='libsql://…' TURSO_AUTH_TOKEN='eyJ…' bash scripts/apply-turso-secrets.sh   # مشترك انتقالي (بتحذير)
 #   bash scripts/apply-turso-secrets.sh --dry-run          # عرض ما سيُفعل بلا تنفيذ
 #   bash scripts/apply-turso-secrets.sh --github-only      # بلا لمس Vercel
 #   bash scripts/apply-turso-secrets.sh --repo owner/name --env production
@@ -25,7 +31,7 @@ SKIP_VERCEL=false
 SKIP_GITHUB=false
 
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -73,7 +79,25 @@ describe_token() {
 }
 
 URL_VALUE="$(read_secret TURSO_DATABASE_URL)"
-TOKEN_VALUE="$(read_secret TURSO_AUTH_TOKEN)"
+
+# الرموز المفصولة تُقرأ من البيئة فقط (بلا سؤال تفاعلي)؛ السؤال التفاعلي الواحد
+# يبقى على الاسم القديم للحفاظ على تجربة الاستخدام السابقة حرفيًا.
+PROD_ENV="$(printenv TURSO_AUTH_TOKEN_PROD || true)"
+CI_ENV="$(printenv TURSO_AUTH_TOKEN_CI || true)"
+LEGACY_ENV="$(printenv TURSO_AUTH_TOKEN || true)"
+if [ -z "${PROD_ENV}${CI_ENV}${LEGACY_ENV}" ]; then
+  LEGACY_ENV="$(read_secret TURSO_AUTH_TOKEN)"
+fi
+PROD_VALUE="${PROD_ENV:-$LEGACY_ENV}"
+CI_VALUE="${CI_ENV:-$LEGACY_ENV}"
+[ -n "$PROD_VALUE" ] || fail "لا رمز للتشغيل: اضبط TURSO_AUTH_TOKEN_PROD أو الرمز المشترك TURSO_AUTH_TOKEN."
+[ -n "$CI_VALUE" ] || fail "لا رمز للمجسّ: اضبط TURSO_AUTH_TOKEN_CI أو الرمز المشترك TURSO_AUTH_TOKEN."
+if [ -z "$PROD_ENV" ]; then
+  echo "⚠️  TURSO_AUTH_TOKEN_PROD غير مضبوط — سيُستخدم الرمز المشترك للتشغيل؛ للفصل مرّر TURSO_AUTH_TOKEN_PROD وTURSO_AUTH_TOKEN_CI قيمتين مختلفتين." >&2
+fi
+if [ -z "$CI_ENV" ]; then
+  echo "⚠️  TURSO_AUTH_TOKEN_CI غير مضبوط — سيُستخدم الرمز المشترك للمجسّ؛ للفصل مرّر TURSO_AUTH_TOKEN_PROD وTURSO_AUTH_TOKEN_CI قيمتين مختلفتين." >&2
+fi
 
 # تشذيب آثار اللصق: مسافات/تاب/أسطر زائدة في الطرفين، وعلامتا اقتباس محيطتان.
 # (رابط بمسافة زائدة يجعل createClient يرمي Invalid URL في الإنتاج ⇒ 500 على كل
@@ -89,19 +113,20 @@ trim_secret() {
 }
 
 URL_TRIMMED="$(trim_secret "$URL_VALUE")"
-TOKEN_TRIMMED="$(trim_secret "$TOKEN_VALUE")"
+PROD_TRIMMED="$(trim_secret "$PROD_VALUE")"
+CI_TRIMMED="$(trim_secret "$CI_VALUE")"
 [ "${#URL_TRIMMED}" -ne "${#URL_VALUE}" ] && echo "ℹ️  أُزيلت ${#URL_VALUE}→${#URL_TRIMMED} حرفًا زائدًا من طرفي قيمة الرابط الملصقة." >&2
-[ "${#TOKEN_TRIMMED}" -ne "${#TOKEN_VALUE}" ] && echo "ℹ️  أُزيلت ${#TOKEN_VALUE}→${#TOKEN_TRIMMED} حرفًا زائدًا من طرفي قيمة الرمز الملصقة." >&2
+[ "${#PROD_TRIMMED}" -ne "${#PROD_VALUE}" ] && echo "ℹ️  أُزيلت ${#PROD_VALUE}→${#PROD_TRIMMED} حرفًا زائدًا من طرفي رمز التشغيل الملصق." >&2
+[ "${#CI_TRIMMED}" -ne "${#CI_VALUE}" ] && echo "ℹ️  أُزيلت ${#CI_VALUE}→${#CI_TRIMMED} حرفًا زائدًا من طرفي رمز المجسّ الملصق." >&2
 URL_VALUE="$URL_TRIMMED"
-TOKEN_VALUE="$TOKEN_TRIMMED"
+PROD_VALUE="$PROD_TRIMMED"
+CI_VALUE="$CI_TRIMMED"
 
 [ -n "$URL_VALUE" ] || fail "TURSO_DATABASE_URL فارغ."
-[ -n "$TOKEN_VALUE" ] || fail "TURSO_AUTH_TOKEN فارغ."
 
 # مسافة داخلية لا تُشذَّب بل تُرفض: لا رابط صالح ولا JWT يحمل مسافة أبدًا،
 # وتمريرها كان سيُسقط الإنتاج بـ 500 (Invalid URL) أو 401 (رمز مكسور).
 case "$URL_VALUE" in *[[:space:]]*) fail "الرابط يحمل مسافة داخلية (طول ${#URL_VALUE}) — الصقه من زر Connect بلا تعديل." ;; esac
-case "$TOKEN_VALUE" in *[[:space:]]*) fail "الرمز يحمل مسافة داخلية (طول ${#TOKEN_VALUE}) — أنشئ توكنًا جديدًا والصقه كاملًا." ;; esac
 
 # 1) التحقق من الرابط: libsql/turso/https على نطاق Turso، وليس صفحة اللوحة.
 case "$URL_VALUE" in
@@ -116,16 +141,26 @@ case "$URL_HOST" in
   *) echo "⚠️  المضيف ليس نطاق Turso المعتاد (…turso.io) — تأكد أنه رابط الاتصال الصحيح." >&2 ;;
 esac
 
-# 2) التحقق من الرمز: JWT بثلاثة مقاطع يبدأ بـ eyJ.
-case "$TOKEN_VALUE" in
-  eyJ*.*.*) ;;
-  *) fail "الرمز ليس JWT: $(describe_token "$TOKEN_VALUE") — أنشئ توكنًا جديدًا (Create Token · Full access · Never expire)." ;;
-esac
-case "$TOKEN_VALUE" in *://*) fail "قيمة الرمز تحمل رابطًا لا رمزًا — $(describe_token "$TOKEN_VALUE")." ;; esac
+# 2) التحقق من الرمزين: JWT بثلاثة مقاطع يبدأ بـ eyJ، وبلا مسافة داخلية.
+# سياسة الإصدار: صلاحية قاعدة واحدة ومدة محدودة — `Full access + Never expire`
+# للتشخيص المؤقت فقط (انظر docs/ops/secret-rotation.md).
+validate_token() {
+  local label="$1" value="$2"
+  case "$value" in *[[:space:]]*) fail "الرمز في $label يحمل مسافة داخلية (طول ${#value}) — أنشئ توكنًا جديدًا والصقه كاملًا." ;; esac
+  case "$value" in
+    eyJ*.*.*) ;;
+    *) fail "الرمز ليس JWT ($label): $(describe_token "$value") — أنشئ توكنًا جديدًا بصلاحية قاعدة واحدة ومدة محدودة (انظر docs/ops/secret-rotation.md)." ;;
+  esac
+  case "$value" in *://*) fail "قيمة الرمز في $label تحمل رابطًا لا رمزًا — $(describe_token "$value")." ;; esac
+}
+
+validate_token "TURSO_AUTH_TOKEN_PROD" "$PROD_VALUE"
+validate_token "TURSO_AUTH_TOKEN_CI" "$CI_VALUE"
 
 echo "🔎 التحقق الشكلي نجح:"
 echo "   • TURSO_DATABASE_URL: $(describe_url "$URL_VALUE")"
-echo "   • TURSO_AUTH_TOKEN:   JWT (طول ${#TOKEN_VALUE})"
+echo "   • TURSO_AUTH_TOKEN_PROD: JWT (طول ${#PROD_VALUE})$([ -z "$PROD_ENV" ] && printf ' ← مشترك انتقالي ⚠️')"
+echo "   • TURSO_AUTH_TOKEN_CI:   JWT (طول ${#CI_VALUE})$([ -z "$CI_ENV" ] && printf ' ← مشترك انتقالي ⚠️')"
 echo
 
 actions=()
@@ -133,9 +168,10 @@ actions=()
 if [ "$SKIP_GITHUB" = false ]; then
   if command -v gh >/dev/null 2>&1; then
     actions+=("gh secret set TURSO_DATABASE_URL --env $ENV_NAME   (القيمة عبر stdin)")
-    actions+=("gh secret set TURSO_AUTH_TOKEN   --env $ENV_NAME   (القيمة عبر stdin)")
+    actions+=("gh secret set TURSO_AUTH_TOKEN_CI --env $ENV_NAME  (رمز المجسّ — القيمة عبر stdin)")
+    actions+=("gh secret set TURSO_AUTH_TOKEN    --env $ENV_NAME  (انتقالي = نفس قيمة CI لمراجع الكود القديمة)")
   else
-    echo "⚠️  gh غير مثبّت — أضف السرّين يدويًا في Settings → Environments → $ENV_NAME → Secrets" >&2
+    echo "⚠️  gh غير مثبّت — أضف الأسرار يدويًا في Settings → Environments → $ENV_NAME → Secrets" >&2
   fi
 fi
 
@@ -143,8 +179,10 @@ if [ "$SKIP_VERCEL" = false ]; then
   if command -v vercel >/dev/null 2>&1; then
     actions+=("vercel env rm TURSO_DATABASE_URL $ENV_NAME --yes   (لتجنّب التكرار)")
     actions+=("vercel env add TURSO_DATABASE_URL $ENV_NAME        (القيمة عبر stdin)")
-    actions+=("vercel env rm TURSO_AUTH_TOKEN $ENV_NAME --yes")
-    actions+=("vercel env add TURSO_AUTH_TOKEN $ENV_NAME")
+    actions+=("vercel env rm TURSO_AUTH_TOKEN_PROD $ENV_NAME --yes  (رمز التشغيل)")
+    actions+=("vercel env add TURSO_AUTH_TOKEN_PROD $ENV_NAME       (القيمة عبر stdin)")
+    actions+=("vercel env rm TURSO_AUTH_TOKEN $ENV_NAME --yes       (انتقالي = نفس قيمة PROD)")
+    actions+=("vercel env add TURSO_AUTH_TOKEN $ENV_NAME            (القيمة عبر stdin)")
     actions+=("vercel deploy --prod                               (نشر جديد لقراءة المتغيرات)")
   else
     echo "ℹ️  vercel CLI غير مثبّت — أعِد النشر من اللوحة: Project → Deployments → Redeploy" >&2
@@ -163,20 +201,24 @@ fi
 if [ "$SKIP_GITHUB" = false ] && command -v gh >/dev/null 2>&1; then
   GH_ARGS=(--env "$ENV_NAME")
   [ -n "$REPO" ] && GH_ARGS+=(--repo "$REPO")
-  printf '%s' "$URL_VALUE"   | gh secret set TURSO_DATABASE_URL "${GH_ARGS[@]}" || fail "فشل ضبط سرّ الرابط على GitHub (تحقّق من gh auth status والصلاحيات)."
-  printf '%s' "$TOKEN_VALUE" | gh secret set TURSO_AUTH_TOKEN   "${GH_ARGS[@]}" || fail "فشل ضبط سرّ الرمز على GitHub."
-  echo "✅ GitHub: حُدِّث السرّان على بيئة $ENV_NAME (بلا طباعة أي قيمة)."
+  printf '%s' "$URL_VALUE" | gh secret set TURSO_DATABASE_URL "${GH_ARGS[@]}" || fail "فشل ضبط سرّ الرابط على GitHub (تحقّق من gh auth status والصلاحيات)."
+  printf '%s' "$CI_VALUE"  | gh secret set TURSO_AUTH_TOKEN_CI "${GH_ARGS[@]}" || fail "فشل ضبط سرّ رمز المجسّ على GitHub."
+  printf '%s' "$CI_VALUE"  | gh secret set TURSO_AUTH_TOKEN "${GH_ARGS[@]}" || fail "فشل ضبط السرّ الانتقالي على GitHub."
+  echo "✅ GitHub: حُدِّثت الأسرار على بيئة $ENV_NAME (بلا طباعة أي قيمة)."
 fi
 
 # 4) Vercel — نفس المنطق، والقيمة عبر stdin.
 if [ "$SKIP_VERCEL" = false ] && command -v vercel >/dev/null 2>&1; then
   vercel env rm TURSO_DATABASE_URL "$ENV_NAME" --yes >/dev/null 2>&1 || true
-  printf '%s' "$URL_VALUE"   | vercel env add TURSO_DATABASE_URL "$ENV_NAME" >/dev/null || fail "فشل ضبط متغير الرابط على Vercel."
+  printf '%s' "$URL_VALUE"  | vercel env add TURSO_DATABASE_URL "$ENV_NAME" >/dev/null || fail "فشل ضبط متغير الرابط على Vercel."
+  vercel env rm TURSO_AUTH_TOKEN_PROD "$ENV_NAME" --yes >/dev/null 2>&1 || true
+  printf '%s' "$PROD_VALUE" | vercel env add TURSO_AUTH_TOKEN_PROD "$ENV_NAME" >/dev/null || fail "فشل ضبط متغير رمز التشغيل على Vercel."
   vercel env rm TURSO_AUTH_TOKEN "$ENV_NAME" --yes >/dev/null 2>&1 || true
-  printf '%s' "$TOKEN_VALUE" | vercel env add TURSO_AUTH_TOKEN "$ENV_NAME" >/dev/null || fail "فشل ضبط متغير الرمز على Vercel."
-  echo "✅ Vercel: حُدِّث المتغيّران على بيئة $ENV_NAME."
+  printf '%s' "$PROD_VALUE" | vercel env add TURSO_AUTH_TOKEN "$ENV_NAME" >/dev/null || fail "فشل ضبط المتغير الانتقالي على Vercel."
+  echo "✅ Vercel: حُدِّثت المتغيرات على بيئة $ENV_NAME."
   echo "➡️  الخطوة الأخيرة: vercel deploy --prod (المتغيرات تُقرأ في نشر جديد)."
 fi
 
 echo
+echo "🔁 التدوير: سجّل تاريخ إنشاء الرمزين اليوم في docs/ops/secret-rotation.md (جدول السجل) ودوّرهما قبل 90 يومًا؛ المجسّ اليومي ينبّه تلقائيًا عند فشل أي رمز."
 echo "بعد التحديث: أي دفع إلى فرعك يعيد تشغيل المجسّ تلقائيًا، وبعد الدمج في main: gh workflow run turso-evidence.yml --ref main"

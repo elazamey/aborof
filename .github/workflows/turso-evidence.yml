@@ -2,7 +2,7 @@ name: Turso evidence probe
 
 # ‏أداة قياس لا أداة نشر: تفتح اتصالًا **للقراءة فقط** بقاعدة الإنتاج وتطبع جدول
 # الصفوف (conn · conn-token-shape · conn-url-shape · conn-cause · mig-table ·
-# mig-parity · row-7 · row-8 · row-9 · tables) في ملخّص التشغيل وسجلّه وفي
+# mig-parity · db-identity · row-7 · row-8 · row-9 · tables) في ملخّص التشغيل وسجلّه وفي
 # تعليق على طلب الدمج — بلا أي كتابة وبلا أي سرّ في المخرجات (السكربت ينقّي
 # الرابط والرمز قبل الطباعة). كل صف أحمر يحمل كود `[TURSO_*]` ثابتًا، والجدول
 # يُختم بحكم `FINAL: PASS|BLOCKED`.
@@ -10,6 +10,9 @@ name: Turso evidence probe
 # المشغّلات:
 #  - `pull_request`: السؤال «هل القاعدة مطابقة للكود؟» سؤال ما قبل الدمج، فيُطرح
 #    في مكانه الطبيعي بدل انتظار تشغيل يدوي بعد النشر.
+#  - `schedule` (يوميًا): المجسّ الإنتاجي — الحكم يُصدَّر كمخرج، والتقرير JSON
+#    يُرفع قطعة أثرية، ووظيفة التنبيه تفتح/تحدّث قضية تتبّع موسومة `turso-probe`
+#    عند BLOCKED وتغلقها عند التعافي (التفصيل في PRODUCTION-CONTRACT.md).
 #  - `workflow_dispatch`: التشغيل اليدوي متى شئت.
 #
 # ‏أداة **أدلة لا بوابة**: حالة قاعدة الإنتاج لا تُحمرّ نقطة التحقق في الطلب (وإلا
@@ -22,6 +25,10 @@ name: Turso evidence probe
 on:
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 05:17 UTC يوميًا (~07:17 القاهرة) — خارج الذروة، وبدقيقة غير صفرية
+    # لتجنّب ازدحام النشرات المجدولة على رأس الساعة.
+    - cron: "17 5 * * *"
 
 concurrency:
   group: turso-evidence-${{ github.ref }}
@@ -39,6 +46,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       configured: ${{ steps.detect.outputs.configured }}
+      verdict: ${{ steps.verdict.outputs.verdict }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -77,12 +85,39 @@ jobs:
         continue-on-error: true
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          # عقد الفصل: المجسّ يفضّل TURSO_AUTH_TOKEN_CI ويسقط على المشترك —
+          # الاختيار داخل resolveTursoToken لا في YAML (مكان واحد للحقيقة).
+          TURSO_AUTH_TOKEN_CI: ${{ secrets.TURSO_AUTH_TOKEN_CI }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           SCOPE: "أسرار نطاق المستودع"
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/probe-turso-ci.sh
+
+      # تصدير الحكم للتنبيه المجدول: إعادة تشغيل JSON خالصة (قراءة فقط) بدل
+      # التقاط مخرجات الغلاف — `|| true` لأن BLOCKED كود خروج 1 مقصود.
+      - name: Extract verdict (JSON)
+        id: verdict
+        if: steps.detect.outputs.configured == 'true'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN_CI: ${{ secrets.TURSO_AUTH_TOKEN_CI }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node scripts/verify-turso.mjs --json --allow-secret-repair > /tmp/turso-probe.json || true
+          VERDICT=$(node -e "console.log(require('/tmp/turso-probe.json').verdict || 'UNKNOWN')" 2>/dev/null || echo UNKNOWN)
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "الحكم المصدَّر: $VERDICT"
+
+      - name: Upload probe report
+        if: steps.detect.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: turso-probe-report
+          path: /tmp/turso-probe.json
+          retention-days: 90
+          if-no-files-found: error
 
   env-scope:
     name: Probe (environment-scope secrets)
@@ -95,6 +130,8 @@ jobs:
     # الطلب؛ الغرض تسجيل الأدلة لا حجب الدمج.
     continue-on-error: true
     environment: production
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,6 +151,7 @@ jobs:
         continue-on-error: true
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN_CI: ${{ secrets.TURSO_AUTH_TOKEN_CI }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           SCOPE: "أسرار بيئة production"
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -125,3 +163,72 @@ jobs:
             exit 0
           fi
           bash scripts/probe-turso-ci.sh
+
+      - name: Extract verdict (JSON)
+        id: verdict
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN_CI: ${{ secrets.TURSO_AUTH_TOKEN_CI }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          if [ -z "${TURSO_DATABASE_URL:-}" ]; then
+            echo "verdict=UNKNOWN" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/verify-turso.mjs --json --allow-secret-repair > /tmp/turso-probe.json || true
+          VERDICT=$(node -e "console.log(require('/tmp/turso-probe.json').verdict || 'UNKNOWN')" 2>/dev/null || echo UNKNOWN)
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "الحكم المصدَّر: $VERDICT"
+
+      - name: Upload probe report
+        uses: actions/upload-artifact@v4
+        with:
+          name: turso-probe-report
+          path: /tmp/turso-probe.json
+          retention-days: 90
+          if-no-files-found: warn
+
+  probe-alert:
+    name: Probe alert (schedule only)
+    # `always()` مقصود: إحدى وظيفتَي الفحص تُتخطَّى دائمًا (نطاق واحد يعمل)،
+    # والتخطي الموروث كان سيُسكت التنبيه — بينما الغرض عكسه تمامًا.
+    needs: [repo-scope, env-scope]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # إدارة قضية التتبّع فقط — لا قراءة محتوى ولا تعليق على طلبات.
+      issues: write
+    steps:
+      - name: Create/update/close tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERDICT_REPO: ${{ needs.repo-scope.outputs.verdict }}
+          VERDICT_ENV: ${{ needs.env-scope.outputs.verdict }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          # الحكم الفعّال: وظيفة البيئة عند عملها، وإلا المستودع، وإلا UNKNOWN
+          # (لا أسرار في أي نطاق — وهو نفسه حدث يستحق التنبيه).
+          VERDICT="${VERDICT_ENV:-${VERDICT_REPO:-UNKNOWN}}"
+          [ "$VERDICT" = "PASS" ] || [ "$VERDICT" = "BLOCKED" ] || VERDICT="UNKNOWN"
+          STAMP="$(date -u '+%F %T UTC')"
+          OPEN="$(gh issue list --label turso-probe --state open --json number --jq '.[].number' | tr '\n' ' ' || true)"
+          BODY="الحكم: **$VERDICT** — التشغيل: $RUN_URL — $STAMP — الإجراء: docs/ops/INCIDENT-RUNBOOK.md"
+          if [ "$VERDICT" = "PASS" ]; then
+            if [ -n "$OPEN" ]; then
+              for n in $OPEN; do
+                gh issue close "$n" --comment "✅ تعافى المجسّ اليومي (PASS) — التشغيل: $RUN_URL"
+              done
+            else
+              echo "PASS ولا قضايا مفتوحة — لا شيء يُفعل."
+            fi
+          elif [ -z "$OPEN" ]; then
+            gh label create turso-probe --description "تتبّع المجسّ اليومي لقاعدة الإنتاج" --color d73a4a 2>/dev/null || true
+            gh issue create --title "🚨 مجسّ Turso اليومي: $VERDICT" --label turso-probe --body "$BODY"
+          else
+            # تحديث المتن بلا تعليق — القضية لوحة حالة لا سجل إزعاج.
+            for n in $OPEN; do
+              gh issue edit "$n" --body "$BODY"
+            done
+          fi

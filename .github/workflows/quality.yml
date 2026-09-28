@@ -116,9 +116,9 @@ jobs:
               ':!.github/workflows/quality.yml' ; then
             found=1
           fi
-          if git grep --cached -n -I -E 'TURSO_AUTH_TOKEN=[A-Za-z0-9_-]{20,}' -- . \
+          if git grep --cached -n -I -E 'TURSO_AUTH_TOKEN(_PROD|_CI|_PREVIEW)?=[A-Za-z0-9_-]{20,}' -- . \
               ':!package-lock.json' ':!.github/workflows/quality.yml' \
-              | grep -v 'TURSO_AUTH_TOKEN=your_turso_token'; then
+              | grep -v -E "TURSO_AUTH_TOKEN(_PROD|_CI|_PREVIEW)?=your_turso_token"; then
             found=1
           fi
           if [ "$found" -eq 1 ]; then

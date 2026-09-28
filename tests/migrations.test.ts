@@ -1,5 +1,6 @@
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { createClient, type Client } from "@libsql/client";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -144,5 +145,55 @@ describe("compound transaction (order + items + stock)", () => {
     assert.equal(Number(stock.rows[0].stock), 1);
     const items = await client.execute("SELECT * FROM order_items WHERE order_id=?", ["ORD-ok"]);
     assert.equal(items.rows.length, 1);
+  });
+});
+
+describe("additive-only migrations lock", () => {
+  // الهجرات إضافية فقط: CREATE/INSERT..SELECT/ADD COLUMN. أي عبارة هادمة
+  // (DROP/RENAME/TRUNCATE/DELETE/UPDATE) في ملف .sql تُفشل البوابة — والبديل
+  // الموثّق: عمود جديد + نقل تدريجي + إسقاط لاحق في نافذة صيانة مُعلَنة
+  // (انظر PRODUCTION-CONTRACT.md). الوحدات .ts المولّدة لا تُفحص (مشتقة ومُزامَنة
+  // عبر sync-migrations --check) — المصدر المرجعي هو .sql وحده.
+  const DESTRUCTIVE = [
+    /\bDROP\s+(TABLE|COLUMN|INDEX|TRIGGER|VIEW)\b/i,
+    /\bALTER\s+TABLE\s+\S+\s+(DROP|RENAME)\b/i,
+    /\bRENAME\s+(TO|COLUMN)\b/i,
+    /\bTRUNCATE\b/i,
+    /\bDELETE\s+FROM\b/i,
+    /\bUPDATE\s+\S+\s+SET\b/i,
+  ];
+
+  function migrationSql(): { file: string; sql: string }[] {
+    const dir = path.join(process.cwd(), "src", "lib", "db", "migrations");
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".sql"))
+      .map((file) => {
+        const raw = fs.readFileSync(path.join(dir, file), "utf8");
+        // تجريد التعليقات أولًا حتى لا تُحسب كلماتها (مثل @ensure-columns).
+        const sql = raw
+          .replace(/--[^\n]*/g, "")
+          .replace(/\/\*[\s\S]*?\*\//g, "");
+        return { file, sql };
+      });
+  }
+
+  test("no destructive statements in any .sql migration", () => {
+    const files = migrationSql();
+    assert.ok(files.length > 0, "لا ملفات هجرة — الحارس يجب أن يجد المرجع وإلا مرّر بصمت");
+    for (const { file, sql } of files) {
+      for (const pattern of DESTRUCTIVE) {
+        assert.doesNotMatch(sql, pattern, `${file} يحمل عبارة هادمة ${pattern} — الهجرات إضافية فقط`);
+      }
+    }
+  });
+
+  test("ALTER TABLE allowed only as ADD COLUMN (safe in SQLite)", () => {
+    for (const { file, sql } of migrationSql()) {
+      const alters = [...sql.matchAll(/\bALTER\s+TABLE\b([\s\S]{0,80}?);/gi)];
+      for (const m of alters) {
+        assert.match(m[1], /ADD\s+COLUMN/i, `${file}: ALTER TABLE بلا ADD COLUMN ممنوع`);
+      }
+    }
   });
 });

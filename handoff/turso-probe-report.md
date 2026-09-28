@@ -1,5 +1,9 @@
 # تقرير مجسّ Turso — الصفوف conn · mig-table · mig-parity · row-7 · row-8 · row-9 · tables
 
+> **وثيقة تاريخية (أرشيف حادث 2026-09-28):** أي إرشاد فيها عن إصدار التوكنات
+> (بما فيه `Full access`/`Never expire`) نُسِخ بسياسة [`docs/ops/secret-rotation.md`](../docs/ops/secret-rotation.md)
+> (صلاحية قاعدة واحدة + مدة ≤ 90 يومًا + فصل PROD/CI/PREVIEW). تُقرأ كسجل أدلة لا كتعليمات.
+
 الفرع: `arena/01a0e7d5-aborof` · نقطة الانطلاق: `main` = `5412e04` · التاريخ: 2026-09-28
 طلب الدمج: [#15](https://github.com/elazamey/aborof/pull/15) · آخر تشغيل: [run 36421481779](https://github.com/elazamey/aborof/actions/runs/36421481779)
 

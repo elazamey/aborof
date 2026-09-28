@@ -46,13 +46,17 @@ jobs:
       - name: Turso connectivity (SELECT 1)
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN_CI: ${{ secrets.TURSO_AUTH_TOKEN_CI }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${TURSO_DATABASE_URL:-}" ] || [ -z "${TURSO_AUTH_TOKEN:-}" ]; then
-            echo "::error::TURSO_DATABASE_URL أو TURSO_AUTH_TOKEN غير مضبوطين في الأسرار"
+          # عقد الفصل: هذا فاحص لا تشغيل — رمز CI أولًا ثم المشترك كبديل.
+          TOKEN="${TURSO_AUTH_TOKEN_CI:-$TURSO_AUTH_TOKEN}"
+          if [ -z "${TURSO_DATABASE_URL:-}" ] || [ -z "$TOKEN" ]; then
+            echo "::error::TURSO_DATABASE_URL أو رمز Turso (TURSO_AUTH_TOKEN_CI/TURSO_AUTH_TOKEN) غير مضبوطين في الأسرار"
             exit 1
           fi
+          export TURSO_AUTH_TOKEN="$TOKEN"
           if node -e '
             const { createClient } = require("@libsql/client");
             (async () => {
