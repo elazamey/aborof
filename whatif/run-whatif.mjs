@@ -21,6 +21,7 @@ const ROOT = join(HERE, "..");
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:3000";
 const NODB_BASE = process.env.NODB_BASE ?? "http://127.0.0.1:3001";
+const AIFAIL_BASE = process.env.AIFAIL_BASE ?? "http://127.0.0.1:3002";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "dev-local-pass-12345";
 const DB_URL = process.env.WHATIF_DB_URL ?? `file:${join(ROOT, "local.db")}`;
 
@@ -87,13 +88,13 @@ async function products() {
  * ضبط الـ precondition.
  *
  * ملاحظة منهجية مهمة: المسار الطبيعي لضبط المخزون هو `POST /api/products`
- * بجلسة إدارة. لكن WF-019 أثبت أن جلسة الإدارة لا تُقبل أبدًا كما تُرسل على
+ * بجلسة إدارة. لكن WF-020 أثبت أن جلسة الإدارة لا تُقبل أبدًا كما تُرسل على
  * السلك (defect في ترميز الكوكيز)، فكل كتابة إدارية تُرجع 401.
  *
  * لذلك تُضبط الحالات هنا كتابةً مباشرة في قاعدة البيانات — وهي *fixture*
  * للاختبار وليست مسارًا قيد القياس. كل فعل قيد القياس (إنشاء الطلب،
  * التفويض، التحقق، التزامن) ما زال يمر عبر HTTP على الـ Runtime الحقيقي.
- * مسار الإدارة نفسه مغطّى ومستقل في WF-017 وWF-019.
+ * مسار الإدارة نفسه مغطّى ومستقل في WF-017 وWF-020.
  */
 async function setProduct(id, patch) {
   const c = createClient({ url: DB_URL });
@@ -116,6 +117,93 @@ async function setProduct(id, patch) {
   }
 }
 
+/**
+ * إدراج/حذف صف منتج كـ fixture.
+ *
+ *จำเป็น لسيناريوهات الجولة الثانية (أحجام، تشابه، «أرخص متاح») لأن الكتالوج
+ * الحالي لا يملك إلا منظف أرضيات واحدًا، فلا تكون المقارنة ذات معنى. الكتابة
+ * مباشرة في القاعدة للسبب نفسه الموثّق في `setProduct` (D-1).
+ *
+ * ملاحظة: لا تُزامن فهرس FTS5 — مقصود، لأن `localAnswer` يعتمد على
+ * `getProducts()` وتسجيل الكلمات لا على الفهرس.
+ */
+async function upsertFixture(p) {
+  const c = createClient({ url: DB_URL });
+  try {
+    await c.execute({
+      sql: `INSERT INTO products (id,name,description,price,old_price,category,image,stock,featured)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,
+            price=excluded.price,old_price=excluded.old_price,category=excluded.category,
+            image=excluded.image,stock=excluded.stock,featured=excluded.featured`,
+      args: [
+        p.id, p.name, p.description ?? "", p.price, p.old_price ?? null,
+        p.category ?? "", p.image ?? "🧴", p.stock ?? 0, p.featured ? 1 : 0,
+      ],
+    });
+  } finally {
+    c.close();
+  }
+}
+
+async function deleteFixture(id) {
+  const c = createClient({ url: DB_URL });
+  try {
+    await c.execute({ sql: "DELETE FROM products WHERE id=?", args: [id] });
+  } finally {
+    c.close();
+  }
+}
+
+/**
+ * تصفير `featured` لكل المنتجات وإرجاع الحالة السابقة.
+ *
+ * ضروري لأن ترتيب الكتالوج `featured DESC, rowid ASC`، ومحرك الرد الاحتياطي
+ * يقطع عند أول 3 نتائج. بدون عزل الترتيب لا يمكن ضمان أن الصنف الصغير هو
+ * المرشح الأول، فيصبح الاختبار غير حاسم (وهذا ما كشفه تشغيل سابق).
+ */
+async function clearAllFeatured() {
+  const prev = [...(await products()).values()].map((p) => ({
+    id: String(p.id),
+    featured: Boolean(p.featured),
+  }));
+  const c = createClient({ url: DB_URL });
+  try {
+    await c.execute("UPDATE products SET featured=0");
+  } finally {
+    c.close();
+  }
+  return prev;
+}
+
+async function restoreFeatured(prev) {
+  const c = createClient({ url: DB_URL });
+  try {
+    for (const p of prev) {
+      await c.execute({ sql: "UPDATE products SET featured=? WHERE id=?", args: [p.featured ? 1 : 0, p.id] });
+    }
+  } finally {
+    c.close();
+  }
+}
+
+async function setFeatured(id, featured) {
+  const c = createClient({ url: DB_URL });
+  try {
+    await c.execute({ sql: "UPDATE products SET featured=? WHERE id=?", args: [featured ? 1 : 0, id] });
+  } finally {
+    c.close();
+  }
+}
+
+async function chat(message, xff) {
+  const r = await req(BASE, "POST", "/api/chat", {
+    body: { messages: [{ role: "user", content: message }] },
+    xff,
+  });
+  return { ...r, reply: r.json?.reply ?? "", source: r.json?.source ?? null };
+}
+
 async function stockOf(id) {
   const p = (await products()).get(id);
   return p ? Number(p.stock) : null;
@@ -124,7 +212,7 @@ async function stockOf(id) {
 /**
  * قراءة صفوف الطلبات.
  *
- * المسار الطبيعي `GET /api/orders` محمي بجلسة الإدارة، وWF-019 أثبت أن الجلسة
+ * المسار الطبيعي `GET /api/orders` محمي بجلسة الإدارة، وWF-020 أثبت أن الجلسة
  * لا تُقبل كما تُرسل على السلك. لذا تُقرأ الصفوف هنا مباشرة من قاعدة البيانات
  * كجزء من جمع الدليل — القرار قيد القياس (التسعير وقت التنفيذ) ما زال صادرًا
  * عن الـ Runtime نفسه عبر استجابة `POST /api/orders`.
@@ -732,10 +820,259 @@ await scenario(
   }
 );
 
+// ---------------------------------------------------------------- WF-012
+await scenario(
+  {
+    id: "WF-012",
+    title: "أحجام متعددة والعميل قال «هات الكبير»",
+    input: "chat: «هات الكبير من منظف الأرضيات باللافندر»",
+    precondition: "صنفان بنفس الاسم يختلفان في الحجم: 1 لتر (60 ج) و5 لتر (180 ج)",
+    expected_decision: "INTENT: resolve «الكبير» → المتغير 5 لتر، لا الأصغر",
+    expected_side_effect: "الرد يسمّي العبوة 5 لتر تحديدًا",
+    evidence_required: "نص الرد + هل ذكر 5 لتر + هل تجنّب الادعاء الخاطئ",
+  },
+  async (rec) => {
+    // الاختبار الحاسم: نجعل العبوة *الصغيرة* هي المميزة (featured=1) فتتصدر
+    // ترتيب المحرك نفسه. لو كان يحسم «الكبير» فعلًا لأعاد 5 لتر رغم ذلك،
+    // ولو كان يطابق كلمات فقط لأعاد 1 لتر. بهذا لا يمكن للنجاح أن يكون صدفة.
+    const prevFeatured = await clearAllFeatured();
+    await upsertFixture({
+      id: "wf12s",
+      name: "منظف أرضيات برائحة اللافندر 1 لتر",
+      description: "عبوة صغيرة للاستخدام الخفيف",
+      price: 60,
+      category: "منظفات أرضيات",
+      stock: 20,
+      featured: true,
+    });
+    await setProduct("p1", { stock: 20, price: 180, old_price: 220 });
+
+    const catalog = (await products()).get("wf12s");
+    const smallIsFirst = [...(await products()).values()].findIndex((p) => p.id === "wf12s") === 0;
+
+    const r = await chat("هات الكبير من منظف الأرضيات باللافندر", `${RUN}-wf012`);
+    const mentions5 = /5\s*لتر/.test(r.reply);
+    const mentions1 = /1\s*لتر/.test(r.reply);
+    const firstLine = r.reply.split("\n").find((l) => l.includes("•")) ?? "";
+
+    await deleteFixture("wf12s");
+    await restoreFeatured(prevFeatured);
+    rec.actual = {
+      http: r.status,
+      source: r.source,
+      reply: r.reply,
+      first_recommendation: firstLine.trim(),
+      precondition_small_is_featured: Boolean(catalog?.featured),
+      precondition_small_ranks_first_in_catalog: smallIsFirst,
+      mentions_5l: mentions5,
+      mentions_1l: mentions1,
+      resolved_size: mentions5 && !mentions1 ? "5 لتر" : mentions5 && mentions1 ? "كلاهما (بلا حسم)" : mentions1 ? "1 لتر (حسم عكسي)" : "لم يحسم",
+    };
+    return {
+      checks: [
+        check(r.status === 200, `chat HTTP ${r.status}`),
+        check(smallIsFirst, `precondition مؤكّد: العبوة الصغيرة هي الأولى في ترتيب الكتالوج`),
+        check(mentions5, `الرد ذكر العبوة الكبيرة (5 لتر): ${mentions5}`),
+        check(
+          mentions5 && !mentions1,
+          `حسم «الكبير» لصالح 5 لتر رغم تصدر الصغيرة (ذكر 5 لتر=${mentions5}، ذكر 1 لتر=${mentions1})`
+        ),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-013
+await scenario(
+  {
+    id: "WF-013",
+    title: "«هات أرخص منظف أرضيات متاح» — ترتيب بالسعر + فلتر توافر",
+    input: "chat: «هات أرخص منظف أرضيات متاح»",
+    precondition: "أ) اقتصادي 30 ج مخزون 0 (الأرخص لكن نافد) ب) مركز 45 ج مخزون 10 ج) فاخر 180 ج مخزون 10",
+    expected_decision: "DATA+POLICY: استبعاد النافد ثم أدنى سعر → (ب) 45 ج",
+    expected_side_effect: "الرد يرشّح 45 ج، ولا يرشّح 30 ج النافد",
+    evidence_required: "نص الرد + الأسعار المذكورة + هل ذُكر النافد",
+  },
+  async (rec) => {
+    await upsertFixture({ id: "wf13c", name: "منظف أرضيات اقتصادي 1 لتر", description: "أرخص خيار", price: 30, category: "منظفات أرضيات", stock: 0 });
+    await upsertFixture({ id: "wf13a", name: "منظف أرضيات مركز 1 لتر", description: "تركيز عالٍ", price: 45, category: "منظفات أرضيات", stock: 10 });
+    await setProduct("p1", { stock: 10, price: 180, old_price: 220 });
+
+    const r = await chat("هات أرخص منظف أرضيات متاح", `${RUN}-wf013`);
+    const prices = [...r.reply.matchAll(/(\d+(?:\.\d+)?)\s*جنيه/g)].map((m) => Number(m[1]));
+    const recommends45 = prices.includes(45);
+    const recommendsStockout30 = /اقتصادي/.test(r.reply) || prices.includes(30);
+    const cheapestMentioned = prices.length ? Math.min(...prices) : null;
+    // الآلية: `localAnswer` تفحص الأسئلة الشائعة *قبل* المنتجات، وكلمة «متاح»
+    // substring داخل «المتاحة» في سؤال طرق الدفع، فيخطف السؤالَ جوابٌ عن الدفع.
+    const faqHijack = /فودافون كاش|الدفع عند الاستلام/.test(r.reply) && prices.length === 0;
+
+    await deleteFixture("wf13c");
+    await deleteFixture("wf13a");
+    rec.actual = {
+      http: r.status,
+      source: r.source,
+      reply: r.reply,
+      prices_mentioned: prices,
+      cheapest_mentioned: cheapestMentioned,
+      recommends_expected_45: recommends45,
+      recommends_out_of_stock_30: recommendsStockout30,
+      faq_hijack: faqHijack,
+      mechanism: faqHijack
+        ? "localAnswer يفحص FAQ أولًا؛ «متاح» ⊂ «المتاحة» في سؤال طرق الدفع، فأجاب عن الدفع بدل المنتجات"
+        : null,
+      expected: "أرخص *متاح* = 45 ج (منظف أرضيات مركز 1 لتر)، واستبعاد 30 ج لأن مخزونه 0",
+    };
+    return {
+      checks: [
+        check(r.status === 200, `chat HTTP ${r.status}`),
+        check(!faqHijack, `لم يخطف سؤالُ المنتجات جوابٌ عن الدفع (FAQ hijack = ${faqHijack})`),
+        check(recommends45, `رشّح الأرخص المتاح (45 ج): ${recommends45}`),
+        check(!recommendsStockout30, `لم يرشّح النافد (30 ج): ${!recommendsStockout30}`),
+        check(cheapestMentioned === 45, `أدنى سعر مذكور = ${cheapestMentioned} (المتوقع 45)`),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-014
+await scenario(
+  {
+    id: "WF-014",
+    title: "منتجان متشابهان جدًا — هل يحسم أم يوضّح؟",
+    input: "chat: «عايز منظف حمامات»",
+    precondition: "صنفان يتطابق اسمهما إلا في الرائحة: ليمون 72 ج ولافندر 74 ج",
+    expected_decision: "AMBIGUITY: عرض الاثنين أو طلب توضيح — لا حسم صامت",
+    expected_side_effect: "لا يُقدَّم صنف واحد على أنه المطلوب الوحيد",
+    evidence_required: "نص الرد + هل ذُكر الصنفان + هل طُلب توضيح",
+  },
+  async (rec) => {
+    await upsertFixture({ id: "wf14a", name: "منظف حمامات برائحة الليمون 1 لتر", description: "رائحة ليمون", price: 72, category: "منظفات حمامات", stock: 15 });
+    await upsertFixture({ id: "wf14b", name: "منظف حمامات برائحة اللافندر 1 لتر", description: "رائحة لافندر", price: 74, category: "منظفات حمامات", stock: 15 });
+
+    const r = await chat("عايز منظف حمامات", `${RUN}-wf014`);
+    const lemon = /ليمون/.test(r.reply);
+    const lavender = /لافندر/.test(r.reply);
+    const asksClarify = /أي|أيه|تحب|تفضّل|اختار|حدد/.test(r.reply);
+    const listed = r.reply.split("\n").filter((l) => l.includes("•")).map((l) => l.replace("•", "").trim());
+
+    // دليل وصفي (لا يحل محل خرج التطبيق): الصنفان يطابقان كلمات السؤال فعلًا،
+    // فسبب غيابهما الترتيب لا المطابقة. المطابقة تُقاس بعدّ كلمات السؤال فقط.
+    const qWords = ["عايز", "منظف", "حمامات"];
+    const eligibility = {};
+    for (const id of ["wf14a", "wf14b"]) {
+      const p = (await products()).get(id);
+      const hay = `${p?.name ?? ""} ${p?.category ?? ""} ${p?.description ?? ""}`;
+      eligibility[id] = { name: p?.name ?? null, matched_words: qWords.filter((w) => hay.includes(w)) };
+    }
+
+    await deleteFixture("wf14a");
+    await deleteFixture("wf14b");
+    rec.actual = {
+      http: r.status,
+      source: r.source,
+      reply: r.reply,
+      listed_recommendations: listed,
+      mentions_lemon: lemon,
+      mentions_lavender: lavender,
+      asks_clarification: asksClarify,
+      fixture_keyword_eligibility: eligibility,
+      behavior: lemon && lavender ? "عرض الخيارين" : asksClarify ? "طلب توضيح" : "حسم صامت واستبعاد الصنفين المتشابهين",
+      mechanism:
+        "localAnswer يرتب بالدرجة ثم يقطع عند 3؛ عند التعادل يفوز الأسبق في ترتيب الكتالوج (featured ثم rowid)، والصنفان المُدرجان أخيرًا فيُستبعدان رغم مطابقتهما",
+    };
+    return {
+      checks: [
+        check(r.status === 200, `chat HTTP ${r.status}`),
+        check(lemon || lavender, `ذكر أحد الصنفين المتشابهين (ليمون=${lemon}، لافندر=${lavender})`),
+        check(
+          (lemon && lavender) || asksClarify,
+          `لم يحسم صامتًا: عرض الاثنين=${lemon && lavender} أو طلب توضيح=${asksClarify}`
+        ),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-015
+await scenario(
+  {
+    id: "WF-015",
+    title: "خدمة الذكاء الاصطناعي توقفت — فشل المزودين",
+    input: "POST /api/chat على نسخة بمفاتيح موجودة لكن المزودين غير متاحين (:3002)",
+    precondition: "GEMINI_API_KEY و GROQ_API_KEY معيَّنان؛ الاتصال بهما يفشل",
+    expected_decision: "CHAIN FALLBACK: gemini ← groq ← local، بلا 5xx",
+    expected_side_effect: "رد مفيد من القاعدة، ولا تسريب مفتاح أو stack",
+    evidence_required: "200 + source=local + غياب المفاتيح و stack عن جسم الرد",
+  },
+  async (rec) => {
+    const r = await req(AIFAIL_BASE, "POST", "/api/chat", {
+      body: { messages: [{ role: "user", content: "سعر منظف الأرضيات كام؟" }] },
+      xff: `${RUN}-wf015`,
+    });
+    const body = r.text;
+    rec.actual = {
+      http: r.status,
+      code: r.json?.code ?? null,
+      source: r.json?.source,
+      reply: (r.json?.reply ?? "").slice(0, 200),
+      request_id: r.requestId,
+      leaked_api_key: /AIza[0-9A-Za-z_-]{10,}|gsk_[0-9A-Za-z]{10,}/.test(body),
+      leaked_stack: /at\s+Object\.|node_modules|\.ts:\d+:\d+/.test(body),
+      provider_failure_mode:
+        "fetch failed — انقطاع اتصال على مستوى TLS في بيئة الاختبار، لا رفض مفتاح؛ كلا المسارين يُنتجان نفس قرار التراجع",
+    };
+    return {
+      checks: [
+        check(r.status === 200, `HTTP ${r.status} (لا 5xx رغم فشل المزودين)`),
+        check(r.json?.source === "local", `source=${r.json?.source} (المتوقع local)`),
+        check((r.json?.reply ?? "").length > 20, "رد مفيد رغم توقف الخدمة"),
+        check(!/AIza[0-9A-Za-z_-]{10,}|gsk_[0-9A-Za-z]{10,}/.test(body), "لا مفتاح API في جسم الرد"),
+        check(!/at\s+Object\.|node_modules|\.ts:\d+:\d+/.test(body), "لا stack trace للعميل"),
+      ],
+    };
+  }
+);
+
 // ---------------------------------------------------------------- WF-019
 await scenario(
   {
     id: "WF-019",
+    title: "أمر غامض — «محتاج حاجة»",
+    input: "chat: «محتاج حاجة»",
+    precondition: "لا شيء",
+    expected_decision: "INTENT غامض → استيضاح أو عرض عام، لا اختراع منتج أو سعر",
+    expected_side_effect: "لا رقم طلب، لا التزام، لا سعر مختلَق",
+    evidence_required: "نص الرد + ثبات عدد الطلبات",
+  },
+  async (rec) => {
+    const before = (await dbFacts()).orders;
+    const r = await chat("محتاج حاجة", `${RUN}-wf019`);
+    const after = (await dbFacts()).orders;
+    const fabricatesOrder = /ORD-/.test(r.reply);
+    rec.actual = {
+      http: r.status,
+      source: r.source,
+      reply: r.reply,
+      fabricates_order_id: fabricatesOrder,
+      orders_before: before,
+      orders_after: after,
+    };
+    return {
+      checks: [
+        check(r.status === 200, `chat HTTP ${r.status}`),
+        check(!fabricatesOrder, `لم يختلق رقم طلب: ${!fabricatesOrder}`),
+        check(after === before, `عدد الطلبات ${before} → ${after} (لا تنفيذ من محادثة)`),
+        check(r.reply.length > 20, "رد مفيد يستوضح أو يعرض خيارات"),
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------- WF-020
+await scenario(
+  {
+    id: "WF-020",
     title: "جلسة إدارة صالحة تُرفض — defect ترميز الكوكيز (اكتشاف المختبر)",
     input: "POST /api/admin/login (كلمة مرور صحيحة) ← GET /api/admin/session و GET /api/orders بنفس الكوكيز",
     precondition: "ADMIN_PASSWORD و ADMIN_SESSION_SECRET صحيحان",
@@ -755,16 +1092,16 @@ await scenario(
 
     const session = await req(BASE, "GET", "/api/admin/session", {
       headers: { cookie: jar },
-      xff: `${RUN}-wf019a`,
+      xff: `${RUN}-wf020a`,
     });
     const list = await req(BASE, "GET", "/api/orders", {
       headers: { cookie: jar },
-      xff: `${RUN}-wf019b`,
+      xff: `${RUN}-wf020b`,
     });
     const write = await req(BASE, "POST", "/api/products", {
       body: { product: { id: "p1", name: "منظف أرضيات برائحة اللافندر 5 لتر", price: 180, stock: 5 } },
       headers: { cookie: jar },
-      xff: `${RUN}-wf019c`,
+      xff: `${RUN}-wf020c`,
     });
 
     rec.actual = {

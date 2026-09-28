@@ -1,35 +1,35 @@
 {
-  "run": "run4",
+  "run": "run7",
   "base": "http://127.0.0.1:3000",
   "nodb_base": "http://127.0.0.1:3001",
-  "generated_at": "2026-09-28T07:55:46.572Z",
+  "generated_at": "2026-09-28T08:10:27.135Z",
   "baseline": {
-    "orders": 11,
-    "order_items": 11,
+    "orders": 26,
+    "order_items": 26,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-82128733-4415d9c6",
+      "id": "ORD-82958542-7ed50d2c",
       "total": 1000,
       "shipping_fee": 0,
       "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
     }
   },
   "final_db": {
-    "orders": 16,
-    "order_items": 16,
+    "orders": 31,
+    "order_items": 31,
     "orphan_order_items": 0,
     "negative_stock_rows": 0,
     "last_order": {
-      "id": "ORD-82146479-1e121d32",
+      "id": "ORD-83026799-a9f141f5",
       "total": 1000,
       "shipping_fee": 0,
       "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
     }
   },
   "totals": {
-    "PASS": 10,
-    "FAIL": 1
+    "PASS": 12,
+    "FAIL": 4
   },
   "scenarios": [
     {
@@ -76,10 +76,10 @@
       ],
       "actual": {
         "http": 200,
-        "request_id": "req_cf8c5e72-1bda-4bbe-95ee-017a4e1eb412",
+        "request_id": "req_5bbdff49-f3d7-4081-888b-3c67f0dda4b2",
         "body": {
           "ok": true,
-          "id": "ORD-82145886-f5ba439f",
+          "id": "ORD-83026187-e6287d92",
           "subtotal": 3600,
           "shipping": 0,
           "total": 3600
@@ -87,12 +87,12 @@
         "stock_before": 50,
         "stock_after": 30,
         "db": {
-          "orders": 12,
-          "order_items": 12,
+          "orders": 27,
+          "order_items": 27,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-82145886-f5ba439f",
+            "id": "ORD-83026187-e6287d92",
             "total": 3600,
             "shipping_fee": 0,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":20}]"
@@ -100,7 +100,7 @@
         }
       },
       "status": "PASS",
-      "ms": 61
+      "ms": 76
     },
     {
       "id": "WF-002",
@@ -133,7 +133,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 12 → 12 (بلا تغيير)"
+          "detail": "عدد الطلبات 27 → 27 (بلا تغيير)"
         },
         {
           "ok": true,
@@ -146,17 +146,17 @@
         "chat_reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 ج",
         "http": 409,
         "code": "CONFLICT",
-        "request_id": "req_f010a45b-cf1f-4e88-bc5c-28049d42eea0",
+        "request_id": "req_8f0e9851-8b70-4464-8d44-cc1d66c20007",
         "body": {
           "error": "أحد المنتجات لم يعد متاحًا",
           "code": "CONFLICT",
-          "request_id": "req_f010a45b-cf1f-4e88-bc5c-28049d42eea0"
+          "request_id": "req_8f0e9851-8b70-4464-8d44-cc1d66c20007"
         },
-        "orders_before": 12,
-        "orders_after": 12
+        "orders_before": 27,
+        "orders_after": 27
       },
       "status": "PASS",
-      "ms": 47
+      "ms": 46
     },
     {
       "id": "WF-003",
@@ -189,21 +189,21 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 12 → 12 (لم يُنشأ طلب)"
+          "detail": "عدد الطلبات 27 → 27 (لم يُنشأ طلب)"
         }
       ],
       "actual": {
         "http": 409,
         "code": "CONFLICT",
         "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-        "request_id": "req_4f9d3e8f-52c5-4354-b51a-c7ff9e84af6d",
+        "request_id": "req_6f0329e7-8b55-459f-a272-597073490326",
         "stock_before": 7,
         "stock_after": 7,
-        "orders_before": 12,
-        "orders_after": 12
+        "orders_before": 27,
+        "orders_after": 27
       },
       "status": "PASS",
-      "ms": 54
+      "ms": 52
     },
     {
       "id": "WF-004",
@@ -232,7 +232,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 12 → 12"
+          "detail": "عدد الطلبات 27 → 27"
         },
         {
           "ok": true,
@@ -243,13 +243,13 @@
         "http": 409,
         "code": "CONFLICT",
         "message": "الكمية المطلوبة من منظف أرضيات برائحة اللافندر 5 لتر غير متاحة",
-        "request_id": "req_d2da546e-3e78-4a8f-931b-a09b33c1b67b",
+        "request_id": "req_7d9e8e61-a597-41af-929e-807370ee07a5",
         "stock_before": 0,
         "stock_after": 0,
-        "orders_after": 12
+        "orders_after": 27
       },
       "status": "PASS",
-      "ms": 49
+      "ms": 41
     },
     {
       "id": "WF-005",
@@ -274,7 +274,7 @@
         },
         {
           "ok": true,
-          "detail": "request_id=req_5c8d216a-ef94-4bc2-bec4-e7045e32ec09"
+          "detail": "request_id=req_1e21e510-9bd8-4bb7-8f9c-2947373a7713"
         },
         {
           "ok": true,
@@ -290,23 +290,23 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 12 → 12 (بلا تغيير)"
+          "detail": "عدد الطلبات 27 → 27 (بلا تغيير)"
         }
       ],
       "actual": {
         "chat_http": 422,
         "chat_code": "VALIDATION_FAILED",
         "chat_error": "Unrecognized key(s) in object: 'message'",
-        "chat_request_id": "req_5c8d216a-ef94-4bc2-bec4-e7045e32ec09",
+        "chat_request_id": "req_1e21e510-9bd8-4bb7-8f9c-2947373a7713",
         "order_http": 422,
         "order_code": "VALIDATION_FAILED",
         "order_error": "items: السلة فارغة",
-        "order_request_id": "req_b7fb62db-6fe9-49f9-8a9c-50bc3fc415c6",
-        "orders_before": 12,
-        "orders_after": 12
+        "order_request_id": "req_0488fc32-780c-467d-962e-9eb111af89e9",
+        "orders_before": 27,
+        "orders_after": 27
       },
       "status": "PASS",
-      "ms": 31
+      "ms": 33
     },
     {
       "id": "WF-010",
@@ -323,7 +323,7 @@
         },
         {
           "ok": true,
-          "detail": "رقما الطلبين مختلفان: ORD-82146125-28d0d268 , ORD-82146148-b55df240"
+          "detail": "رقما الطلبين مختلفان: ORD-83026425-ef3bab2d , ORD-83026443-44b687d6"
         },
         {
           "ok": true,
@@ -341,19 +341,19 @@
       "actual": {
         "http_1": 200,
         "http_2": 200,
-        "id_1": "ORD-82146125-28d0d268",
-        "id_2": "ORD-82146148-b55df240",
-        "request_id_1": "req_76ae8609-667e-43e5-a1e3-d4dcbd1c836d",
-        "request_id_2": "req_cdd83bcc-bf59-4e45-8a1b-08183ad66428",
+        "id_1": "ORD-83026425-ef3bab2d",
+        "id_2": "ORD-83026443-44b687d6",
+        "request_id_1": "req_b231e634-9b4e-4f8f-a0b9-f8739be07e88",
+        "request_id_2": "req_1af675be-ef1b-4a09-9059-0d2e044fa517",
         "stock_before": 10,
         "stock_after": 8,
         "db": {
-          "orders": 14,
-          "order_items": 14,
+          "orders": 29,
+          "order_items": 29,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-82146148-b55df240",
+            "id": "ORD-83026443-44b687d6",
             "total": 230,
             "shipping_fee": 50,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":180,\"qty\":1}]"
@@ -362,7 +362,7 @@
         "finding": "لا يوجد idempotency key في createOrderContract — التكرار يُنشئ طلبين"
       },
       "status": "PASS",
-      "ms": 97
+      "ms": 66
     },
     {
       "id": "WF-011",
@@ -421,10 +421,10 @@
         "tamper_http": 422,
         "tamper_code": "VALIDATION_FAILED",
         "tamper_error": "items.0: Unrecognized key(s) in object: 'price'",
-        "request_id": "req_f2c95d1b-5793-4ea1-92e5-d05195f43857"
+        "request_id": "req_25a290e4-19f0-406f-954c-0a777fbe7850"
       },
       "status": "PASS",
-      "ms": 94
+      "ms": 59
     },
     {
       "id": "WF-016",
@@ -453,7 +453,7 @@
         },
         {
           "ok": true,
-          "detail": "request_id=req_a5c4e5ae-ebda-404d-83b5-0516091599c1 للربط بالسجلات"
+          "detail": "request_id=req_8f588099-68fd-4d63-bd2a-677803ae87fd للربط بالسجلات"
         },
         {
           "ok": true,
@@ -461,21 +461,21 @@
         },
         {
           "ok": true,
-          "detail": "طلبات DB الحقيقية 15 → 15 (لم يُكتب شيء)"
+          "detail": "طلبات DB الحقيقية 30 → 30 (لم يُكتب شيء)"
         }
       ],
       "actual": {
         "http": 503,
         "code": "SERVICE_UNAVAILABLE",
         "message": "قاعدة البيانات غير مربوطة",
-        "request_id": "req_a5c4e5ae-ebda-404d-83b5-0516091599c1",
+        "request_id": "req_8f588099-68fd-4d63-bd2a-677803ae87fd",
         "read_http": 200,
         "read_products": 12,
-        "real_db_orders_before": 15,
-        "real_db_orders_after": 15
+        "real_db_orders_before": 30,
+        "real_db_orders_after": 30
       },
       "status": "PASS",
-      "ms": 37
+      "ms": 28
     },
     {
       "id": "WF-017",
@@ -516,7 +516,7 @@
         },
         {
           "ok": true,
-          "detail": "عدد الطلبات 15 → 15"
+          "detail": "عدد الطلبات 30 → 30"
         }
       ],
       "actual": {
@@ -528,11 +528,11 @@
         "delete_product": 401,
         "stock_before": 49,
         "stock_after": 49,
-        "orders_before": 15,
-        "orders_after": 15
+        "orders_before": 30,
+        "orders_after": 30
       },
       "status": "PASS",
-      "ms": 76
+      "ms": 78
     },
     {
       "id": "WF-018",
@@ -557,7 +557,7 @@
         },
         {
           "ok": true,
-          "detail": "أ) عدد الطلبات 15 → 15 (لا طلب)"
+          "detail": "أ) عدد الطلبات 30 → 30 (لا طلب)"
         },
         {
           "ok": true,
@@ -577,7 +577,7 @@
         },
         {
           "ok": true,
-          "detail": "ب) طلبات DB 15 → 16 (+1 فقط)"
+          "detail": "ب) طلبات DB 30 → 31 (+1 فقط)"
         },
         {
           "ok": true,
@@ -595,8 +595,8 @@
         "a_p1_before": 10,
         "a_p1_after": 10,
         "a_orders": [
-          15,
-          15
+          30,
+          30
         ],
         "b_http": [
           200,
@@ -609,20 +609,20 @@
         "b_stock_before": 5,
         "b_stock_after": 1,
         "b_orders_created": [
-          15,
-          16
+          30,
+          31
         ],
         "b_request_ids": [
-          "req_ef51bcf1-b9f9-480b-9b2f-2c89209077ae",
-          "req_1c655196-f9d8-49a7-a011-de0adacd9096"
+          "req_0c8140bf-dec9-4f6f-a468-fb31828dbcc3",
+          "req_25fe491d-eb51-4776-9115-966916e0ddce"
         ],
         "db": {
-          "orders": 16,
-          "order_items": 16,
+          "orders": 31,
+          "order_items": 31,
           "orphan_order_items": 0,
           "negative_stock_rows": 0,
           "last_order": {
-            "id": "ORD-82146479-1e121d32",
+            "id": "ORD-83026799-a9f141f5",
             "total": 1000,
             "shipping_fee": 0,
             "items": "[{\"id\":\"p1\",\"name\":\"منظف أرضيات برائحة اللافندر 5 لتر\",\"price\":250,\"qty\":4}]"
@@ -630,10 +630,231 @@
         }
       },
       "status": "PASS",
-      "ms": 116
+      "ms": 200
+    },
+    {
+      "id": "WF-012",
+      "title": "أحجام متعددة والعميل قال «هات الكبير»",
+      "input": "chat: «هات الكبير من منظف الأرضيات باللافندر»",
+      "precondition": "صنفان بنفس الاسم يختلفان في الحجم: 1 لتر (60 ج) و5 لتر (180 ج)",
+      "expected_decision": "INTENT: resolve «الكبير» → المتغير 5 لتر، لا الأصغر",
+      "expected_side_effect": "الرد يسمّي العبوة 5 لتر تحديدًا",
+      "evidence_required": "نص الرد + هل ذكر 5 لتر + هل تجنّب الادعاء الخاطئ",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "chat HTTP 200"
+        },
+        {
+          "ok": true,
+          "detail": "precondition مؤكّد: العبوة الصغيرة هي الأولى في ترتيب الكتالوج"
+        },
+        {
+          "ok": true,
+          "detail": "الرد ذكر العبوة الكبيرة (5 لتر): true"
+        },
+        {
+          "ok": false,
+          "detail": "حسم «الكبير» لصالح 5 لتر رغم تصدر الصغيرة (ذكر 5 لتر=true، ذكر 1 لتر=true)"
+        }
+      ],
+      "actual": {
+        "http": 200,
+        "source": "local",
+        "reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• منظف أرضيات برائحة اللافندر 1 لتر — 60 جنيه\n\nتقدر تضيفهم للسلة وتكمل الطلب، والدفع فودافون كاش على 01095032221 أو عند الاستلام.",
+        "first_recommendation": "• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه",
+        "precondition_small_is_featured": true,
+        "precondition_small_ranks_first_in_catalog": true,
+        "mentions_5l": true,
+        "mentions_1l": true,
+        "resolved_size": "كلاهما (بلا حسم)"
+      },
+      "status": "FAIL",
+      "ms": 80
+    },
+    {
+      "id": "WF-013",
+      "title": "«هات أرخص منظف أرضيات متاح» — ترتيب بالسعر + فلتر توافر",
+      "input": "chat: «هات أرخص منظف أرضيات متاح»",
+      "precondition": "أ) اقتصادي 30 ج مخزون 0 (الأرخص لكن نافد) ب) مركز 45 ج مخزون 10 ج) فاخر 180 ج مخزون 10",
+      "expected_decision": "DATA+POLICY: استبعاد النافد ثم أدنى سعر → (ب) 45 ج",
+      "expected_side_effect": "الرد يرشّح 45 ج، ولا يرشّح 30 ج النافد",
+      "evidence_required": "نص الرد + الأسعار المذكورة + هل ذُكر النافد",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "chat HTTP 200"
+        },
+        {
+          "ok": false,
+          "detail": "لم يخطف سؤالُ المنتجات جوابٌ عن الدفع (FAQ hijack = true)"
+        },
+        {
+          "ok": false,
+          "detail": "رشّح الأرخص المتاح (45 ج): false"
+        },
+        {
+          "ok": true,
+          "detail": "لم يرشّح النافد (30 ج): true"
+        },
+        {
+          "ok": false,
+          "detail": "أدنى سعر مذكور = null (المتوقع 45)"
+        }
+      ],
+      "actual": {
+        "http": 200,
+        "source": "local",
+        "reply": "الدفع عن طريق فودافون كاش على رقم 01095032221، أو الدفع عند الاستلام داخل القاهرة والجيزة.",
+        "prices_mentioned": [],
+        "cheapest_mentioned": null,
+        "recommends_expected_45": false,
+        "recommends_out_of_stock_30": false,
+        "faq_hijack": true,
+        "mechanism": "localAnswer يفحص FAQ أولًا؛ «متاح» ⊂ «المتاحة» في سؤال طرق الدفع، فأجاب عن الدفع بدل المنتجات",
+        "expected": "أرخص *متاح* = 45 ج (منظف أرضيات مركز 1 لتر)، واستبعاد 30 ج لأن مخزونه 0"
+      },
+      "status": "FAIL",
+      "ms": 41
+    },
+    {
+      "id": "WF-014",
+      "title": "منتجان متشابهان جدًا — هل يحسم أم يوضّح؟",
+      "input": "chat: «عايز منظف حمامات»",
+      "precondition": "صنفان يتطابق اسمهما إلا في الرائحة: ليمون 72 ج ولافندر 74 ج",
+      "expected_decision": "AMBIGUITY: عرض الاثنين أو طلب توضيح — لا حسم صامت",
+      "expected_side_effect": "لا يُقدَّم صنف واحد على أنه المطلوب الوحيد",
+      "evidence_required": "نص الرد + هل ذُكر الصنفان + هل طُلب توضيح",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "chat HTTP 200"
+        },
+        {
+          "ok": false,
+          "detail": "ذكر أحد الصنفين المتشابهين (ليمون=false، لافندر=false)"
+        },
+        {
+          "ok": false,
+          "detail": "لم يحسم صامتًا: عرض الاثنين=false أو طلب توضيح=false"
+        }
+      ],
+      "actual": {
+        "http": 200,
+        "source": "local",
+        "reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• منظف حمامات ومزيل جير 1 لتر — 75 جنيه\n• جل تسليك مواسير 1 لتر — 130 جنيه\n\nتقدر تضيفهم للسلة وتكمل الطلب، والدفع فودافون كاش على 01095032221 أو عند الاستلام.",
+        "listed_recommendations": [
+          "كلوركس مبيض ومطهر 4 لتر — 95 جنيه",
+          "منظف حمامات ومزيل جير 1 لتر — 75 جنيه",
+          "جل تسليك مواسير 1 لتر — 130 جنيه"
+        ],
+        "mentions_lemon": false,
+        "mentions_lavender": false,
+        "asks_clarification": false,
+        "fixture_keyword_eligibility": {
+          "wf14a": {
+            "name": "منظف حمامات برائحة الليمون 1 لتر",
+            "matched_words": [
+              "منظف",
+              "حمامات"
+            ]
+          },
+          "wf14b": {
+            "name": "منظف حمامات برائحة اللافندر 1 لتر",
+            "matched_words": [
+              "منظف",
+              "حمامات"
+            ]
+          }
+        },
+        "behavior": "حسم صامت واستبعاد الصنفين المتشابهين",
+        "mechanism": "localAnswer يرتب بالدرجة ثم يقطع عند 3؛ عند التعادل يفوز الأسبق في ترتيب الكتالوج (featured ثم rowid)، والصنفان المُدرجان أخيرًا فيُستبعدان رغم مطابقتهما"
+      },
+      "status": "FAIL",
+      "ms": 62
+    },
+    {
+      "id": "WF-015",
+      "title": "خدمة الذكاء الاصطناعي توقفت — فشل المزودين",
+      "input": "POST /api/chat على نسخة بمفاتيح موجودة لكن المزودين غير متاحين (:3002)",
+      "precondition": "GEMINI_API_KEY و GROQ_API_KEY معيَّنان؛ الاتصال بهما يفشل",
+      "expected_decision": "CHAIN FALLBACK: gemini ← groq ← local، بلا 5xx",
+      "expected_side_effect": "رد مفيد من القاعدة، ولا تسريب مفتاح أو stack",
+      "evidence_required": "200 + source=local + غياب المفاتيح و stack عن جسم الرد",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "HTTP 200 (لا 5xx رغم فشل المزودين)"
+        },
+        {
+          "ok": true,
+          "detail": "source=local (المتوقع local)"
+        },
+        {
+          "ok": true,
+          "detail": "رد مفيد رغم توقف الخدمة"
+        },
+        {
+          "ok": true,
+          "detail": "لا مفتاح API في جسم الرد"
+        },
+        {
+          "ok": true,
+          "detail": "لا stack trace للعميل"
+        }
+      ],
+      "actual": {
+        "http": 200,
+        "code": null,
+        "source": "local",
+        "reply": "أهلاً بيك 👋 دي المنتجات المناسبة لطلبك:\n• منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه\n• كلوركس مبيض ومطهر 4 لتر — 95 جنيه\n• سائل غسيل أطباق ليمون 2 لتر — 70 جنيه\n\nتقدر تضيفهم للسلة وتكمل الطلب، والد",
+        "request_id": "req_58de38a0-1dfb-4b61-b4bb-2f5fc4e7ba5e",
+        "leaked_api_key": false,
+        "leaked_stack": false,
+        "provider_failure_mode": "fetch failed — انقطاع اتصال على مستوى TLS في بيئة الاختبار، لا رفض مفتاح؛ كلا المسارين يُنتجان نفس قرار التراجع"
+      },
+      "status": "PASS",
+      "ms": 53
     },
     {
       "id": "WF-019",
+      "title": "أمر غامض — «محتاج حاجة»",
+      "input": "chat: «محتاج حاجة»",
+      "precondition": "لا شيء",
+      "expected_decision": "INTENT غامض → استيضاح أو عرض عام، لا اختراع منتج أو سعر",
+      "expected_side_effect": "لا رقم طلب، لا التزام، لا سعر مختلَق",
+      "evidence_required": "نص الرد + ثبات عدد الطلبات",
+      "checks": [
+        {
+          "ok": true,
+          "detail": "chat HTTP 200"
+        },
+        {
+          "ok": true,
+          "detail": "لم يختلق رقم طلب: true"
+        },
+        {
+          "ok": true,
+          "detail": "عدد الطلبات 31 → 31 (لا تنفيذ من محادثة)"
+        },
+        {
+          "ok": true,
+          "detail": "رد مفيد يستوضح أو يعرض خيارات"
+        }
+      ],
+      "actual": {
+        "http": 200,
+        "source": "local",
+        "reply": "أهلاً بحضرتك في روفيده 🧼\nأنا سيليا، تحت أمرك. عندنا منظفات أرضيات ومطابخ وحمامات ومعطرات وأدوات نظافة.\nقولّي محتاج إيه بالظبط وأرشحلك الأنسب، أو كلمنا واتساب على 01095032221.",
+        "fabricates_order_id": false,
+        "orders_before": 31,
+        "orders_after": 31
+      },
+      "status": "PASS",
+      "ms": 21
+    },
+    {
+      "id": "WF-020",
       "title": "جلسة إدارة صالحة تُرفض — defect ترميز الكوكيز (اكتشاف المختبر)",
       "input": "POST /api/admin/login (كلمة مرور صحيحة) ← GET /api/admin/session و GET /api/orders بنفس الكوكيز",
       "precondition": "ADMIN_PASSWORD و ADMIN_SESSION_SECRET صحيحان",
@@ -647,7 +868,7 @@
         },
         {
           "ok": true,
-          "detail": "كوكيز صدر فعلًا: 1790582146533%3AVUiIdqTj…"
+          "detail": "كوكيز صدر فعلًا: 1790583027100%3ApYhAZrJz…"
         },
         {
           "ok": true,
@@ -668,7 +889,7 @@
       ],
       "actual": {
         "login_http": 200,
-        "cookie_value_on_the_wire": "1790582146533%3AVUiIdqTjyXgnuXuky7gbvWmOiiRvg3fv.wNo8LPTwCssty2HM92nAJVFk4pFXBrlQMvGHyl2oB6U",
+        "cookie_value_on_the_wire": "1790583027100%3ApYhAZrJzcRoMG5q7qfCT23coARR5nGdM.i9x6Y6xcZMVtB8OKo9ofci8-XsP4QeP2gaz1GRsW3NQ",
         "wire_contains_percent3A": true,
         "session_http": 200,
         "session_authenticated": false,
@@ -681,7 +902,7 @@
         "defect": true
       },
       "status": "FAIL",
-      "ms": 56
+      "ms": 47
     }
   ]
 }

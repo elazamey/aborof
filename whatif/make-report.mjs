@@ -95,11 +95,11 @@ md.push(`---
 
 | خطوة | نتيجة |
 |---|---|
-| \`POST /api/admin/login\` بكلمة مرور صحيحة | \`${ev.scenarios.find((s) => s.id === "WF-019").actual.login_http}\` + \`Set-Cookie\` |
-| قيمة الكوكيز على السلك | \`${ev.scenarios.find((s) => s.id === "WF-019").actual.cookie_value_on_the_wire}\` |
-| \`GET /api/admin/session\` بنفس الكوكيز | \`authenticated=${ev.scenarios.find((s) => s.id === "WF-019").actual.session_authenticated}\` |
-| \`GET /api/orders\` بنفس الكوكيز | \`${ev.scenarios.find((s) => s.id === "WF-019").actual.list_orders_http}\` \`${ev.scenarios.find((s) => s.id === "WF-019").actual.list_orders_code}\` |
-| \`POST /api/products\` بنفس الكوكيز | \`${ev.scenarios.find((s) => s.id === "WF-019").actual.admin_write_http}\` \`${ev.scenarios.find((s) => s.id === "WF-019").actual.admin_write_code}\` |
+| \`POST /api/admin/login\` بكلمة مرور صحيحة | \`${ev.scenarios.find((s) => s.id === "WF-020").actual.login_http}\` + \`Set-Cookie\` |
+| قيمة الكوكيز على السلك | \`${ev.scenarios.find((s) => s.id === "WF-020").actual.cookie_value_on_the_wire}\` |
+| \`GET /api/admin/session\` بنفس الكوكيز | \`authenticated=${ev.scenarios.find((s) => s.id === "WF-020").actual.session_authenticated}\` |
+| \`GET /api/orders\` بنفس الكوكيز | \`${ev.scenarios.find((s) => s.id === "WF-020").actual.list_orders_http}\` \`${ev.scenarios.find((s) => s.id === "WF-020").actual.list_orders_code}\` |
+| \`POST /api/products\` بنفس الكوكيز | \`${ev.scenarios.find((s) => s.id === "WF-020").actual.admin_write_http}\` \`${ev.scenarios.find((s) => s.id === "WF-020").actual.admin_write_code}\` |
 
 **السبب الجذري:** \`createAdminSession()\` تُنتج حمولة على شكل \`<ts>:<nonce>\` بنقطتين خام. \`response.cookies.set()\` ترمّز القيمة، فتصير النقطتان \`%3A\` على السلك. و\`verifyAdminSession()\` تقرأ القيمة كما وصلت فتحسب HMAC فوق النص المُرمَّز — بينما التوقيع حُسب فوق الخام — فلا يتطابق. ولو تطابق، فإن \`Number(payload.split(":",1)[0])\` يُعيد \`NaN\` لأن الفاصل لم يعد \`:\`، فيسقط فحص العمر أيضًا.
 
@@ -118,15 +118,49 @@ md.push(`---
 
 \`Content-Security-Policy\` تعمل في وضع \`Report-Only\` (\`CSP_ENFORCE !== "true"\`). هي تراقب ولا تفرض. هذا مقصود في الكود، لكنه يعني أن أي انتهاك CSP حاليًا لا يُحجب فعليًا.
 
+### D-4 · الرد الاحتياطي: سؤال عن المنتجات يُخطفه جواب عن الدفع — ${ICON.FAIL}
+
+**السيناريو:** WF-013 — «هات أرخص منظف أرضيات متاح».
+
+**ما حدث فعلًا:** الرد كان \`${esc(ev.scenarios.find((s) => s.id === "WF-013").actual.reply)}\` — أي جواب السؤال الشائع عن طرق الدفع، وليس ترشيح منتج واحد. لم يُذكر أي سعر (\`prices_mentioned=${JSON.stringify(ev.scenarios.find((s) => s.id === "WF-013").actual.prices_mentioned)}\`).
+
+**السبب الجذري:** \`localAnswer\` تفحص الأسئلة الشائعة **قبل** المنتجات وتكتفي بمطابقة واحدة (\`bestFaq.s >= 1\`). وكلمة «متاح» الواردة في سؤال العميل هي substring داخل «المتاحة» في سؤال «ما هي طرق الدفع المتاحة؟»، فيكفي هذا التقاطع الجزئي لخطف السؤال كله.
+
+**لماذا يهم:** المطابقة substring بلا حدود كلمة تعني أن أي استعلام يحتوي مقطعًا من سؤال شائع يتحوّل عن موضوعه. هذا ليس خطأ في البيانات بل في سياسة المطابقة.
+
+### D-5 · الرد الاحتياطي: لا حسم للمقاس، وإسقاط صامت للأصناف المتساوية — ${ICON.FAIL}
+
+**السيناريوهان:** WF-012 («هات الكبير») وWF-014 («عايز منظف حمامات»).
+
+**WF-012 — لا حسم للمقاس:** مع تثبيت precondition أن العبوة الصغيرة (1 لتر) هي الأولى في ترتيب الكتالوج، جاء الرد ليذكر **المقاسين معًا** (\`mentions_5l=${ev.scenarios.find((s) => s.id === "WF-012").actual.mentions_5l}\`، \`mentions_1l=${ev.scenarios.find((s) => s.id === "WF-012").actual.mentions_1l}\`). صفة «الكبير» لم تُترجم إلى أي تفضيل؛ المحرك يطابق أسماء ولا يفهم صفات.
+
+**WF-014 — إسقاط صامت:** أُدرج صنفان متطابقان إلا في الرائحة (ليمون 72 ج، لافندر 74 ج)، وكلاهما طابق كلمتَي السؤال («منظف»، «حمامات») كما يوثّق \`fixture_keyword_eligibility\`. مع ذلك لم يظهر أيٌّ منهما؛ الرد أخرج:
+
+${(ev.scenarios.find((s) => s.id === "WF-014").actual.listed_recommendations ?? []).map((l) => `- ${esc(l)}`).join("\n")}
+
+**السبب الجذري:** \`localAnswer\` ترتّب بالدرجة ثم تقطع عند أول 3 (\`.slice(0, 3)\`). عند تساوي الدرجات يحسم ترتيب الكتالوج (\`featured DESC, rowid ASC\`)، والأصناف المُدرجة لاحقًا تُستبعد بصمت. لا طلب توضيح ولا إشارة إلى وجود بدائل.
+
+**الأثر التجاري:** منتج جديد مضاف من لوحة التحكم قد لا يظهر في المحادثة إطلاقًا رغم مطابقته التامة للطلب، فقط لأنه أُدرج بعد ثلاثة أصناف أقدم بنفس الدرجة.
+
+**نطاق هاتين النتيجتين:** كلاهما في \`localAnswer\` — مسار الرد الاحتياطي بلا مفاتيح API، وهو مسار يُعلنه README ميزةً («رد احتياطي ذكي بدون مفتاح»). بوجود مفاتيح Gemini/Groq يختلف السلوك، وهو ما لم يُقَس هنا لأن البيئة تحجب الاتصال الخارجي (انظر الملاحظة المنهجية 6).
+
 ---
 
 ## ملاحظات منهجية
 
 1. **كل فعل قيد القياس مرّ عبر HTTP على Runtime حقيقي** — لا Mocks ولا استدعاء مباشر للدوال.
-2. **ضبط الـ precondition تم كتابةً مباشرة في قاعدة البيانات** بدل \`POST /api/products\`، لأن D-1 يجعل أي كتابة إدارية تُرجع 401. هذا fixture للاختبار لا مسار قيد القياس، ومغطّى مستقلًا في WF-017/WF-019.
+2. **ضبط الـ precondition تم كتابةً مباشرة في قاعدة البيانات** بدل \`POST /api/products\`، لأن D-1 يجعل أي كتابة إدارية تُرجع 401. هذا fixture للاختبار لا مسار قيد القياس، ومغطّى مستقلًا في WF-017/WF-020.
 3. **كل سيناريو أخذ \`x-forwarded-for\` مستقلًا** لأن \`bucketKey()\` يشتق مفتاح تحديد المعدل منه، والحد \`8/10min\` على \`/api/orders\` كان سيعطي \`429\` ويخفي القرارات الحقيقية.
-4. **نسخة DB-down تعمل من مجلد منفصل** (\`~/whatif-nodb\`) حتى لا تتصارع نسختا dev على \`.next\`.
+4. **ثلاث نسخ Runtime من نفس الكود، كل واحدة لظرف:**
+   - \`:3000\` — الحالة الأساسية، قاعدة بيانات مربوطة.
+   - \`:3001\` (\`~/whatif-nodb\`) — \`TURSO_DATABASE_URL\` فارغ، لـ WF-016.
+   - \`:3002\` (\`~/whatif-aifail\`) — مفاتيح Gemini/Groq موجودة، لـ WF-015.
+   المجلدات منفصلة لأن نسختَي dev في مجلد واحد تتصارعان على \`.next\`، ولأن Turbopack يرفض \`node_modules\` الرمزي («points out of the filesystem root») فنُسخت بالوصلات الصلبة.
 5. **لم يُعدَّل أي كود تطبيق.** التغييرات الوحيدة: \`next.config.mjs\` (قراءة \`ALLOWED_DEV_ORIGINS\` من البيئة، ومعطّل افتراضيًا) ومجلد \`whatif/\` الجديد.
+6. **حدود البيئة — ما لم يُقَس:** الاتصال الخارجي محجوب على مستوى TLS (\`generativelanguage.googleapis.com\` و\`api.groq.com\` يُرجعان \`000\` مع \`SSL_ERROR_SYSCALL\`). لذلك:
+   - WF-015 قاس **انقطاع المزود** لا **رفض المفتاح**. كلاهما يُنتج نفس قرار التراجع في \`chat/route.ts\`، لكن «مفتاح منتهي/غير صالح» تحديدًا لم يُختبر.
+   - مسار Gemini/Groq الحقيقي لم يُقَس إطلاقًا، ونتائج D-4/D-5 تخص \`localAnswer\` وحده.
+7. **حالات FAIL الثلاث في الرد الاحتياطي (D-4/D-5) ليست أعطال Runtime** بل قصور قرار في محرك بلا مفاتيح. صُنّفت FAIL لأن المتوقع كان قرارًا صحيحًا، لا لأن الطلب سقط.
 
 ## إعادة التشغيل
 
