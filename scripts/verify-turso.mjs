@@ -19,7 +19,12 @@
  */
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
-import { dashboardUrlToConnectionCandidates, describeDatabaseUrl, originForHttpProbe } from "./lib/db-url.mjs";
+import {
+  dashboardUrlToConnectionCandidates,
+  describeDatabaseUrl,
+  interpretProbeStatus,
+  originForHttpProbe,
+} from "./lib/db-url.mjs";
 
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
@@ -65,6 +70,34 @@ function classifyConnectionError(error) {
  * نجرّب الروابط المرشّحة واحدة واحدة (اتصال `SELECT 1` فعلي) ونعيد أول عميل
  * ينجح. لا تُطبع أي قيمة مشتقة؛ التقرير يذكر النمط وتصنيف الفشل فقط.
  */
+/**
+ * نداء HTTP خام (نقطة hrana `POST /v2/pipeline`) بطلب `SELECT 1` — الأخطر أن
+ * الفرق بين 404 و401 هو الفرق بين «أنشئ القاعدة» و«جدّد الرمز»، وهما علاجان
+ * مختلفان تمامًا يخفي `@libsql/client` كليهما وراء رسالة SERVER_ERROR واحدة.
+ * لا يُطبع الرد؛ فقط رمز الحالة والحكم المُترجَم منه.
+ */
+async function probeHttpEndpoint(candidateUrl) {
+  const origin = originForHttpProbe(candidateUrl);
+  if (!origin) return { ok: false, verdict: "رابط غير قابل للفحص عبر HTTP" };
+  try {
+    const res = await fetch(`${origin}/v2/pipeline`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({
+        requests: [{ type: "execute", stmt: { sql: "SELECT 1 AS ok" } }, { type: "close" }],
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await res.text().catch(() => "");
+    return interpretProbeStatus(res.status, redact(body, [...secrets, candidateUrl]));
+  } catch (error) {
+    return { ok: false, verdict: redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidateUrl]) };
+  }
+}
+
 async function attemptDerivedConnection() {
   const candidates = dashboardUrlToConnectionCandidates(url);
   if (candidates.length === 0) {
@@ -72,15 +105,20 @@ async function attemptDerivedConnection() {
   }
   const failures = [];
   for (const candidate of candidates) {
+    // 1) الفحص الخام أولًا ليُعرف السبب (لا قاعدة / رمز) لا مجرد «فشل اتصال».
+    const verdict = await probeHttpEndpoint(candidate);
+    if (!verdict.ok) {
+      failures.push(verdict.verdict);
+      continue;
+    }
+    // 2) ثم المسار الحقيقي: نفس عميل التطبيق على نفس الرابط.
     const client = createClient({ url: candidate, authToken });
     try {
       await client.execute("SELECT 1 AS ok");
       return { client, candidate, note: "" };
     } catch (error) {
-      // نص الخطأ نفسه مفيد للتشخيص ومع ذلك آمن: الرابط المرشّح داخل قائمة
-      // الحجب، فأي ظهور له في الرسالة يُستبدل بـ *** قبل الطباعة.
       const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidate]);
-      failures.push(`${classifyConnectionError(error)} — ${raw}`);
+      failures.push(`المسار الخام نجح وعميل libsql فشل: ${raw}`);
       client.close();
     }
   }

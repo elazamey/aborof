@@ -11,6 +11,7 @@ import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/mi
 import {
   dashboardUrlToConnectionCandidates,
   describeDatabaseUrl,
+  interpretProbeStatus,
   originForHttpProbe,
 } from "../scripts/lib/db-url.mjs";
 import {
@@ -105,6 +106,15 @@ describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كش�
     assert.deepEqual(dashboardUrlToConnectionCandidates("libsql://aborof-elazamey.turso.io"), []);
     assert.deepEqual(dashboardUrlToConnectionCandidates("https://aborof.vercel.app/elazamey/databases/aborof"), []);
     assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/databases"), []);
+  });
+
+  test("ترجمة رمز الحالة تفصل بين «لا قاعدة» و«رمز مرفوض» — وهما علاجان مختلفان", () => {
+    assert.equal(interpretProbeStatus(200).ok, true);
+    assert.match(interpretProbeStatus(401).verdict, /الرمز مرفوض/);
+    assert.match(interpretProbeStatus(403).verdict, /الرمز مرفوض/);
+    assert.match(interpretProbeStatus(404).verdict, /لا قاعدة بهذا الاسم/);
+    assert.match(interpretProbeStatus(400, "<html>").verdict, /صيغة الرابط/);
+    assert.match(interpretProbeStatus(500).verdict, /استجابة غير متوقعة/);
   });
 
   test("التشخيص يذكر طول المضيف وشكل المقاطع بالأطوال فقط — لا أسماء ولا قيم", () => {

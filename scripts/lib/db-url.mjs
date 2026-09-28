@@ -87,6 +87,22 @@ export function dashboardUrlToConnectionCandidates(url) {
 }
 
 /**
+ * ترجمة رمز حالة استجابة HTTP من خادم libSQL إلى حكم سببي **قاطع**.
+ * الفرق بين 404 و401 هو الفرق بين «أنشئ القاعدة» و«جدّد الرمز» — وكلاهما كان
+ * يُغلف في @libsql/client برسالة واحدة (`SERVER_ERROR: Server returned HTTP
+ * status NNN`) بلا معنى قابل للتنفيذ.
+ */
+export function interpretProbeStatus(status, body = "") {
+  const code = Number(status);
+  const hint = String(body || "").replace(/\s+/g, " ").slice(0, 120);
+  if (code === 200) return { ok: true, verdict: "الاتصال ناجح (HTTP 200)" };
+  if (code === 401 || code === 403) return { ok: false, verdict: `الرمز مرفوض أو غير كافٍ (HTTP ${code}) — أنشئ توكنًا جديدًا Full access` };
+  if (code === 404) return { ok: false, verdict: "لا قاعدة بهذا الاسم على المؤسسة (HTTP 404) — القاعدة غير موجودة أو اسمها مختلف" };
+  if (code === 400) return { ok: false, verdict: `الخادم رفض الطلب (HTTP 400)${hint ? ` — ${hint}` : ""} — تحقّق من صيغة الرابط` };
+  return { ok: false, verdict: `استجابة غير متوقعة (HTTP ${code || "بلا رمز"})${hint ? ` — ${hint}` : ""}` };
+}
+
+/**
  * يحوّل رابط libsql/ws إلى أصل HTTP لفحص إمكانية الوصول. `origin` يجرّد المسار
  * والاستعلام — فبعض روابط Turso تحمل `?authToken=…`، ويجب ألا يظهر رمز في السجل.
  */
