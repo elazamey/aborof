@@ -14,7 +14,15 @@ export const dynamic = "force-dynamic";
  * موحّدًا حتى لا يُكشف وجودها. لا تُعرض أي قيم أسرار، فقط تحذيرات ومقاييس.
  */
 export const GET = apiHandler("/api/admin/diagnostics", async (request) => {
-  if (!isDiagnosticsEnabled()) throw Errors.diagnosticsDisabled();
+  if (!isDiagnosticsEnabled()) {
+    // 404 موحّد — نفس استجابة أي مسار غير موجود، ونفس ما تفعله نقطة MCP.
+    //
+    // لا يجوز هنا إرجاع كود أو رسالة تخصّ التشخيص (مثل `DIAGNOSTICS_DISABLED`
+    // أو «التشخيص معطل»): فذلك يُثبت للمهاجم أن المسار موجود وأنه محمي بعلم
+    // بيئة، وهو نقيض المقصد المكتوب أعلاه. سبب التعطيل يُسجَّل في الخادم فقط.
+    console.info("diagnostics endpoint requested while disabled; returning unified 404");
+    throw Errors.notFound("هذه النقطة غير متاحة");
+  }
 
   // نقبل جلسة إدارة أو مفتاح التشخيص المستقل.
   const authHeader = request.headers.get("x-diagnostics-key");

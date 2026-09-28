@@ -15,7 +15,6 @@ export type ErrorCode =
   | "CONFLICT"
   | "PAYLOAD_TOO_LARGE"
   | "SERVICE_UNAVAILABLE"
-  | "DIAGNOSTICS_DISABLED"
   | "INTERNAL_ERROR";
 
 export interface ErrorBody {
@@ -65,8 +64,6 @@ export const Errors = {
   payloadTooLarge: (message = "حجم الطلب كبير جدًا") => new DomainError("PAYLOAD_TOO_LARGE", 413, message),
   serviceUnavailable: (message = "الخدمة غير متاحة مؤقتًا") =>
     new DomainError("SERVICE_UNAVAILABLE", 503, message),
-  diagnosticsDisabled: (message = "التشخيص معطل في بيئة الإنتاج") =>
-    new DomainError("DIAGNOSTICS_DISABLED", 404, message),
   internal: (message = "حدث خطأ داخلي، حاول مرة أخرى") =>
     new DomainError("INTERNAL_ERROR", 500, message),
 };
