@@ -25,13 +25,20 @@ export function describeDatabaseUrl(url) {
 
   let kind = "غير معروف";
   let hostMasked = "—";
+  let hostLength = 0;
+  // ‏شكل المسار بطول المقاطع فقط (مثال: "9/10/6") — لا أسماء ولا قيم.
+  let pathShape = "—";
   const httpish = value
     .replace(/^libsql:\/\//i, "https://")
     .replace(/^wss:\/\//i, "https://")
     .replace(/^ws:\/\//i, "http://");
   try {
-    const host = new URL(httpish).hostname.toLowerCase();
+    const parsed = new URL(httpish);
+    const host = parsed.hostname.toLowerCase();
     hostMasked = maskHost(host);
+    hostLength = host.length;
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    pathShape = segments.length ? segments.map((seg) => seg.length).join("/") : "—";
     if (host === "turso.io" || host.endsWith(".turso.io")) kind = "Turso";
     else if (host === "libsql.io" || host.endsWith(".libsql.io")) kind = "libsql.io";
     else if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) kind = "نطاق داخلي";
@@ -40,7 +47,7 @@ export function describeDatabaseUrl(url) {
     kind = hasPlaceholder ? "قيمة موضعية غير مستبدلة" : "رابط غير قابل للتحليل";
   }
 
-  return { scheme, kind, hostMasked, hasPlaceholder, length: value.length };
+  return { scheme, kind, hostMasked, hostLength, pathShape, hasPlaceholder, length: value.length };
 }
 
 /**

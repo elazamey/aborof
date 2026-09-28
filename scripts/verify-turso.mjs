@@ -51,22 +51,41 @@ function record(id, label, ok, detail) {
   rows.push({ id, label, ok, detail });
 }
 
+/** تصنيف خطأ محاولة اتصال — تصنيف فقط، بلا طباعة قيمة الرابط ولا الرمز. */
+function classifyConnectionError(error) {
+  const text = String(error?.message ?? error);
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|fetch failed|dns/i.test(text)) return "المضيف غير موجود (DNS)";
+  if (/\b40[13]\b|unauthor|forbidden|token|auth/i.test(text)) return "الرمز مرفوض أو غير كافٍ";
+  if (/\b404\b|not found/i.test(text)) return "المضيف موجود ولا قاعدة بهذا الاسم";
+  return "خطأ اتصال آخر";
+}
+
 /**
  * ترميم محدود ومعلن: إذا كانت القيمة المضبوطة رابط لوحة تحكم لا رابط اتصال،
  * نجرّب الروابط المرشّحة واحدة واحدة (اتصال `SELECT 1` فعلي) ونعيد أول عميل
- * ينجح. لا تُطبع القيمة المشتقة؛ الرسالة تصف النمط فقط وتطلب تصحيح السرّ.
+ * ينجح. لا تُطبع أي قيمة مشتقة؛ التقرير يذكر النمط وتصنيف الفشل فقط.
  */
-async function tryDerivedUrls() {
-  for (const candidate of dashboardUrlToConnectionCandidates(url)) {
+async function attemptDerivedConnection() {
+  const candidates = dashboardUrlToConnectionCandidates(url);
+  if (candidates.length === 0) {
+    return { client: null, candidate: null, note: "لا يمكن اشتقاق رابط اتصال من هذه القيمة (بنية مسار غير معروفة) — انسخ الرابط من زر Connect في لوحة Turso" };
+  }
+  const failures = [];
+  for (const candidate of candidates) {
     const client = createClient({ url: candidate, authToken });
     try {
       await client.execute("SELECT 1 AS ok");
-      return { client, candidate };
-    } catch {
+      return { client, candidate, note: "" };
+    } catch (error) {
+      failures.push(classifyConnectionError(error));
       client.close();
     }
   }
-  return null;
+  return {
+    client: null,
+    candidate: null,
+    note: `جُرّب ${failures.length} رابطًا مشتقًا على نمط <db>-<org>.turso.io: ${failures.map((f, i) => `${i + 1}) ${f}`).join(" · ")}`,
+  };
 }
 
 /**
@@ -77,7 +96,7 @@ async function tryDerivedUrls() {
 async function diagnoseEndpoint() {
   const shape = describeDatabaseUrl(url);
   const parts = [
-    `بنية الرابط: ${shape.scheme} · ${shape.kind} · المضيف ${shape.hostMasked} · طول ${shape.length}` +
+    `بنية الرابط: ${shape.scheme} · ${shape.kind} · المضيف ${shape.hostMasked} (طول ${shape.hostLength}) · مقاطع المسار ${shape.pathShape} · طول الرابط ${shape.length}` +
       (shape.hasPlaceholder ? " · يحتوي علامة موضع (<…> أو ... أو xx) فهو قيمة موضعية لا رابط حقيقي" : ""),
   ];
   const origin = originForHttpProbe(url);
@@ -133,8 +152,8 @@ try {
 
     // ترميم مُعلَن (بعلم صريح): قيمة لوحة تحكم بدل رابط اتصال.
     if (allowDashboardUrl) {
-      const derived = await tryDerivedUrls();
-      if (derived) {
+      const derived = await attemptDerivedConnection();
+      if (derived.client) {
         db.close();
         db = derived.client;
         effectiveUrl = derived.candidate;
@@ -146,6 +165,8 @@ try {
           true,
           `متصل عبر رابط اشتُقّ من قيمة لوحة التحكم (${describeDatabaseUrl(url).hostMasked} ⇒ <db>-<org>.turso.io) · **صحّح TURSO_DATABASE_URL في الإعدادات**`
         );
+      } else {
+        record("conn-derived", "اشتقاق رابط الاتصال من قيمة لوحة التحكم", false, derived.note);
       }
     }
 

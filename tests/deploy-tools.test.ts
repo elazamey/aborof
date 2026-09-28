@@ -107,6 +107,13 @@ describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كش�
     assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/databases"), []);
   });
 
+  test("التشخيص يذكر طول المضيف وشكل المقاطع بالأطوال فقط — لا أسماء ولا قيم", () => {
+    const shape = describeDatabaseUrl("https://app.turso.tech/elazamey/databases/aborof");
+    assert.equal(shape.hostLength, 14);
+    assert.equal(shape.pathShape, "8/9/6");
+    assert.ok(!JSON.stringify(shape).includes("elazamey"));
+  });
+
   test("المضيف يُقنَّع: لا يُطبع كاملًا مع أن آخره يكفي للتعرّف", () => {
     const masked = describeDatabaseUrl("libsql://store-abc.turso.io").hostMasked;
     assert.ok(!masked.includes("store-abc"));
