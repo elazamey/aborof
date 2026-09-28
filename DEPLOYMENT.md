@@ -44,6 +44,7 @@
 | `DIAGNOSTICS_KEY` | Secret اختياري | مفتاح **مستقل** عن `ADMIN_SESSION_SECRET` لنقطة `/api/admin/diagnostics` |
 | `CSP_ENFORCE` | Variable اختياري | `true` لتشديد CSP من وضع المراقبة إلى الحجب |
 | `ENABLE_ORDER_TRACKING` | Variable اختياري | `true` لفتح نقطة تتبع العملاء للطلبات `/api/orders/track`؛ **مغلق افتراضيًا** (لا يفتح إلا بعد فحوص الصفين 13 و14 في قائمة التحقق) |
+| `ENABLE_AGENT_FLEET` | Variable اختياري | `true` (مع `ENABLE_AI_AGENT=true`) لتفعيل أسطول وكلاء المتجر: 50 وكيلًا متخصصًا يختار بينهم موجّه حتمي بلا موديل، وكل وكيل يرى مجموعة فرعية من أدوات MCP للقراءة فقط؛ غيابه أو أي قيمة أخرى يُبقي السلوك السابق حرفيًا — التفاصيل في `docs/ai/phase-4-agent-fleet.md` |
 | `AI_PROVIDER_ORDER` | Variable اختياري | قائمة أسماء مزودين مفصولة بفواصل لضبط ترتيب السلسلة (مثلًا `groq,gemini,nvidia-nim`)؛ الأسماء غير المعروفة تُتجاهل و`local` يُثبَّت دائمًا في النهاية. غيابه يُبقي الترتيب التاريخي Gemini ← Groq ← NIM ← محلي |
 | `VERCEL_DEPLOY_ENABLED` | Repository variable (أو Environment variable على `production`) | `true` بعد التأكد من الأسرار |
 
