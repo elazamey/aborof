@@ -78,13 +78,76 @@ describe("products route", () => {
     assert.equal(res.status, 401);
   });
 
-  test("GET is public and returns products envelope", async () => {
-    delete process.env.TURSO_DATABASE_URL; // استخدم بيانات البذور المحلية
-    const { GET } = await import("../src/app/api/products/route");
-    const res = await GET(new Request("http://x/api/products"));
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.ok(Array.isArray(body.products));
+  test("GET is public and uses local seed data only outside production", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousDatabaseUrl = process.env.TURSO_DATABASE_URL;
+    const previousAuthToken = process.env.TURSO_AUTH_TOKEN;
+    Reflect.set(process.env, "NODE_ENV", "test");
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
+    try {
+      const { GET } = await import("../src/app/api/products/route");
+      const res = await GET(new Request("http://x/api/products"));
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body.products));
+    } finally {
+      if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+      else Reflect.set(process.env, "NODE_ENV", previousNodeEnv);
+      if (previousDatabaseUrl === undefined) delete process.env.TURSO_DATABASE_URL;
+      else process.env.TURSO_DATABASE_URL = previousDatabaseUrl;
+      if (previousAuthToken === undefined) delete process.env.TURSO_AUTH_TOKEN;
+      else process.env.TURSO_AUTH_TOKEN = previousAuthToken;
+    }
+  });
+
+  test("GET fails closed with 503 in production when Turso is not configured", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousDatabaseUrl = process.env.TURSO_DATABASE_URL;
+    const previousAuthToken = process.env.TURSO_AUTH_TOKEN;
+    Reflect.set(process.env, "NODE_ENV", "production");
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
+    try {
+      const { GET } = await import("../src/app/api/products/route");
+      const res = await GET(new Request("http://x/api/products"));
+      assert.equal(res.status, 503);
+      const body = await json(res);
+      assert.equal(body.code, "SERVICE_UNAVAILABLE");
+      assert.ok(body.request_id);
+    } finally {
+      if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+      else Reflect.set(process.env, "NODE_ENV", previousNodeEnv);
+      if (previousDatabaseUrl === undefined) delete process.env.TURSO_DATABASE_URL;
+      else process.env.TURSO_DATABASE_URL = previousDatabaseUrl;
+      if (previousAuthToken === undefined) delete process.env.TURSO_AUTH_TOKEN;
+      else process.env.TURSO_AUTH_TOKEN = previousAuthToken;
+    }
+  });
+
+  test("GET reports a bad Turso dashboard URL as 503, not INTERNAL_ERROR", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousDatabaseUrl = process.env.TURSO_DATABASE_URL;
+    const previousAuthToken = process.env.TURSO_AUTH_TOKEN;
+    Reflect.set(process.env, "NODE_ENV", "production");
+    process.env.TURSO_DATABASE_URL = "https://app.turso.tech/elazamey/databases/example";
+    process.env.TURSO_AUTH_TOKEN = "libsql://example-elazamey.turso.io";
+    try {
+      const { GET } = await import("../src/app/api/products/route");
+      const res = await GET(new Request("http://x/api/products"));
+      assert.equal(res.status, 503);
+      const body = await json(res);
+      assert.equal(body.code, "SERVICE_UNAVAILABLE");
+      assert.ok(!JSON.stringify(body).includes("app.turso.tech"));
+      assert.ok(!JSON.stringify(body).includes("libsql://example-elazamey.turso.io"));
+    } finally {
+      if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+      else Reflect.set(process.env, "NODE_ENV", previousNodeEnv);
+      if (previousDatabaseUrl === undefined) delete process.env.TURSO_DATABASE_URL;
+      else process.env.TURSO_DATABASE_URL = previousDatabaseUrl;
+      if (previousAuthToken === undefined) delete process.env.TURSO_AUTH_TOKEN;
+      else process.env.TURSO_AUTH_TOKEN = previousAuthToken;
+    }
   });
 });
 

@@ -57,7 +57,7 @@
 
 > ⚠️ **`VERCEL_TOKEN` لا يُملأ من `~/.vercel/auth.json`:** توكن `vercel login` هو OAuth قصير العمر (`expiresAt` خلال ساعات + `refreshToken`) وموضعه في CLI الحديث تحت `com.vercel.cli` داخل `XDG_DATA_HOME` — يصلح للنشر من جهازك، ولا يصلح سرًّا دائمًا. أنشئ رمزًا من **Vercel → Account Settings → Tokens** بصلاحية Full access على الفريق. فحص الرمز في `deploy.yml` يستدعي `api.vercel.com/v2/user`، و`404: User not found` تعني رمزًا مصادَقًا عليه لكنه ملغى/غير موجود (استبدله)، بينما `403` تعني صلاحية ناقصة على الفريق.
 
-يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel. إن غاب `TURSO_DATABASE_URL` عن بيئة Production فالموقع يظل يعرض المنتجات من البذرة المحلية بينما يفشل كل إنشاء طلب بـ `503` (انظر «قراءة نتائج الـ Smoke بلا لبس» أعلاه).
+يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel. في Production لا تُستخدم بيانات البذرة كبديل صامت عند غياب Turso أو فشل الاتصال: قراءات المنتجات/الأسئلة الشائعة تُرجع `503 SERVICE_UNAVAILABLE`، ولا بد من ربط قاعدة حقيقية وإعادة النشر.
 
 ## التفعيل والتحقق
 
@@ -156,7 +156,7 @@ npm run front:check     # 22 فحصًا: الحدود الأربعة، ميتا�
 ### قراءة نتائج الـ Smoke بلا لبس
 
 - **وضع CSP**: الرأس يُنشر افتراضيًا في وضع المراقبة (`Content-Security-Policy-Report-Only`) حتى يُفعَّل `CSP_ENFORCE=true`؛ لذلك صف الرؤوس يقبل الوضعين، وصف `csp-mode` يبيّن الوضع الفعلي، ولا يُفرض الحجب إلا مع `--require-csp-enforce` (استخدمه بعد ضبط `CSP_ENFORCE=true` وإلا فشل الفحص عمدًا).
-- **قرينة ربط قاعدة البيانات (صف `db-binding`)**: مسار Turso في `getProducts()` يمرّر مفتاح `old_price` في كل صف دائمًا (ولو `null`)، بينما الاحتياطي يعيد كائنات `SEED_PRODUCTS` كما هي. ظهور صف بلا المفتاح يعني أن الكتالوج من البذرة المحلية ⇒ على الأرجح `TURSO_DATABASE_URL` غير مضبوط في Vercel، وعندها يفشل أي طلب حقيقي بـ `503 «قاعدة البيانات غير مربوطة»` (الصفان 10 و11). القرينة **ليست إثباتًا**: إثبات الاتصال هو الصفوف 7–9 (`npm run verify:turso`). التنازل الصريح عن القرينة: `--allow-seed-fallback`.
+- **قرينة ربط قاعدة البيانات (صف `db-binding`)**: صفوف Turso تمرّر مفتاح `old_price` دائمًا (ولو `null`)، بينما `SEED_PRODUCTS` قد لا تحمله. في بيئة التطوير/الاختبار يُسمح بالبذرة المحلية؛ أما Production فيفشل مغلقًا بـ`503 SERVICE_UNAVAILABLE` عند غياب قاعدة البيانات أو تعذّرها ولا يعرض البذرة كبديل صامت. لذلك يُعدّ `503` في `/api/products` دليل عدم جاهزية مباشرًا، و`200` مع صف بلا `old_price` قرينة على نشر قديم أو مسار غير متوقع. القرينة **ليست إثباتًا**: إثبات الاتصال وتطابق المخطط هو الصفوف 7–9 (`npm run verify:turso`).
 - **`503` في الصف 4**: الرسالة تسمّي المتغير الناقص بدقة على Vercel؛ و`401` تعني أن اللوحة مهيأة فعلًا.
 - **الصف 15 (`/product/<id>`)**: فشله بـ`404` يعني عودة العطل الإنتاجي «`params` غير مُنتظر» (Next 16 يجعل `params` وعدًا) — الإصلاح والبوابتان في `src/app/product/[id]/page.tsx` و`npm run front:check`.
 - **الصف 16**: `200` بدل `404` = «404 ناعم» يسبّبه أي `loading.tsx` في جذر `src/app/`؛ ووسم `index, follow` بجانب `noindex` = إعلان `robots` صريح في الـlayout.

@@ -1,25 +1,75 @@
 import { createClient, type Client } from "@libsql/client";
 import { SEED_PRODUCTS, type Product } from "@/lib/seed";
 import { runMigrations } from "@/lib/db/migrate";
-import { redactSecrets } from "@/lib/errors";
+import { DomainError, Errors, isProduction, redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 
 let _client: Client | null = null;
 let _ready: Promise<void> | null = null;
 let _clientOverride: Client | null = null;
 
+function databaseErrorLabel(error: unknown): string {
+  const candidate = error as { name?: unknown; code?: unknown } | null;
+  const name = typeof candidate?.name === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/.test(candidate.name)
+    ? candidate.name
+    : "UnknownError";
+  const code = typeof candidate?.code === "string" && /^[A-Za-z0-9_.-]{1,40}$/.test(candidate.code)
+    ? `, code=${candidate.code}`
+    : "";
+  return `${name}${code}`;
+}
+
+function failDatabaseRead<T>(operation: string, error: unknown, fallback: T): T {
+  if (isProduction() && error instanceof DomainError && error.code === "SERVICE_UNAVAILABLE") {
+    throw error;
+  }
+  // لا نكتب رسالة المزود الخام في السجل؛ قد تتضمن عنوان اتصال أو قيمة مصادقة.
+  console.error(`db: ${operation} failed (${databaseErrorLabel(error)})`);
+  if (isProduction()) {
+    throw Errors.serviceUnavailable("قاعدة بيانات المتجر غير متاحة حاليًا.");
+  }
+  return fallback;
+}
+
+function databaseNotConfigured<T>(fallback: T): T {
+  if (isProduction()) {
+    throw Errors.serviceUnavailable("قاعدة بيانات المتجر غير مهيأة في بيئة الإنتاج.");
+  }
+  return fallback;
+}
+
+function isTursoDashboardUrl(value: string): boolean {
+  try {
+    return new URL(value).hostname.toLowerCase() === "app.turso.tech";
+  } catch {
+    return false;
+  }
+}
+
 export function hasDB() {
-  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL);
+  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL?.trim());
 }
 
 export function db(): Client | null {
   if (_clientOverride) return _clientOverride;
-  if (!hasDB()) return null;
+  const databaseUrl = process.env.TURSO_DATABASE_URL?.trim();
+  if (!databaseUrl) return null;
+
+  // رابط لوحة Turso ليس endpoint لقاعدة البيانات، وقد يجعل تهيئة العميل نفسها
+  // ترمي استثناءً قبل الوصول إلى معالج أخطاء الاستعلام.
+  if (isTursoDashboardUrl(databaseUrl)) {
+    throw Errors.serviceUnavailable("إعداد رابط قاعدة البيانات غير صالح.");
+  }
+
   if (!_client) {
-    _client = createClient({
-      url: process.env.TURSO_DATABASE_URL as string,
-      authToken: process.env.TURSO_AUTH_TOKEN,
-    });
+    try {
+      _client = createClient({
+        url: databaseUrl,
+        authToken: process.env.TURSO_AUTH_TOKEN?.trim(),
+      });
+    } catch {
+      throw Errors.serviceUnavailable("إعداد الاتصال بقاعدة البيانات غير صالح.");
+    }
   }
   return _client;
 }
@@ -103,9 +153,16 @@ function toPlain<T>(rows: unknown[]): T[] {
   return rows.map((r) => ({ ...(r as object) })) as T[];
 }
 
+/** في Production لا نعرض بذرة محلية ككتالوج حيّ؛ غياب القاعدة أو فشلها يوقف القراءة بـ 503. */
 export async function getProducts(): Promise<Product[]> {
-  const c = db();
-  if (!c) return SEED_PRODUCTS;
+  let c: Client | null;
+  try {
+    c = db();
+  } catch (error) {
+    return failDatabaseRead("products client initialization", error, SEED_PRODUCTS);
+  }
+  if (!c) return databaseNotConfigured(SEED_PRODUCTS);
+
   try {
     await ensureSchema();
     const started = Date.now();
@@ -117,9 +174,8 @@ export async function getProducts(): Promise<Product[]> {
       old_price: p.old_price == null ? null : Number(p.old_price),
       stock: Number(p.stock),
     }));
-  } catch (e) {
-    console.error("DB error, using seed:", redactSecrets(String((e as Error)?.message ?? e)));
-    return SEED_PRODUCTS;
+  } catch (error) {
+    return failDatabaseRead("products query", error, SEED_PRODUCTS);
   }
 }
 
@@ -129,18 +185,25 @@ export async function getProduct(id: string): Promise<Product | null> {
 }
 
 export async function getFaq(): Promise<{ question: string; answer: string }[]> {
-  const c = db();
   const fallback = [
     { question: "طرق الدفع", answer: "فودافون كاش على 01095032221 أو الدفع عند الاستلام." },
     { question: "الشحن", answer: "50 جنيه، ومجاني فوق 1000 جنيه. التوصيل خلال 1-3 أيام." },
     { question: "الجملة", answer: "أسعار خاصة للجملة — تواصل واتساب 01095032221." },
   ];
-  if (!c) return fallback;
+
+  let c: Client | null;
+  try {
+    c = db();
+  } catch (error) {
+    return failDatabaseRead("FAQ client initialization", error, fallback);
+  }
+  if (!c) return databaseNotConfigured(fallback);
+
   try {
     await ensureSchema();
     const r = await c.execute("SELECT question, answer FROM faq");
     return toPlain<{ question: string; answer: string }>(r.rows);
-  } catch {
-    return fallback;
+  } catch (error) {
+    return failDatabaseRead("FAQ query", error, fallback);
   }
 }
