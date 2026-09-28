@@ -80,6 +80,44 @@ jobs:
             exit 1
           fi
 
+      # الاتصال وحده (SELECT 1) لا يكفي: قاعدة تتصل لكنها ناقصة هجرة تُنتج
+      # متجرًا يعمل جزئيًا بلا جداول الطلبات أو فهرس البحث. هذا الفحص بنيوي:
+      # تطابق بصمات الهجرات مع المستودع + الصفوف 7/8/9 من DEPLOYMENT.md +
+      # مزامنة FTS5 مع الكتالوج.
+      #
+      # يُشغَّل هنا لا محليًا حتى لا يضطر أحد إلى لصق رمز Turso في محادثة أو
+      # طرفية — الرمز يبقى في أسرار GitHub فقط، والسجل يمر عبر نفس تنقية
+      # الحجب المستخدمة في خطوة الاتصال.
+      - name: Turso structural check (npm run verify:turso)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TURSO_DATABASE_URL:-}" ] || [ -z "${TURSO_AUTH_TOKEN:-}" ]; then
+            echo "::error::TURSO_DATABASE_URL أو TURSO_AUTH_TOKEN غير مضبوطين في الأسرار"
+            exit 1
+          fi
+          # --json يُخرج نتيجة قابلة للتحليل، ويُخزَّن الناتج أولًا حتى تُحجب
+          # أي قيمة سرية قد تظهر عرَضًا في رسالة خطأ قبل الطباعة.
+          if node scripts/verify-turso.mjs --json > /tmp/verify-turso.json 2>&1; then
+            node -e '
+              const j = JSON.parse(require("node:fs").readFileSync("/tmp/verify-turso.json", "utf8"));
+              for (const r of j.rows) {
+                console.log(`${r.ok ? "✅" : "❌"} ${String(r.id).padEnd(11)} ${r.detail}`);
+              }
+              console.log(`\n${j.ok ? "✅ الفحص البنيوي أخضر" : "❌ الفحص البنيوي فشل"} — ${j.local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}`);
+              process.exit(j.ok ? 0 : 1);
+            '
+          else
+            out=$(cat /tmp/verify-turso.json)
+            out=${out//"$TURSO_DATABASE_URL"/***}
+            out=${out//"$TURSO_AUTH_TOKEN"/***}
+            printf '%s\n' "$out" | head -c 1200
+            echo "::error::الفحص البنيوي لقاعدة Turso فشل — راجع DEPLOYMENT.md (الصفوف 7–9)"
+            exit 1
+          fi
+
       - name: Gemini API ping (same REST endpoint as /api/chat)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
