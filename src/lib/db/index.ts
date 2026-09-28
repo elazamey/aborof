@@ -27,8 +27,9 @@ export function db(): Client | null {
 /**
  * حقن عميل مخصص للاختبارات (يُقرأ قبل مدخل البيئة). يُستخدم مع عميل
  * ملف مؤقت كي تكون كل خطوات الاختبار على نفس حالة قاعدة البيانات.
+ * `null` يُلغي الحقن ويعيد السلوك الافتراضي (بذرة محلية بلا قاعدة).
  */
-export function setDbClientForTest(client: Client): void {
+export function setDbClientForTest(client: Client | null): void {
   _clientOverride = client;
   _ready = null;
 }

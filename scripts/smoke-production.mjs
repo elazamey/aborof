@@ -12,6 +12,16 @@
  *   node scripts/smoke-production.mjs --admin-probe            # الصف 4 (كلمة خاطئة عمدًا)
  *   node scripts/smoke-production.mjs --allow-mutations --orders-body ./order.json   # الصفان 10 و11
  *   node scripts/smoke-production.mjs --track <orderId> --last4 1234                 # الصفان 13 و14
+ *   node scripts/smoke-production.mjs --require-csp-enforce                          # بعد ضبط CSP_ENFORCE=true
+ *   node scripts/smoke-production.mjs --allow-seed-fallback                          # تنازل عن قرينة ربط Turso
+ *
+ * قراءتان دقيقتان مقصودتان حتى لا يعطي التشغيل الافتراضي حكمًا كاذبًا:
+ *   - **CSP**: تُنشر في وضع المراقبة (`Content-Security-Policy-Report-Only`) حتى يُفعَّل
+ *     `CSP_ENFORCE=true`، فيُقبل الوضعان في صف الرؤوس، ويُفرض الحجب فقط مع `--require-csp-enforce`.
+ *   - **ربط Turso**: مسار قاعدة البيانات في `getProducts()` يمرّر `old_price` في كل صف دائمًا
+ *     (ولو `null`)، بينما مسار البذرة المحلية يعيد كائنات `SEED_PRODUCTS` كما هي. الشكل حينها
+ *     قرينة (لا إثبات) على أن `TURSO_DATABASE_URL` غير مربوط في بيئة النشر — وعندها تفشل كتابة
+ *     أي طلب حقيقي بـ 503 «قاعدة البيانات غير مربوطة».
  *
  * لا تُطبع أي أسرار ولا أي بيانات عميل كاملة (يُفحص الجواب بحثًا عن PII ويُحجب).
  * كود الخروج: 0 = كل الفحوص المطلوبة خضراء، 1 = فشل حاجب، 2 = استخدام خاطئ.
@@ -20,7 +30,8 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const USAGE = `الاستخدام: node scripts/smoke-production.mjs [--base https://aborof.vercel.app]
-  [--admin-probe] [--allow-mutations --orders-body <file.json>] [--track <orderId> --last4 <4 digits>] [--json]`;
+  [--admin-probe] [--allow-mutations --orders-body <file.json>] [--track <orderId> --last4 <4 digits>]
+  [--require-csp-enforce] [--allow-seed-fallback] [--json]`;
 
 const args = process.argv.slice(2);
 function arg(name, fallback = null) {
@@ -51,6 +62,55 @@ export function isSafeBaseUrl(base) {
   if (!host) return false;
   const blocked = /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|metadata)/;
   return !blocked.test(host) && !host.endsWith(".local") && !host.endsWith(".internal");
+}
+
+/**
+ * الرؤوس الأمنية الصارمة التي يجب أن تكون حاضرة دائمًا. رأس CSP مستثنى عمدًا
+ * لأنه يُنشر في وضعين (حجب/مراقبة) وفق `CSP_ENFORCE` — انظر `classifySecurityHeaders`.
+ * مُصدَّرة للاختبار في tests/deploy-tools.test.ts.
+ */
+export const BASELINE_SECURITY_HEADERS = [
+  "strict-transport-security",
+  "x-content-type-options",
+  "x-frame-options",
+  "referrer-policy",
+];
+
+/** وصف مقروء لوضع CSP كما يظهر في النشر الحيّ. */
+export const CSP_MODE_LABEL = {
+  enforce: "الحجب (CSP_ENFORCE=true)",
+  "report-only": "المراقبة Report-Only (الافتراضي الموثّق)",
+  absent: "غائب تمامًا",
+};
+
+/**
+ * يفصل بين «الرأس غائب» و«الرأس موجود في وضع المراقبة»: طلب الرأس الحاجب حرفيًا
+ * كان يُنتج ❌ كاذبة على نشر سليم يعمل بالوضع الافتراضي (Report-Only)، وهو ما
+ * ظهر فعليًا في فحص الإنتاج بتاريخ 2026-09-28.
+ * مُصدَّرة للاختبار في tests/deploy-tools.test.ts.
+ */
+export function classifySecurityHeaders(headers) {
+  const missing = BASELINE_SECURITY_HEADERS.filter((h) => !headers.get(h));
+  const enforcing = headers.get("content-security-policy");
+  const reportOnly = headers.get("content-security-policy-report-only");
+  const cspMode = enforcing ? "enforce" : reportOnly ? "report-only" : "absent";
+  if (cspMode === "absent") missing.push("content-security-policy");
+  return { ok: missing.length === 0, missing, cspMode };
+}
+
+/**
+ * قرينة (لا إثبات) على أن الكتالوج يُخدم من البذرة المحلية لا من Turso:
+ * مسار قاعدة البيانات في `getProducts()` يبني كل صف عبر كائن يحمل مفتاح
+ * `old_price` **دائمًا** (قيمة `null` عند الغياب)، بينما مسار البذرة يعيد
+ * كائنات `SEED_PRODUCTS` كما هي، فبعضها بلا المفتاح أصلًا. ثبات هذا العقد
+ * محميّ باختبار يشغّل `getProducts()` على قاعدة فعلية (tests/deploy-tools.test.ts).
+ * مُصدَّرة للاختبار في tests/deploy-tools.test.ts.
+ */
+export function looksLikeSeedFallback(products) {
+  if (!Array.isArray(products) || products.length === 0) return false;
+  return products.some(
+    (p) => p && typeof p === "object" && !Object.prototype.hasOwnProperty.call(p, "old_price")
+  );
 }
 
 const results = [];
@@ -84,16 +144,30 @@ async function readOnlyChecks() {
   const home = await request("GET", "/");
   record("1", "GET /", home.status === 200, "200", `${home.status} (${home.ms}ms)`);
 
-  // رؤوس الأمان على الصفحة الرئيسية
-  const requiredHeaders = [
-    "strict-transport-security",
-    "x-content-type-options",
-    "x-frame-options",
-    "referrer-policy",
-    "content-security-policy",
-  ];
-  const missing = requiredHeaders.filter((h) => !home.headers.get(h));
-  record("headers", "رؤوس الأمان الأساسية", missing.length === 0, requiredHeaders.join(", "), missing.length ? `ناقصة: ${missing.join(", ")}` : "كلها موجودة");
+  // رؤوس الأمان على الصفحة الرئيسية — CSP تُقبل في وضعيها، والوضع الفعلي يُعرض في صفه الخاص.
+  const sec = classifySecurityHeaders(home.headers);
+  record(
+    "headers",
+    "رؤوس الأمان الأساسية",
+    sec.ok,
+    `${BASELINE_SECURITY_HEADERS.join(", ")} + CSP (أي وضع)`,
+    sec.ok
+      ? `كلها موجودة — CSP في وضع ${CSP_MODE_LABEL[sec.cspMode]}`
+      : `ناقصة: ${sec.missing.join(", ")}`
+  );
+
+  // صف مستقل لوضع CSP: المراقبة هي الافتراضي الموثّق (DEPLOYMENT.md)، والحجب
+  // يُطلب صراحةً بـ --require-csp-enforce بعد ضبط CSP_ENFORCE=true على Vercel.
+  const requireCspEnforce = flag("--require-csp-enforce");
+  const cspEnforced = sec.cspMode === "enforce";
+  record(
+    "csp-mode",
+    "وضع CSP (CSP_ENFORCE)",
+    cspEnforced || (sec.cspMode === "report-only" && !requireCspEnforce),
+    requireCspEnforce ? "content-security-policy (حجب فعلي)" : "أي وضع — والحجب يُفرض بـ --require-csp-enforce",
+    `الوضع الحالي: ${CSP_MODE_LABEL[sec.cspMode]}${requireCspEnforce && !cspEnforced ? " — مطلوب الحجب فتحقّق من CSP_ENFORCE على Vercel ثم أعد النشر" : ""}`
+  );
+
 
   // الصف 2
   const admin = await request("GET", "/admin");
@@ -123,19 +197,41 @@ async function readOnlyChecks() {
     `${mcp.status} — ${mcp.status === 404 ? "الطبقة مغلقة" : mcp.status === 401 ? "الطبقة مفتوحة فعليًا" : "استجابة غير متوقعة"}`
   );
 
-  // إضافي: كتالوج المنتجات
+  // إضافي: كتالوج المنتجات (وهو نفسه حامل قرينة ربط Turso أدناه)
   const products = await request("GET", "/api/products");
   let productOk = products.status === 200;
   let productCount = "?";
+  let productList = [];
   try {
     const parsed = JSON.parse(products.text);
     const list = Array.isArray(parsed) ? parsed : parsed?.products;
-    if (Array.isArray(list)) productCount = String(list.length);
-    else productOk = false;
+    if (Array.isArray(list)) {
+      productCount = String(list.length);
+      productList = list;
+    } else {
+      productOk = false;
+    }
   } catch {
     productOk = false;
   }
   record("extra-products", "GET /api/products", productOk, "200 + قائمة منتجات", `${products.status} — ${productCount} منتجًا`);
+
+  // قرينة ربط قاعدة البيانات — لا تُثبت الاتصال (إثباته الصفوف 7–9)، لكنها ترصد
+  // الحالة الأخطر: نشر يخدم البذرة المحلية، فتظهر المنتجات ويتعذّر حفظ أي طلب
+  // حقيقي (503 «قاعدة البيانات غير مربوطة»). التنازل الصريح: --allow-seed-fallback.
+  const seedFallback = looksLikeSeedFallback(productList);
+  const allowSeedFallback = flag("--allow-seed-fallback");
+  record(
+    "db-binding",
+    "قرينة ربط قاعدة البيانات (شكل /api/products)",
+    productOk && (!seedFallback || allowSeedFallback),
+    "كل صف يحمل مفتاح old_price (مسار Turso) — أو --allow-seed-fallback للتنازل",
+    seedFallback
+      ? `الكتالوج من البذرة المحلية (صف بلا مفتاح old_price) ⇒ على الأرجح TURSO_DATABASE_URL غير مضبوط في بيئة Vercel الإنتاجية؛ تحقّق من الصفوف 7–9 قبل الصفين 10 و11${allowSeedFallback ? " [مُتنازَل عنه بـ --allow-seed-fallback]" : ""}`
+      : productOk
+        ? "كل الصفوف عبر مسار قاعدة البيانات (الاتصال نفسه يُثبته الصفان 7–9)"
+        : "تعذّرت القراءة — لا حكم"
+  );
 
   // إضافي: وجود مسار التتبع في البناء المنشور (GET غير مدعوم ⇒ 405).
   // لا يكشف حالة العلم: الحالة تُقرأ فقط بـ POST (الصفان 13 و14).
@@ -271,6 +367,8 @@ async function main() {
     );
     if (!flag("--admin-probe")) console.log("\nملاحظة: الصف 4 يحتاج تشغيل `--admin-probe` (محاولة واحدة احترامًا لحد المعدل).");
     if (!flag("--allow-mutations")) console.log("ملاحظة: الصفان 10 و11 يحتاجان `--allow-mutations --orders-body <file>` لأن أول إنشاء طلب حقيقي.");
+    if (!flag("--require-csp-enforce")) console.log("ملاحظة: وضع CSP يُقبل في الحالتين افتراضيًا؛ بعد ضبط `CSP_ENFORCE=true` على Vercel أضف `--require-csp-enforce` ليفشل الفحص إن بقيت المراقبة.");
+    if (!flag("--allow-seed-fallback")) console.log("ملاحظة: صف `db-binding` قرينة على مصدر الكتالوج؛ إثبات اتصال Turso نفسه بالصفوف 7–9 عبر `npm run verify:turso` أو `service-health.yml`.");
   }
 
   process.exit(failed.length === 0 ? 0 : 1);

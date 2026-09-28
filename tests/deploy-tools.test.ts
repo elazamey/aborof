@@ -8,7 +8,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { runMigrations, MIGRATIONS } from "../src/lib/db/migrate";
 import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/migration-checksums.mjs";
-import { isSafeBaseUrl } from "../scripts/smoke-production.mjs";
+import {
+  isSafeBaseUrl,
+  classifySecurityHeaders,
+  looksLikeSeedFallback,
+  BASELINE_SECURITY_HEADERS,
+} from "../scripts/smoke-production.mjs";
+import { setDbClientForTest } from "../src/lib/db";
+import { SEED_PRODUCTS } from "../src/lib/seed";
 
 /**
  * أدوات تحقق النشر (scripts/) أدلة تشغيلية؛ نحميها باختبارات حتى لا تتقادم
@@ -80,6 +87,109 @@ describe("scripts/smoke-production — حاجز النطاقات (SSRF)", () => 
       "",
     ]) {
       assert.equal(isSafeBaseUrl(bad), false, `كان يجب رفض: ${bad}`);
+    }
+  });
+});
+
+describe("scripts/smoke-production — رؤوس الأمان ووضع CSP", () => {
+  const baseline: Record<string, string> = {
+    "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "strict-origin-when-cross-origin",
+  };
+  const headersOf = (map: Record<string, string>) => ({
+    get: (name: string) => map[name.toLowerCase()] ?? null,
+  });
+
+  test("وضع المراقبة (الافتراضي في الإنتاج) لا يُحسب رأس CSP ناقصًا — كان فشلًا كاذبًا", () => {
+    const result = classifySecurityHeaders(
+      headersOf({ ...baseline, "content-security-policy-report-only": "default-src 'self'" })
+    );
+    assert.equal(result.cspMode, "report-only");
+    assert.deepEqual(result.missing, []);
+    assert.equal(result.ok, true);
+  });
+
+  test("وضع الحجب يُصنَّف enforce", () => {
+    const result = classifySecurityHeaders(
+      headersOf({ ...baseline, "content-security-policy": "default-src 'self'" })
+    );
+    assert.equal(result.cspMode, "enforce");
+    assert.equal(result.ok, true);
+  });
+
+  test("غياب CSP تمامًا يُذكر باسمه في الناقص", () => {
+    const result = classifySecurityHeaders(headersOf(baseline));
+    assert.equal(result.cspMode, "absent");
+    assert.deepEqual(result.missing, ["content-security-policy"]);
+    assert.equal(result.ok, false);
+  });
+
+  test("نقص رأس أساسي يُذكر باسمه", () => {
+    const { "x-frame-options": _omitted, ...rest } = baseline;
+    const result = classifySecurityHeaders(headersOf({ ...rest, "content-security-policy": "x" }));
+    assert.deepEqual(result.missing, ["x-frame-options"]);
+    assert.equal(result.ok, false);
+  });
+
+  test("قائمة الرؤوس الأساسية لا تتضمن CSP (لأن وضعها متغيّر بطبعه)", () => {
+    assert.ok(!BASELINE_SECURITY_HEADERS.includes("content-security-policy"));
+  });
+});
+
+describe("scripts/smoke-production — قرينة ربط قاعدة البيانات", () => {
+  test("صف بلا مفتاح old_price = قرينة بذرة محلية (الشكل الحيّ بعد كشف 2026-09-28)", () => {
+    const live = [
+      { id: "p1", price: 180, old_price: 220, stock: 40, featured: 1 },
+      { id: "p3", price: 70, stock: 80, featured: 1 }, // مسار Turso كان سيضع old_price: null
+    ];
+    assert.equal(looksLikeSeedFallback(live), true);
+  });
+
+  test("صفوف مسار Turso تحمل old_price دائمًا (ولو null) = لا قرينة", () => {
+    assert.equal(
+      looksLikeSeedFallback([
+        { id: "p1", price: 180, old_price: 220 },
+        { id: "p3", price: 70, old_price: null },
+      ]),
+      false
+    );
+  });
+
+  test("قائمة فارغة أو غير صالحة لا تُنتج قرينة", () => {
+    assert.equal(looksLikeSeedFallback([]), false);
+    assert.equal(looksLikeSeedFallback(null), false);
+    assert.equal(looksLikeSeedFallback("not-a-list"), false);
+  });
+
+  /**
+   * ثبات القرينة نفسه: نشغّل `getProducts()` فعليًا على قاعدة مهاجَرة، ونتأكد أن
+   * مسار Turso يمرّر مفتاح `old_price` في كل صف — بينما البذرة المحلية لا تفعل.
+   * إن تغيّر هذا العقد يومًا، يفشل هذا الاختبار قبل أن يصبح صف `db-binding` مضلّلًا.
+   */
+  test("عقد getProducts: مسار Turso يحمل old_price دائمًا والبذرة لا", async () => {
+    const { client } = fileClient("aborof-shape");
+    await runMigrations(client);
+    await client.execute(
+      "INSERT INTO products (id,name,description,price,category,image,stock) VALUES ('px','بلا سعر قديم','وصف',10,'x','🧴',3)"
+    );
+    setDbClientForTest(client);
+    try {
+      const { getProducts } = await import("../src/lib/db");
+      const fromDb = await getProducts();
+      assert.ok(fromDb.length > 0, "القاعدة المهاجَرة يجب أن تعطي صفًا واحدًا على الأقل");
+      for (const product of fromDb) {
+        assert.ok(
+          Object.prototype.hasOwnProperty.call(product, "old_price"),
+          "مسار Turso يجب أن يمرّر مفتاح old_price في كل صف"
+        );
+      }
+      assert.equal(looksLikeSeedFallback(fromDb), false, "صفوف قاعدة البيانات ليست قرينة بذرة");
+      assert.equal(looksLikeSeedFallback(SEED_PRODUCTS), true, "البذرة المحلية يجب أن تُكتشف كقرينة");
+    } finally {
+      setDbClientForTest(null);
+      client.close();
     }
   });
 });
