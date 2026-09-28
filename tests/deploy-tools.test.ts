@@ -12,6 +12,7 @@ import {
   isSafeBaseUrl,
   classifySecurityHeaders,
   looksLikeSeedFallback,
+  frontPageFindings,
   BASELINE_SECURITY_HEADERS,
 } from "../scripts/smoke-production.mjs";
 import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
@@ -368,5 +369,82 @@ describe(".github/workflows/deploy.yml — بوابة النشر", () => {
     assert.match(workflow, /::error::vercel pull فشل/, "فشل vercel pull يجب أن يُبث كتعليق");
     assert.match(workflow, /::error::vercel build فشل/, "فشل vercel build يجب أن يُبث كتعليق");
     assert.match(workflow, /::error::vercel deploy فشل/, "فشل vercel deploy يجب أن يُبث كتعليق");
+  });
+});
+
+/**
+ * الصفوف 15–17 في الـ smoke test تغطّي العطل الإنتاجي الذي أبقى كل صفحات المنتجات
+ * 404، و«404 الناعم»، وتعقب وسمَي robots المتعارضين. لا يمكن تشغيل السكربت نفسه
+ * محليًا (isSafeBaseUrl يرفض localhost عن قصد)، لذلك نختبر الدالة النقية بأجسام مصنوعة.
+ */
+describe("smoke — الواجهة المنشورة (الصفوف 15–17)", () => {
+  const ok = (text: string, status = 200) => ({ status, text });
+  const healthy = {
+    sampleId: "p1",
+    sampleName: "منظف أرضيات برائحة اللافندر 5 لتر",
+    productPage: ok(
+      '<title>منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه | روفيده</title><link rel="canonical" href="https://aborof.vercel.app/product/p1"/>'
+    ),
+    missing: ok('<meta name="robots" content="noindex"/>', 404),
+    missingRoute: ok("", 404),
+    robotsTxt: ok("User-Agent: *\nDisallow: /admin\nSitemap: https://aborof.vercel.app/sitemap.xml"),
+    sitemapXml: ok("<urlset><url><loc>https://aborof.vercel.app/</loc></url><url><loc>https://aborof.vercel.app/product/p1</loc></url></urlset>"),
+    webmanifest: ok("{}"),
+    iconSvg: ok("<svg/>"),
+  };
+
+  test("النشر السليم: الصفوف 15 و16 و16b و17 خضراء", () => {
+    const findings = frontPageFindings(healthy);
+    assert.deepEqual(findings.map((f) => f.id), ["15", "16", "16b", "17"]);
+    for (const f of findings) assert.ok(f.ok, `${f.id} فشل: ${f.actual}`);
+  });
+
+  test("عودة عطل params (404 لكل منتج) تُكتشف برسالة عطل صريحة", () => {
+    const findings = frontPageFindings({ ...healthy, productPage: ok("404: This page could not be found.", 404) });
+    const row15 = findings.find((f) => f.id === "15");
+    assert.equal(row15?.ok, false);
+    assert.match(String(row15?.actual), /params/);
+  });
+
+  test("صفحة منتج بميتاداتا ناقصة (بلا canonical أو بعنوان عام) تفشل", () => {
+    const noCanonical = frontPageFindings({ ...healthy, productPage: ok("<title>روفيده — لأدوات ومستلزمات النظافة</title>") });
+    assert.equal(noCanonical.find((f) => f.id === "15")?.ok, false, "عنوان الـlayout العام يجب ألا يُقبل كعنوان منتج");
+    const noTitle = frontPageFindings({ ...healthy, productPage: ok('<link rel="canonical" href="/product/p1"/>') });
+    assert.equal(noTitle.find((f) => f.id === "15")?.ok, false);
+  });
+
+  test("«404 ناعم» (200 بمحتوى 404) يُكتشف ويُشرح سببه", () => {
+    const findings = frontPageFindings({ ...healthy, missing: ok("الصفحة أو المنتج غير موجود", 200) });
+    const row16 = findings.find((f) => f.id === "16");
+    assert.equal(row16?.ok, false);
+    assert.match(String(row16?.actual), /404 ناعم/);
+  });
+
+  test("404 بلا noindex أو بوسم robots متعارض يفشل", () => {
+    const noNoindex = frontPageFindings({ ...healthy, missing: ok("<html></html>", 404) });
+    assert.equal(noNoindex.find((f) => f.id === "16")?.ok, false, "404 بلا noindex يجب أن يفشل");
+    const conflict = frontPageFindings({
+      ...healthy,
+      missing: ok('<meta name="robots" content="noindex"/><meta name="robots" content="index, follow"/>', 404),
+    });
+    assert.equal(conflict.find((f) => f.id === "16")?.ok, false, "وسما robots متعارضان يجب أن يظهرا كفشل");
+    assert.match(String(conflict.find((f) => f.id === "16")?.actual), /متعارض/);
+  });
+
+  test("robots بلا حجب /admin أو خريطة تكشف /admin تفشل", () => {
+    const noBlock = frontPageFindings({ ...healthy, robotsTxt: ok("User-Agent: *\nAllow: /") });
+    assert.equal(noBlock.find((f) => f.id === "17")?.ok, false);
+    const leaky = frontPageFindings({
+      ...healthy,
+      sitemapXml: ok("<urlset><url><loc>https://aborof.vercel.app/admin</loc></url></urlset><loc>"),
+    });
+    assert.equal(leaky.find((f) => f.id === "17")?.ok, false);
+  });
+
+  test("ملف ميتاداتا مفقود (غير 200) يفشل الصف 17", () => {
+    const findings = frontPageFindings({ ...healthy, sitemapXml: ok("", 500) });
+    const row17 = findings.find((f) => f.id === "17");
+    assert.equal(row17?.ok, false);
+    assert.match(String(row17?.actual), /500/);
   });
 });

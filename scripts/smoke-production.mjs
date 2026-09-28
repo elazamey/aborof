@@ -114,6 +114,80 @@ export function looksLikeSeedFallback(products) {
   );
 }
 
+/**
+ * منطق الصفوف 15–17 (الواجهة المنشورة) كدالة **نقية** مُصدَّرة:
+ * الحالات الثلاث المهمة — عودة صفحات المنتجات 404 («params غير مُنتظر»)، تحوّل
+ * المنتج غير الموجود إلى «404 ناعم» (200)، وتعارض وسمَي robots في صفحات 404 —
+ * لا يمكن إنتاجها في اختبار بلا خادم، ولا يمكن تشغيل السكربت محليًا (isSafeBaseUrl).
+ * لذلك تُبنى الحالات في tests/deploy-tools.test.ts من أجسام مصنوعة.
+ * @param {{sampleId: string, sampleName: string, productPage: any, missing: any, missingRoute: any, robotsTxt: any, sitemapXml: any, webmanifest: any, iconSvg: any}} input
+ */
+export function frontPageFindings({
+  sampleId,
+  sampleName,
+  productPage,
+  missing,
+  missingRoute,
+  robotsTxt,
+  sitemapXml,
+  webmanifest,
+  iconSvg,
+}) {
+  const findings = [];
+
+  const pageTitle = /<title[^>]*>([^<]*)<\/title>/i.exec(productPage?.text ?? "")?.[1]?.trim() ?? "";
+  const hasCanonical = /rel="canonical"/.test(productPage?.text ?? "");
+  const titleOk = sampleName ? pageTitle.includes(sampleName) : pageTitle.length > 0;
+  findings.push({
+    id: "15",
+    label: `GET /product/${sampleId} (صفحة منتج حقيقية)`,
+    ok: productPage?.status === 200 && titleOk && hasCanonical,
+    expected: "200 + <title> يحمل اسم المنتج + rel=canonical",
+    actual:
+      productPage?.status === 404
+        ? "404 — عطل «params غير مُنتظر» عاد إلى البناء المنشور (راجع npm run front:check)"
+        : `${productPage?.status} — العنوان: «${pageTitle.slice(0, 60)}»${hasCanonical ? " + canonical" : " — بلا canonical"}`,
+  });
+
+  const missingNoindex = /<meta name="robots" content="noindex"/.test(missing?.text ?? "");
+  const conflictingRobots = /content="index,\s*follow"/.test(missing?.text ?? "");
+  findings.push({
+    id: "16",
+    label: "GET /product/<معرف غير موجود> (منع 404 الناعم)",
+    ok: missing?.status === 404 && missingNoindex && !conflictingRobots,
+    expected: '404 + <meta name="robots" content="noindex"> وحده',
+    actual:
+      `${missing?.status}${missing?.status === 200 ? " — «404 ناعم»: يسبّبه حدّ تحميل في جذر src/app/" : ""}` +
+      `${missingNoindex ? " + noindex" : " — بلا noindex"}` +
+      `${conflictingRobots ? " + وسم robots متعارض (index, follow)" : ""}`,
+  });
+
+  findings.push({
+    id: "16b",
+    label: "GET /<مسار غير موجود>",
+    ok: missingRoute?.status === 404,
+    expected: "404",
+    actual: `${missingRoute?.status}`,
+  });
+
+  const sitemapLocs = (sitemapXml?.text?.match(/<loc>/g) ?? []).length;
+  const robotsBlocksAdmin = /Disallow:\s*\/admin/.test(robotsTxt?.text ?? "");
+  const sitemapHidesAdmin = !/\/admin/.test(sitemapXml?.text ?? "");
+  const allOk = [robotsTxt, sitemapXml, webmanifest, iconSvg].every((r) => r?.status === 200);
+  findings.push({
+    id: "17",
+    label: "GET /robots.txt · /sitemap.xml · /manifest.webmanifest · /icon.svg",
+    ok: allOk && sitemapLocs >= 2 && robotsBlocksAdmin && sitemapHidesAdmin,
+    expected: "200 للجميع + خريطة بروابط + حجب /admin",
+    actual:
+      `robots ${robotsTxt?.status}${robotsBlocksAdmin ? " (يحجب /admin)" : " — لا يحجب /admin"} · ` +
+      `sitemap ${sitemapXml?.status} (${sitemapLocs} رابطًا${sitemapHidesAdmin ? "" : " — يكشف /admin"}) · ` +
+      `manifest ${webmanifest?.status} · icon ${iconSvg?.status}`,
+  });
+
+  return findings;
+}
+
 const results = [];
 function record(id, label, ok, expected, actual) {
   results.push({ id, label, ok, expected, actual });
@@ -233,6 +307,27 @@ async function readOnlyChecks() {
         ? "كل الصفوف عبر مسار قاعدة البيانات (الاتصال نفسه يُثبته الصفان 7–9)"
         : "تعذّرت القراءة — لا حكم"
   );
+
+  // ------------------------------- الواجهة المنشورة (الصفوف 15–17)
+  // عطل إنتاجي حقيقي: كل صفحات المنتجات كانت 404 لأن Next 16 يجعل `params` وعدًا
+  // والكود قرأه متزامنًا. المنطق مُفصول في دالة نقية مُصدَّرة كي يغطّيها الاختبار
+  // ببيانات مصنوعة (لا يمكن تشغيل هذا السكربت محليًا بحماية `isSafeBaseUrl`).
+  const sampleId = productList[0]?.id ?? "p1";
+  const sampleName = productList[0]?.name ?? "";
+  const stamp = Date.now().toString(36);
+  const [productPage, missing, missingRoute, robotsTxt, sitemapXml, webmanifest, iconSvg] =
+    await Promise.all([
+      request("GET", `/product/${sampleId}`),
+      request("GET", `/product/probe-missing-${stamp}`),
+      request("GET", `/probe-missing-${stamp}`),
+      request("GET", "/robots.txt"),
+      request("GET", "/sitemap.xml"),
+      request("GET", "/manifest.webmanifest"),
+      request("GET", "/icon.svg"),
+    ]);
+  for (const finding of frontPageFindings({ sampleId, sampleName, productPage, missing, missingRoute, robotsTxt, sitemapXml, webmanifest, iconSvg })) {
+    record(finding.id, finding.label, finding.ok, finding.expected, finding.actual);
+  }
 
   // إضافي: وجود مسار التتبع في البناء المنشور (GET غير مدعوم ⇒ 405).
   // لا يكشف حالة العلم: الحالة تُقرأ فقط بـ POST (الصفان 13 و14).

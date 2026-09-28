@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { getProduct, getProducts } from "@/lib/db";
 import { STORE } from "@/lib/seed";
 import { notFound } from "next/navigation";
@@ -6,8 +7,52 @@ import AddButton from "./AddButton";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProductPage({ params }: { params: { id: string } }) {
-  const p = await getProduct(params.id);
+/**
+ * Next.js 16 يجعل `params` وعدًا (Promise) — قراءتها متزامنة تعطي `id` غير معرّف،
+ * فيسقط كل منتج إلى `notFound()`. هذا كان **خطأً إنتاجيًا حقيقيًا**: كل صفحات
+ * المنتجات تُرجع 404 رغم أن الروابط إليها منشورة في الصفحة الرئيسية.
+ * الشكل الصحيح هو `await params` في الصفحة وفي generateMetadata معًا.
+ */
+type Props = { params: Promise<{ id: string }> };
+
+/**
+ * ميتاداتا صفحة المنتج — أكبر مكسب فهرسة ومشاركة: عنوان المنتج الحقيقي وسعره
+ * في الوصف، وcanonical مطلق، وبطاقة مشاركة عربية. المنتج غير الموجود يعطي
+ * عنوانًا محايدًا (وصفحة 404 هي التي تُخدَم فعلًا عبر notFound).
+ */
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  const product = await getProduct(id);
+  if (!product) {
+    // `notFound()` هنا مقصودة لا في الصفحة فقط: مع وجود `loading.tsx` يبدأ البث
+    // بحالة 200 قبل رسم الصفحة، فيتحول 404 إلى «404 ناعم». رفع القرار إلى الميتاداتا
+    // (وهي تُحلّ قبل البث) يعطي رمز الحالة الصحيح 404 للزواحف وللمراقبة.
+    notFound();
+  }
+  const price = Number(product.price);
+  const description = `${product.description} — السعر ${price} جنيه${
+    product.old_price ? ` بدل ${Number(product.old_price)} جنيه` : ""
+  }. توصيل لكل المحافظات ودفع فودافون كاش أو عند الاستلام.`;
+
+  return {
+    title: `${product.name} — ${price} جنيه | ${STORE.name}`,
+    description,
+    alternates: { canonical: `/product/${product.id}` },
+    openGraph: {
+      type: "website",
+      locale: "ar_EG",
+      title: `${product.name} — ${price} جنيه`,
+      description,
+      url: `/product/${product.id}`,
+      siteName: STORE.name,
+    },
+    twitter: { card: "summary_large_image", title: `${product.name} — ${price} جنيه`, description },
+  };
+}
+
+export default async function ProductPage({ params }: Props) {
+  const { id } = await params;
+  const p = await getProduct(id);
   if (!p) notFound();
   const related = (await getProducts()).filter((x) => x.category === p.category && x.id !== p.id).slice(0, 4);
 

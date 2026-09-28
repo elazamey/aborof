@@ -13,7 +13,25 @@
 
 1. **الموقع حيّ وسليم العرض** ✅ — الصفوف 1 و2 و3 و5 و6 + كل الرؤوس الأمنية الأساسية (التفاصيل في §2).
 2. **قاعدة Turso غير مربوطة في بيئة الإنتاج** 🔴 — الكتالوج يُخدم من البذرة المحلية (`SEED_PRODUCTS`)، ولذلك **أي طلب حقيقي من الموقع يفشل بـ `503 «قاعدة البيانات غير مربوطة»`** (`createOrder` تشترط `db()` صراحةً). الصفوف 7–11 لا يمكن أن تنجح قبل ضبط `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` في Vercel ← Production وإعادة النشر. الأدلة في §3.
-3. **سر `VERCEL_TOKEN` ميت** 🔴 — فحص الطيران التمهيدي في التشغيل `35320925636` أعاد `HTTP 404: User not found` من `api.vercel.com/v2/user`، أي أن النشر الآلي متوقف منذ تسعة أيام. العلاج رمز جديد من **لوحة Vercel** (Account Settings → Tokens) لا التوكن التفاعلي الناتج من `vercel login` (تفصيل في §5).
+3. **عطل إنتاجي حقيقي: كل صفحات المنتجات كانت تُرجع 404** 🔴→✅ — `https://aborof.vercel.app/product/p1` كان يعيد صفحة «404: This page could not be found» رغم أن الروابط إلى المنتجات منشورة في الصفحة الرئيسية و`/api/products` يعيد 12 منتجًا. السبب: Next.js 16 يجعل `params` **وعدًا**، والكود كان يقرأه متزامنًا فيصير `id` غير معرّف. أُصلح في هذا الفرع (`await params` في الصفحة وفي `generateMetadata`) مع بوابتين في `front:check` واختبارات تمنع عودته — **يحتاج إعادة نشر ليعود الموقع سليمًا للزوّار**.
+4. **عطلان أصغر صُلحا معه** ✅ — «404 ناعم» (المنتج غير الموجود كان يعطي 200 بسبب حدّ تحميل جذري) ووسما `robots` متعارضان في صفحات 404 (`noindex` + `index, follow`). التفاصيل المقارنة في `docs/frontend/frontend-guide.md` §3.5.
+5. **سر `VERCEL_TOKEN` ميت** 🔴 — فحص الطيران التمهيدي في التشغيل `35320925636` أعاد `HTTP 404: User not found` من `api.vercel.com/v2/user`، أي أن النشر الآلي متوقف منذ تسعة أيام. العلاج رمز جديد من **لوحة Vercel** (Account Settings → Tokens) لا التوكن التفاعلي الناتج من `vercel login` (تفصيل في §5).
+
+---
+
+## 1.5) ما يجب أن يصل إلى الإنتاج مع هذا الفرع (وإلا بقيت المنتجات مكسورة)
+
+| التغيير | الأثر على الإنتاج | كيف تتحقق بعد النشر |
+|---|---|---|
+| `await params` في `src/app/product/[id]/page.tsx` | إحياء **كل** صفحات المنتجات (كانت 404) | الصف 15 أعلاه |
+| `generateMetadata` للمنتج (اسم + سعر + canonical + openGraph) | ظهور المنتج في نتائج البحث وبطاقات المشاركة | الصف 15 (وجود `<title>` و`canonical`) |
+| `notFound()` مبكرًا + نقل حدّ التحميل إلى `(home)` | 404 حقيقي بدل «404 ناعم» | الصف 16 |
+| حذف `robots` الصريح من الـlayout | لا تضارب `noindex`/`index, follow` | الصف 16 |
+| `sitemap.ts` · `robots.ts` · `manifest.ts` · `icon.svg` | فهرسة كاملة + «أضف للشاشة الرئيسية» + حجب `/admin` و`/api/` | الصف 17 |
+| `src/app/loading.tsx` · `error.tsx` · `not-found.tsx` · `global-error.tsx` | لا صفحة بيضاء عند فشل القاعدة أو التنقّل | افتح الموقع واقطع الشبكة/افتح رابطًا غلطًا |
+| `npm run front:check` في `quality.yml` + `deploy.yml` | البناء يفشل فورًا عند حذف أي من ما سبق | تبويب Actions: الخطوة «بوابة الواجهة الإلزامية» |
+
+**التحقق المحلي الكامل قبل النشر (11 مسارًا):** `/` و`/cart` و`/admin` = 200؛ `/product/p1` و`/product/p12` = 200 بميتاداتا كاملة؛ `/product/ghost-999` و`/page-…` = 404؛ `/robots.txt` و`/sitemap.xml` و`/manifest.webmanifest` و`/icon.svg` = 200. الحزمة: **220/220 اختبارًا**، `front:check` 22/22، `security:gates` 74 ملفًا، `security:bundle` 17 ملفًا بلا أسرار، ومانيفست الأسطول مطابق.
 
 ---
 
@@ -30,6 +48,9 @@
 | CSP | وضع `CSP_ENFORCE` | المراقبة افتراضيًا | `Content-Security-Policy-Report-Only` فقط، ولا رأس حاجب | ✅ سلوك افتراضي موثّق |
 | إضافي | `GET /api/orders/track` | 405 (المسار منشور) | `HTTP/1.1 405 Method Not Allowed` + `X-Matched-Path: /api/orders/track` | ✅ |
 | إضافي | `GET /api/products` | 200 + كتالوج | `200` + 12 منتجًا | ⚠️ انظر §3 |
+| 15 | `GET /product/p1` | 200 + عنوان المنتج وسعره | `404: This page could not be found.` (وفحص محلي بعد الإصلاح: `200` + `<title>منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه \| روفيده</title>`) | 🔴 **قبل الإصلاح** → ✅ بعد النشر |
+| 16 | `GET /product/<معرف غير موجود>` | 404 + `noindex` وحده | محليًا بعد الإصلاح: `404` + `<meta name="robots" content="noindex"/>` وحده | ✅ بعد النشر |
+| 17 | `GET /robots.txt` · `/sitemap.xml` · `/manifest.webmanifest` · `/icon.svg` | 200 جميعها | محليًا: 200 جميعها، و13 رابطًا في الخريطة بلا `/admin` | ✅ بعد النشر |
 
 > **إصلاح أداة نتيجة هذا الفحص:** صف الرؤوس في `scripts/smoke-production.mjs` كان يطلب رأس `content-security-policy` الحاجب حرفيًا، فيُنتج ❌ كاذبة على نشر سليم يعمل بالوضع الافتراضي (Report-Only). صار الفحص يقبل الوضعين ويفصل بينهما في صف `csp-mode`، ويُفرض الحجب فقط بـ `--require-csp-enforce` بعد ضبط `CSP_ENFORCE=true`.
 

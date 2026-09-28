@@ -100,6 +100,9 @@
 | 12 | `POST /api/chat` بسؤال «منظف أرضيات» مع تفعيل `ENABLE_AI_AGENT` و`ENABLE_MCP_TOOLS` | رد يحمل بطاقات منتجات مطابقة | FTS5 أو طبقة الأدوات عاطلة؛ راجع سجل النشر |
 | 13 | `POST /api/orders/track` برقم الطلب من الخطوة 10 وآخر 4 أرقام من هاتفه **مع** `ENABLE_ORDER_TRACKING=true` | `200` مع `{ok:true,status:"جديد",items:[…]}` بلا هاتف كامل ولا عنوان | قناة التتبع عاطلة أو المعرّفات غير صحيحة |
 | 14 | `POST /api/orders/track` بنفس رقم الطلب وآخر 4 أرقام **خاطئة** | `404` بنفس رسالة الخطوة 13 («تعذر العثور على الطلب») حرفيًا | تسريب وجود/عدم وجود الطلب (غير مقبول — لا تكشِف الفرق للعميل) |
+| 15 | `GET /product/p1` (ولأي معرف حقيقي) | `200`، و`<title>` يحمل اسم المنتج وسعره، و`rel="canonical"` يعود للمسار نفسه | **عطل إنتاجي حقيقي سابق**: كان `params` يُقرأ متزامنًا في Next 16 ⇒ **كل صفحات المنتجات 404**. تأكد أن النشر يحمل الإصلاح (`await params`) |
+| 16 | `GET /product/<معرف غير موجود>` | `404` (لا صفحة 200 بمحتوى 404) ووسم `<meta name="robots" content="noindex">` **وحده** | 200 = «404 ناعم» (سببها حدّ تحميل جذري)، ووسمان متعارضان = إعلان `robots` في الـlayout |
+| 17 | `GET /robots.txt` · `GET /sitemap.xml` · `GET /manifest.webmanifest` · `GET /icon.svg` | `200` جميعها؛ الخريطة تحوي 13 رابطًا بلا `/admin` | بناء الميتاداتا الديناميكية معطّل (تحقق من مخرجات البناء في `Route (app)`) |
 
 مثال على الخطوة 4 (نفّذها **مرة واحدة** — حد المعدل 8 محاولات لكل 10 دقائق):
 
@@ -126,6 +129,15 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
 
 **الحسم:** حُذف `src/lib/db.ts` وأصبح `@/lib/db` يحل حصريًا إلى `db/index.ts` الذي يشغّل الهجرات (بما فيها `order_items` وقيودها). بعد الدمج تحقق عبر الصف 7 ثم الصفين 10–11 من الجدول أعلاه.
 
+### بوابة الواجهة الإلزامية (تمنع تراجع هذه الإصلاحات)
+
+```bash
+npm run front:check     # 22 فحصًا: الحدود الأربعة، ميتاداتا المنتج، sitemap/robots/manifest
+                        # + await params (سبب 404 المنتجات) + منع حدّ تحميل يلفّ /product/[id]
+```
+
+البوابة تعمل في `quality.yml` (بعد جرد المسارات) وفي `deploy.yml` (قبل النشر)، وأي نقص يُفشل البناء برسالة عربية تحدّد الملف المفقود.
+
 يمكن أيضًا تشغيل وظيفة **Production probe** من تبويب **Actions** للحصول على نتيجة الخطوة 4 من داخل GitHub (بدون أسرار، ومحاولة واحدة لكل تشغيل).
 
 ## أدوات التحقق الجاهزة (سكربتات)
@@ -136,7 +148,7 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
 |---|---|---|
 | `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
 | `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
-| `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--chat-probe` للصف 12، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط |
+| `npm run smoke:prod` | الصفوف 1 و2 و3 و5 و6 و**15 و16 و16b و17** (صفحة منتج حقيقية، منع 404 الناعم، مسار غير موجود، ملفات robots/sitemap/manifest/icon) + رؤوس الأمان + وضع CSP + قرينة ربط قاعدة البيانات + وجود مسار التتبع، مع `<span dir="ltr">--admin-probe</span>` للصف 4، و`--chat-probe` للصف 12، و`--allow-mutations --orders-body` للصفين 10 و11، و`--track <id> --last4 <4>` للصفين 13 و14 | قراءة فقط افتراضيًا، وحاجز SSRF وشبكة عامة فقط (لا يعمل على localhost عن قصد) |
 | `npm run security:bundle` | فحص ما ينزّله المتصفح فعلاً (`.next/static`): أسماء وقيم أسرار الخادم | يُشغَّل آليًا بعد `npm run build` في `quality.yml` و`deploy.yml` |
 | `npm run routes:inventory` | جرد المسارات وبواباتها (نفس بوابة CI) | يفشل إن غاب أي مسار مطلوب |
 
@@ -145,6 +157,8 @@ curl -i -X POST https://aborof.vercel.app/api/admin/login \
 - **وضع CSP**: الرأس يُنشر افتراضيًا في وضع المراقبة (`Content-Security-Policy-Report-Only`) حتى يُفعَّل `CSP_ENFORCE=true`؛ لذلك صف الرؤوس يقبل الوضعين، وصف `csp-mode` يبيّن الوضع الفعلي، ولا يُفرض الحجب إلا مع `--require-csp-enforce` (استخدمه بعد ضبط `CSP_ENFORCE=true` وإلا فشل الفحص عمدًا).
 - **قرينة ربط قاعدة البيانات (صف `db-binding`)**: مسار Turso في `getProducts()` يمرّر مفتاح `old_price` في كل صف دائمًا (ولو `null`)، بينما الاحتياطي يعيد كائنات `SEED_PRODUCTS` كما هي. ظهور صف بلا المفتاح يعني أن الكتالوج من البذرة المحلية ⇒ على الأرجح `TURSO_DATABASE_URL` غير مضبوط في Vercel، وعندها يفشل أي طلب حقيقي بـ `503 «قاعدة البيانات غير مربوطة»` (الصفان 10 و11). القرينة **ليست إثباتًا**: إثبات الاتصال هو الصفوف 7–9 (`npm run verify:turso`). التنازل الصريح عن القرينة: `--allow-seed-fallback`.
 - **`503` في الصف 4**: الرسالة تسمّي المتغير الناقص بدقة على Vercel؛ و`401` تعني أن اللوحة مهيأة فعلًا.
+- **الصف 15 (`/product/<id>`)**: فشله بـ`404` يعني عودة العطل الإنتاجي «`params` غير مُنتظر» (Next 16 يجعل `params` وعدًا) — الإصلاح والبوابتان في `src/app/product/[id]/page.tsx` و`npm run front:check`.
+- **الصف 16**: `200` بدل `404` = «404 ناعم» يسبّبه أي `loading.tsx` في جذر `src/app/`؛ ووسم `index, follow` بجانب `noindex` = إعلان `robots` صريح في الـlayout.
 
 تفاصيل الاستخدام والتشخيص في [`handoff/deploy-activation-runbook.md`](handoff/deploy-activation-runbook.md)، وسجل آخر تحقق حيّ في [`handoff/post-deploy-verification.md`](handoff/post-deploy-verification.md).
 

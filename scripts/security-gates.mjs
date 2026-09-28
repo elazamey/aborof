@@ -9,7 +9,9 @@
  *  3. كل مسارات API تُغلَّف بـ apiHandler الموحّد.
  *  4. عزل العميل/الخادم: مكوّن عميل لا يستورد وحدة خادم فقط (auth/db/secrets/orders/rate-limit).
  *  5. لا تُطبع متغيرات البيئة الحساسة مباشرة في السجلات.
- *  6. أسطول الوكلاء (المرحلة الرابعة): الكتالوج بيانات لا سلوك — لا استيراد وحدات
+ *  6. ثوابت CSP: لا مصدر خارجي للخطوط أو السكربتات، و`frame-ancestors 'none'` قائمة،
+ *     و`connect-src 'self'` أساسه — أي توسيع يحتاج تذكرة أمنية صريحة.
+ *  7. أسطول الوكلاء (المرحلة الرابعة): الكتالوج بيانات لا سلوك — لا استيراد وحدات
  *     بيانات (db/orders/auth)، ولا أدوات خارج قائمة القراءة فقط المجمّدة هنا.
  */
 import fs from "node:fs";
@@ -129,6 +131,64 @@ for (const file of files) {
   if (/console\.(log|error|warn)\([^)]*process\.env\./.test(src) &&
       /SECRET|PASSWORD|TOKEN|KEY/.test(src.match(/console\.(log|error|warn)\([^)]*process\.env\.([A-Z_]+)/)?.[1] ?? "")) {
     problems.push(`${rel}: لا تطبع قيم البيئة الحساسة في السجلات.`);
+  }
+}
+
+/**
+ * ثوابت CSP — تُقرأ من وحدة السياسة نفسها (لا من نسخة نصية تتقادم)، وتُفرض
+ * على وضعي الحجب والمراقبة معًا. أي إضافة مصدر خارجي للخطوط أو السكربتات،
+ * أو إضعاف frame-ancestors، تُفشل البوابة في CI.
+ */
+const CSP_INVARIANTS = [
+  { directive: "font-src", rule: "self-data-only", why: "الخطوط تُستضاف محليًا أو تكون خطوط نظام — لا Google Fonts" },
+  { directive: "script-src", rule: "no-external-origin", why: "لا سكربتات طرف ثالث بلا تذكرة أمنية" },
+  { directive: "frame-ancestors", rule: "must-be-none", why: "منع التأطير (clickjacking) غير قابل للتفاوض" },
+  { directive: "object-src", rule: "must-be-none", why: "منع تضمين كائنات قابلة للتنفيذ" },
+  { directive: "base-uri", rule: "self-data-only", why: "منع اختطاف المسارات النسبية" },
+  { directive: "connect-src", rule: "self-present", why: "أي مصدر خارجي في connect-src يجب أن يكون مقصودًا ومراجعًا" },
+];
+
+function directiveSources(policy, directive) {
+  const part = policy
+    .split(";")
+    .map((p) => p.trim())
+    .find((p) => p.startsWith(directive + " "));
+  if (!part) return null;
+  return part.slice(directive.length).trim().split(/\s+/).filter(Boolean);
+}
+
+const isExternalOrigin = (source) => /^https?:\/\//.test(source) || source.startsWith("//");
+
+const headersFile = path.join(root, "src", "lib", "security", "headers.ts");
+if (fs.existsSync(headersFile)) {
+  const headersSource = fs.readFileSync(headersFile, "utf8");
+  const literal = headersSource.match(/const directives = \[([\s\S]*?)\];/);
+  if (!literal) {
+    problems.push("src/lib/security/headers.ts: تعذّر قراءة قائمة توجيهات CSP للفحص.");
+  } else {
+    // السلاسل بعلامات مزدوجة فقط، لأن القيم نفسها تحوي علامات مفردة مثل 'self'.
+    // (استخراج بالعلامات المزدوجة حول مصدر واحد كان يبتلع النصف قبل 'self'.)
+    const policy = [...literal[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]).join("; ");
+    for (const invariant of CSP_INVARIANTS) {
+      const sources = directiveSources(policy, invariant.directive);
+      if (!sources) {
+        problems.push(`CSP: التوجيه ${invariant.directive} غائب — ${invariant.why}`);
+        continue;
+      }
+      const external = sources.filter(isExternalOrigin);
+      if (invariant.rule === "must-be-none" && sources.join(" ") !== "'none'") {
+        problems.push(`CSP: ${invariant.directive} يجب أن يكون 'none' — ${invariant.why}`);
+      }
+      if (invariant.rule === "self-data-only" && external.length > 0) {
+        problems.push(`CSP: ${invariant.directive} يحتوي مصادر خارجية (${external.join(", ")}) — ${invariant.why}`);
+      }
+      if (invariant.rule === "no-external-origin" && external.length > 0) {
+        problems.push(`CSP: ${invariant.directive} يحتوي مصادر خارجية (${external.join(", ")}) — ${invariant.why}`);
+      }
+      if (invariant.rule === "self-present" && !sources.includes("'self'")) {
+        problems.push(`CSP: ${invariant.directive} يجب أن يحوي 'self' — ${invariant.why}`);
+      }
+    }
   }
 }
 

@@ -28,7 +28,7 @@
 2. **عزل العميل/الخادم مفروض ببوابة CI**: مكوّن `"use client"` لا يجوز أن يستورد `@/lib/auth|secrets|db|orders|rate-limit` — الفحص يفشل البناء (`npm run security:gates`).
 3. **`npm audit --audit-level=high` يحجب النشر** ⇒ أي مكتبة واجهة جديدة تدخل عبر بوابة تدقيق، لا بحرية.
 4. **`npm run security:bundle`** يفحص الحزمة بعد البناء: لا أسماء ولا قيم أسرار — يمنع تمرير بيانات خادمية إلى مكوّن عميل.
-5. **لا اختبارات DOM/E2E** حاليًا: كل الـ198 اختبارًا خادمية/منطقية. أي تطوير واجهة **بلا شبكة أمان آلية** اليوم.
+5. **لا اختبارات DOM/E2E** حاليًا: كل الـ220 اختبارًا خادمية/منطقية. أي تطوير واجهة **بلا شبكة أمان آلية** اليوم.
 
 ## 3) الفجوات المرصودة (بالدليل، لا بالرأي)
 
@@ -43,10 +43,33 @@
 | لا قياس أداء أمامي | لا Web Vitals ولا ميزانية أداء في CI | لا يُكتشف انحدار الأداء إلا بشكوى |
 | صور/خطوط بلا تحسين | `globals.css` بلا `@font-face`، ولا تحسين صور | مفقود عند إضافة صور حقيقية |
 
+## 3.5) خطآن إنتاجيان حقيقيان اكتُشفا أثناء تنفيذ المرحلة 1 (بالدليل)
+
+التحقق قبل التسليم كشف عطلين حيّين على `https://aborof.vercel.app` لم يُرصدهما أي اختبار قائم، وكلاهما صُلح واحتُجز ببوابة/اختبار يمنع عودته.
+
+| # | العطل | الدليل على الإنتاج | السبب الجذري | الإصلاح | الحاجز |
+|---|---|---|---|---|---|
+| 1 | **كل صفحات المنتجات 404** — `/product/p1` تُرجع صفحة 404 رغم أن روابط المنتجات منشورة في الرئيسية و`/api/products` يعيد 12 منتجًا | `fetch_page` لـ`https://aborof.vercel.app/product/p1` ⇒ `404: This page could not be found.` بينما عنوان الصفحة الرئيسية «روفيده…» وروابطها `/product/p1` تعمل | Next.js 16 يجعل `params` **وعدًا (Promise)**؛ القراءة المتزامنة `params.id` تعطي `undefined` ⇒ `getProduct(undefined)` = `null` ⇒ `notFound()` | `type Props = { params: Promise<{ id: string }> }` + `await params` في الصفحة وفي `generateMetadata` | `front:check`: `product-params-awaited` + `product-params-promise` (فحصان) واختبار `params تُقرأ بـawait كوعد` |
+| 2 | **404 ناعم** — المنتج غير الموجود يعطي 200 + محتوى 404 (خطأ SEO: «Soft 404») | تحقق محلي مقارن: `/product/ghost-999` = **200** مع حدّ تحميل جذري، و**404** بعد نقله إلى `(home)` | `loading.tsx` في الجذر يفتح حدّ بثّ يبدأ الردّ بحالة 200 قبل حسم وجود المنتج، فلا يمكن تعديل الرمز لاحقًا | نقل حدّ التحميل إلى `src/app/(home)/loading.tsx` + رفع `notFound()` إلى `generateMetadata` (يُحلّ قبل البثّ) | `front:check`: `loading-home` + `no-loading-boundary-over-product` واختباران |
+| 3 | **وسوم robots متضاربة** — صفحة 404 تحمل `noindex` **و** `index, follow` معًا | `curl` محلي للصفحة 404 ⇒ وسمان: `<meta name="robots" content="noindex"/>` و`<meta name="robots" content="index, follow"/>` | `robots: { index: true, follow: true }` صريحًا في `layout.tsx`، وهو يورَّث إلى صفحات 404 التي يضيف لها Next `noindex` | حذف إعلان `robots` من الـlayout (الافتراضي «قابل للفهرسة» بلا وسم متعارض) | اختبار `الـlayout لا يعلن robots صريحًا` |
+
+**مصفوفة التحقق المحلية بعد الإصلاح** (`next build && next start`، 11 مسارًا):
+
+```
+/                     200      /product/p1        200  (عنوان + سعر + canonical)
+/cart                 200      /product/p12       200
+/admin                200      /product/ghost-999 404  ← كان 200 (404 ناعم)
+/robots.txt           200      /page-غير-موجود   404
+/sitemap.xml          200      /manifest.webmanifest  200      /icon.svg  200
+```
+
+`/sitemap.xml` يعيد 13 رابطًا (الرئيسية + 12 منتجًا) بلا `/admin`، و`/robots.txt` يحجب `/admin` و`/api/` و`/cart` ويشير إلى الخريطة.
+
 ## 4) خطة التطوير — أربع مراحل مرتّبة بالأثر
 
 ### المرحلة 1: صمود الوجه (2–4 ساعات، بلا أي اعتمادية جديدة) — **أعلى أثر/أقل مخاطرة**
-- `src/app/loading.tsx` + `error.tsx` + `not-found.tsx` + `global-error.tsx` بأسلوب الموقع نفسه.
+- `src/app/(home)/loading.tsx` + `error.tsx` + `not-found.tsx` + `global-error.tsx` بأسلوب الموقع نفسه.
+  - ⚠️ **حدّ التحميل محصور في مجموعة `(home)` عن قصد:** أي `loading.tsx` في جذر `src/app/` يبدأ بثّ الردّ بحالة 200 قبل حسم وجود المنتج، فيتحول `notFound()` في `/product/[id]` إلى «404 ناعم» (200 + محتوى 404). مُثبت محليًا: مع حدّ جذري ⇒ 200، وبدونه ⇒ 404. وبوابة `front:check` تمنع عودة حدّ التحميل فوق مسار المنتج.
 - `generateMetadata` لصفحة المنتج (اسم المنتج + الوصف + صورة المشاركة) — أكبر مكسب SEO بلا مكتبات.
 - `sitemap.ts` و`robots.ts` (ديناميكيان من نفس مصدر المنتجات).
 - `manifest.ts` (PWA أساسي: اسم، أيقونة، `theme_color`, `display: standalone`).
@@ -117,6 +140,6 @@ npm run security:bundle       # لا أسرار في ما ينزّله المت�
 
 ## 7) أول ثلاث مهام جاهزة للتنفيذ
 
-1. **PR «صمود»**: `loading/error/not-found/global-error` + `generateMetadata` للمنتج + `sitemap/robots/manifest` — بلا تبعيات، أثر فوري على SEO والثقة.
+1. **PR «صمود»**: مُنفَّذ في هذا الفرع — `loading/error/not-found/global-error` + `generateMetadata` للمنتج + `sitemap/robots/manifest`، ومعها إصلاحا العطلين الإنتاجيين أعلاه وبوابات CI جديدة (22 فحصًا).
 2. **PR «تحويل»**: شريط الشحن المجاني + تحقق النموذج العربي + زر واتساب ثابت للموبايل.
 3. **PR «قياس»**: ميزانية حجم الحزمة في CI + تسجيل Web Vitals داخلي (بلا مزود خارجي).

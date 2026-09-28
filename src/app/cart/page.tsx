@@ -5,6 +5,10 @@ import { useCart } from "@/lib/cart";
 import { STORE } from "@/lib/seed";
 import { GOVERNORATES, calculateShipping, SHIPPING_RATES } from "@/lib/shipping";
 
+/**
+ * ملاحظة: `metadata` لا تعمل في مكوّن عميل — لذلك تبقى الفهرسة محجوبة من
+ * `robots.ts`، وهذا التصدير موثّق هنا بدل تصدير ميتاداتا لا أثر لها.
+ */
 export default function CartPage() {
   const { items, subtotal, setQty, remove, clear } = useCart();
   const [form, setForm] = useState({ customer: "", phone: "", governorate: "القاهرة", address: "", note: "", payment: "vodafone_cash", transferRef: "" });
