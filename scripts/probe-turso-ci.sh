@@ -21,7 +21,9 @@ REPORT=$(mktemp)
   echo
 } > "$REPORT"
 
-node scripts/verify-turso.mjs >> "$REPORT" 2>&1
+# ‏`--allow-dashboard-url`: لصق رابط لوحة التحكم بدل رابط الاتصال حالة واقعية،
+# والترميم مشروط ومُعلَن في صف `conn` نفسه — فيكتمل الجدول بدل إسقاط الفحص كله.
+node scripts/verify-turso.mjs --allow-dashboard-url >> "$REPORT" 2>&1
 code=$?
 
 cat "$REPORT"

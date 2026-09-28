@@ -8,7 +8,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { runMigrations, MIGRATIONS } from "../src/lib/db/migrate";
 import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/migration-checksums.mjs";
-import { describeDatabaseUrl, originForHttpProbe } from "../scripts/lib/db-url.mjs";
+import {
+  dashboardUrlToConnectionCandidates,
+  describeDatabaseUrl,
+  originForHttpProbe,
+} from "../scripts/lib/db-url.mjs";
 import {
   isSafeBaseUrl,
   classifySecurityHeaders,
@@ -84,6 +88,23 @@ describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كش�
     assert.equal(originForHttpProbe("libsql://store-abc.turso.io?authToken=SECRET-123"), "https://store-abc.turso.io");
     assert.equal(originForHttpProbe("wss://store-abc.turso.io/v2"), "https://store-abc.turso.io");
     assert.equal(originForHttpProbe("file:/tmp/local.db"), null);
+  });
+
+  test("اشتقاق رابط الاتصال من رابط لوحة التحكم (libsql://<db>-<org>.turso.io)", () => {
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/databases/aborof"), [
+      "libsql://aborof-elazamey.turso.io",
+      "libsql://elazamey-aborof.turso.io",
+    ]);
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/db/store"), [
+      "libsql://store-elazamey.turso.io",
+      "libsql://elazamey-store.turso.io",
+    ]);
+  });
+
+  test("الاشتقاق لا يعمل إلا على نطاق اللوحة — رابط اتصال سليم أو نطاق آخر لا يُمس", () => {
+    assert.deepEqual(dashboardUrlToConnectionCandidates("libsql://aborof-elazamey.turso.io"), []);
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://aborof.vercel.app/elazamey/databases/aborof"), []);
+    assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/databases"), []);
   });
 
   test("المضيف يُقنَّع: لا يُطبع كاملًا مع أن آخره يكفي للتعرّف", () => {

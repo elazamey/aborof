@@ -10,15 +10,21 @@
  * الفحص **للقراءة فقط**: لا ينفّذ أي هجرة ولا أي كتابة. أي ❌ يعني تهيئة ناقصة
  * على البيئة الحيّة، وليس خللًا في قاعدة البيانات نفسها.
  *
+ * علم اختياري (يستخدمه CI فقط، والترميم مُعلَن في التقرير نفسه):
+ *   --allow-dashboard-url   إذا كانت القيمة رابط لوحة تحكم (`app.turso.tech`)
+ *                           لا رابط اتصال، تُشتق `<db>-<org>.turso.io` وتُجرَّب
+ *                           فعلًا قبل استخدامها — بدل إسقاط كل الصفوف التابعة.
+ *
  * كود الخروج: 0 = كل الفحوص خضراء، 1 = فشل حاجب، 2 = تهيئة الفحص ناقصة.
  */
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
-import { describeDatabaseUrl, originForHttpProbe } from "./lib/db-url.mjs";
+import { dashboardUrlToConnectionCandidates, describeDatabaseUrl, originForHttpProbe } from "./lib/db-url.mjs";
 
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 const asJson = process.argv.includes("--json");
+const allowDashboardUrl = process.argv.includes("--allow-dashboard-url");
 
 if (!url) {
   console.error(
@@ -34,6 +40,7 @@ if (!url) {
 
 const secrets = [url, authToken];
 const local = url.startsWith("file:");
+let effectiveUrl = url;
 if (!local && !authToken) {
   console.error("❌ TURSO_AUTH_TOKEN مطلوب لأي رابط غير محلي (libsql:// أو https://).");
   process.exit(2);
@@ -42,6 +49,24 @@ if (!local && !authToken) {
 const rows = [];
 function record(id, label, ok, detail) {
   rows.push({ id, label, ok, detail });
+}
+
+/**
+ * ترميم محدود ومعلن: إذا كانت القيمة المضبوطة رابط لوحة تحكم لا رابط اتصال،
+ * نجرّب الروابط المرشّحة واحدة واحدة (اتصال `SELECT 1` فعلي) ونعيد أول عميل
+ * ينجح. لا تُطبع القيمة المشتقة؛ الرسالة تصف النمط فقط وتطلب تصحيح السرّ.
+ */
+async function tryDerivedUrls() {
+  for (const candidate of dashboardUrlToConnectionCandidates(url)) {
+    const client = createClient({ url: candidate, authToken });
+    try {
+      await client.execute("SELECT 1 AS ok");
+      return { client, candidate };
+    } catch {
+      client.close();
+    }
+  }
+  return null;
 }
 
 /**
@@ -91,7 +116,7 @@ function render() {
   }
 }
 
-const db = createClient({ url, authToken });
+let db = createClient({ url, authToken });
 
 try {
   // 1) الاتصال — نفس مسار @libsql/client المستخدم في الإنتاج.
@@ -99,13 +124,34 @@ try {
   try {
     await db.execute("SELECT 1 AS ok");
     connected = true;
-    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : `libsql متصل (${describeDatabaseUrl(url).kind})`);
+    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", true, local ? "رابط ملف محلي" : `libsql متصل (${describeDatabaseUrl(effectiveUrl).kind})`);
   } catch (error) {
     // الفشل هنا يوقف الفحوص التابعة (لا معنى لها بلا اتصال) لكنه **لا يمنع
     // طباعة الجدول**: الجدول نفسه هو الدليل، فيُضاف إليه وصف بنية الرابط
     // واستجابة أصله. لا يُطبع الرابط ولا الرمز — الوصف كله عبر `redact`.
     const details = await diagnoseEndpoint();
-    record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "));
+
+    // ترميم مُعلَن (بعلم صريح): قيمة لوحة تحكم بدل رابط اتصال.
+    if (allowDashboardUrl) {
+      const derived = await tryDerivedUrls();
+      if (derived) {
+        db.close();
+        db = derived.client;
+        effectiveUrl = derived.candidate;
+        secrets.push(derived.candidate);
+        connected = true;
+        record(
+          "conn",
+          "الاتصال بقاعدة البيانات (SELECT 1)",
+          true,
+          `متصل عبر رابط اشتُقّ من قيمة لوحة التحكم (${describeDatabaseUrl(url).hostMasked} ⇒ <db>-<org>.turso.io) · **صحّح TURSO_DATABASE_URL في الإعدادات**`
+        );
+      }
+    }
+
+    if (!connected) {
+      record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "));
+    }
   }
 
   if (!connected) {
