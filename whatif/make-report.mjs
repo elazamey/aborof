@@ -379,6 +379,15 @@ cd ~/aborof && node whatif/run-whatif.mjs && node whatif/make-report.mjs
 
 # إعادة إنتاج D-1 بمفردها
 cd ~/aborof && node --import tsx whatif/repro-auth-cookie.mjs
+
+# بعد المختبر: إعادة القاعدة إلى حالة البذرة (انظر ملاحظة 12)
+cd ~/aborof && npm run db:reset            # فحص جاف — يعرض الانحراف فقط
+cd ~/aborof && npm run db:reset -- --apply # التنفيذ
+
+# بوابات المشروع نفسها (انظر ملاحظة 11)
+cd ~/aborof && npm run lint && npm run typecheck && npm test && npm run build
+cd ~/aborof && npm run routes:inventory && npm run security:gates
+cd ~/aborof && npm run smoke:prod          # على النسخة المنشورة فقط — انظر ملاحظة 11
 \`\`\`
 
 الملفات:
