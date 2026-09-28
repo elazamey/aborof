@@ -24,12 +24,15 @@ import {
   describeDatabaseUrl,
   interpretProbeStatus,
   originForHttpProbe,
+  parseAuthValue,
 } from "./lib/db-url.mjs";
 
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 const asJson = process.argv.includes("--json");
-const allowDashboardUrl = process.argv.includes("--allow-dashboard-url");
+// ترميم الإعدادات (رابط لوحة تحكم بدل رابط اتصال، أو رابط في حقل الرمز) — بعلم صريح.
+const allowDashboardUrl =
+  process.argv.includes("--allow-dashboard-url") || process.argv.includes("--allow-secret-repair");
 
 if (!url) {
   console.error(
@@ -76,7 +79,7 @@ function classifyConnectionError(error) {
  * مختلفان تمامًا يخفي `@libsql/client` كليهما وراء رسالة SERVER_ERROR واحدة.
  * لا يُطبع الرد؛ فقط رمز الحالة والحكم المُترجَم منه.
  */
-async function probeHttpEndpoint(candidateUrl) {
+async function probeHttpEndpoint(candidateUrl, token) {
   const origin = originForHttpProbe(candidateUrl);
   if (!origin) return { ok: false, verdict: "رابط غير قابل للفحص عبر HTTP" };
   try {
@@ -84,7 +87,7 @@ async function probeHttpEndpoint(candidateUrl) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({
         requests: [{ type: "execute", stmt: { sql: "SELECT 1 AS ok" } }, { type: "close" }],
@@ -99,58 +102,51 @@ async function probeHttpEndpoint(candidateUrl) {
 }
 
 async function attemptDerivedConnection() {
-  const candidates = dashboardUrlToConnectionCandidates(url);
-  if (candidates.length === 0) {
-    return { client: null, candidate: null, note: "لا يمكن اشتقاق رابط اتصال من هذه القيمة (بنية مسار غير معروفة) — انسخ الرابط من زر Connect في لوحة Turso" };
+  const authParts = parseAuthValue(authToken);
+
+  // أزواج (رابط، رمز) مرتّبة من الأرجح إلى الأقل: الزوج المتسق المستخرج من قيمة
+  // حقل الرمز أولًا (فهو خطأ اللصق الأكثر شيوعًا)، ثم اشتقاق مسار اللوحة مع كل رمز.
+  const pairs = [];
+  const add = (candidateUrl, token, label) => {
+    if (!candidateUrl) return;
+    const key = `${candidateUrl}\u0000${token ?? ""}`;
+    if (pairs.some((p) => p.key === key)) return;
+    pairs.push({ key, candidateUrl, token, label });
+  };
+  if (authParts.url && authParts.token) add(authParts.url, authParts.token, "زوج مستخرج من قيمة حقل الرمز");
+  for (const candidateUrl of dashboardUrlToConnectionCandidates(url)) {
+    if (authParts.token) add(candidateUrl, authParts.token, "رابط مشتق من مسار اللوحة + رمز مستخرج من حقل الرمز");
+    add(candidateUrl, authToken, "رابط مشتق من مسار اللوحة + الرمز المضبوط");
   }
+  if (authParts.url) add(authParts.url, authToken, "رابط مستخرج من حقل الرمز + الرمز المضبوط");
+
+  if (pairs.length === 0) {
+    return { client: null, note: "لا يمكن اشتقاق رابط اتصال من هذه القيمة (بنية مسار غير معروفة) — انسخ الرابط من زر Connect في لوحة Turso" };
+  }
+
   const failures = [];
-  for (const candidate of candidates) {
+  for (const pair of pairs) {
     // 1) الفحص الخام أولًا ليُعرف السبب (لا قاعدة / رمز) لا مجرد «فشل اتصال».
-    const verdict = await probeHttpEndpoint(candidate);
+    const verdict = await probeHttpEndpoint(pair.candidateUrl, pair.token);
     if (!verdict.ok) {
-      failures.push(verdict.verdict);
+      failures.push(`${pair.label}: ${verdict.verdict}`);
       continue;
     }
-    // 2) ثم المسار الحقيقي: نفس عميل التطبيق على نفس الرابط.
-    const client = createClient({ url: candidate, authToken });
+    // 2) ثم المسار الحقيقي: نفس عميل التطبيق على نفس الزوج.
+    const client = createClient({ url: pair.candidateUrl, authToken: pair.token });
     try {
       await client.execute("SELECT 1 AS ok");
-      return { client, candidate, note: "" };
+      return { client, candidateUrl: pair.candidateUrl, token: pair.token, label: pair.label, note: "" };
     } catch (error) {
-      const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, candidate]);
-      failures.push(`المسار الخام نجح وعميل libsql فشل: ${raw}`);
+      const raw = redact(String(error?.message ?? error).slice(0, 120), [...secrets, pair.candidateUrl, pair.token]);
+      failures.push(`${pair.label}: المسار الخام نجح وعميل libsql فشل — ${raw}`);
       client.close();
     }
   }
   return {
     client: null,
-    candidate: null,
-    note: `جُرّب ${failures.length} رابطًا مشتقًا على نمط <db>-<org>.turso.io: ${failures.map((f, i) => `${i + 1}) ${f}`).join(" · ")}`,
+    note: `جُرّبت ${pairs.length} تركيبة على نمط <db>-<org>.turso.io: ${failures.map((f, i) => `${i + 1}) ${f}`).join(" · ")}`,
   };
-}
-
-/**
- * وصف آمن لبنية الرابط عند فشل الاتصال — بلا قيمة الرابط وبلا رمزه.
- * (نص خطأ @libsql/client نفسه، مثل `Unexpected token '<'`، يقول إن المضيف رد
- * HTML لا JSON؛ وهذا عرض مختلف تمامًا عن «رمز غير صالح» أو «شبكة محجوبة».)
- */
-async function diagnoseEndpoint() {
-  const shape = describeDatabaseUrl(url);
-  const parts = [
-    `بنية الرابط: ${shape.scheme} · ${shape.kind} · المضيف ${shape.hostMasked} (طول ${shape.hostLength}) · مقاطع المسار ${shape.pathShape} · طول الرابط ${shape.length}` +
-      (shape.hasPlaceholder ? " · يحتوي علامة موضع (<…> أو ... أو xx) فهو قيمة موضعية لا رابط حقيقي" : ""),
-  ];
-  const origin = originForHttpProbe(url);
-  if (!origin) return parts;
-  const guard = [...secrets, origin];
-  try {
-    const res = await fetch(origin, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(10_000) });
-    const body = redact(String(await res.text()).slice(0, 160).replace(/\s+/g, " ").trim(), guard);
-    parts.push(`استجابة أصل الرابط: HTTP ${res.status} · content-type: ${res.headers.get("content-type") ?? "—"} · body: ${body || "—"}`);
-  } catch (e) {
-    parts.push(`تعذّر الوصول إلى أصل الرابط: ${redact(String(e?.message ?? e), guard)}`);
-  }
-  return parts;
 }
 
 /** يطبع الجدول (أو JSON) مرة واحدة — يستدعيه المسار العادي ومسار فشل الاتصال. */
@@ -194,17 +190,28 @@ try {
     // ترميم مُعلَن (بعلم صريح): قيمة لوحة تحكم بدل رابط اتصال.
     if (allowDashboardUrl) {
       const derived = await attemptDerivedConnection();
+      const authParts = parseAuthValue(authToken);
+      if (!authParts.shape.looksLikeJwt) {
+        record(
+          "conn-token-shape",
+          "صيغة قيمة TURSO_AUTH_TOKEN",
+          false,
+          authParts.shape.scheme
+            ? `ليست رمز JWT بل قيمة تبدأ بـ ${authParts.shape.scheme}:// (النقطتان في الموضع ${authParts.shape.colonOffset} من ${authParts.shape.length} حرفًا) — رابط في حقل الرمز · **انقل الرابط إلى TURSO_DATABASE_URL ورمز JWT إلى TURSO_AUTH_TOKEN**`
+            : `ليست بصيغة JWT المعتادة (طول ${authParts.shape.length}) · **أنشئ توكنًا جديدًا Full access**`
+        );
+      }
       if (derived.client) {
         db.close();
         db = derived.client;
-        effectiveUrl = derived.candidate;
-        secrets.push(derived.candidate);
+        effectiveUrl = derived.candidateUrl;
+        secrets.push(derived.candidateUrl, derived.token);
         connected = true;
         record(
           "conn",
           "الاتصال بقاعدة البيانات (SELECT 1)",
           true,
-          `متصل عبر رابط اشتُقّ من قيمة لوحة التحكم (${describeDatabaseUrl(url).hostMasked} ⇒ <db>-<org>.turso.io) · **صحّح TURSO_DATABASE_URL في الإعدادات**`
+          `متصل عبر ترميم مؤقت (${derived.label}) ⇒ القاعدة والرمز **سليمان**؛ المشكلة في مكان القيم لا في القاعدة · **صحّح TURSO_DATABASE_URL/TURSO_AUTH_TOKEN في الإعدادات لإزالة الترميم**`
         );
       } else {
         record("conn-derived", "اشتقاق رابط الاتصال من قيمة لوحة التحكم", false, derived.note);

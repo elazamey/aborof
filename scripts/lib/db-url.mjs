@@ -87,6 +87,43 @@ export function dashboardUrlToConnectionCandidates(url) {
 }
 
 /**
+ * تحليل قيمة حقل الرمز: JWT سليم، أم **رابط اتصال لُصق في مكان الرمز**
+ * (خطأ شائع: قيمة تبدأ بـ `libsql://` ثم `:` في الموضع 6 — وهي بعينها ما يشرح
+ * رسالة الخادم `JWT error: Base64 error: Invalid symbol 58, offset 6`، لأن 58
+ * هو رمز `:`).
+ *
+ * تعيد الرابط (بلا استعلام) والرمز إن وُجد داخل معامل `authToken`/`token`،
+ * مع وصف شكلي لا يحمل أي قيمة — الاستخدام الفعلي بعلم صريح فقط.
+ */
+export function parseAuthValue(value) {
+  const raw = String(value ?? "").trim();
+  const schemeMatch = raw.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  const shape = {
+    length: raw.length,
+    scheme: schemeMatch ? schemeMatch[1].toLowerCase() : null,
+    colonOffset: raw.indexOf(":"),
+    looksLikeJwt: /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/.test(raw),
+  };
+
+  let url = null;
+  let token = null;
+  if (shape.scheme) {
+    try {
+      const parsed = new URL(raw.replace(/^libsql:\/\//i, "https://").replace(/^turso:\/\//i, "https://"));
+      const scheme = shape.scheme === "https" || shape.scheme === "wss" || shape.scheme === "ws" ? "https" : "libsql";
+      url = `${scheme}://${parsed.host}`;
+      token = parsed.searchParams.get("authToken") || parsed.searchParams.get("token") || null;
+    } catch {
+      url = null;
+    }
+  } else if (shape.looksLikeJwt) {
+    token = raw;
+  }
+
+  return { url, token, shape };
+}
+
+/**
  * ترجمة رمز حالة استجابة HTTP من خادم libSQL إلى حكم سببي **قاطع**.
  * الفرق بين 404 و401 هو الفرق بين «أنشئ القاعدة» و«جدّد الرمز» — وكلاهما كان
  * يُغلف في @libsql/client برسالة واحدة (`SERVER_ERROR: Server returned HTTP

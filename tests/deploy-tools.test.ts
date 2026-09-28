@@ -13,6 +13,7 @@ import {
   describeDatabaseUrl,
   interpretProbeStatus,
   originForHttpProbe,
+  parseAuthValue,
 } from "../scripts/lib/db-url.mjs";
 import {
   isSafeBaseUrl,
@@ -106,6 +107,22 @@ describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كش�
     assert.deepEqual(dashboardUrlToConnectionCandidates("libsql://aborof-elazamey.turso.io"), []);
     assert.deepEqual(dashboardUrlToConnectionCandidates("https://aborof.vercel.app/elazamey/databases/aborof"), []);
     assert.deepEqual(dashboardUrlToConnectionCandidates("https://app.turso.tech/elazamey/databases"), []);
+  });
+
+  test("قيمة حقل الرمز: JWT سليم، أم رابط اتصال لُصق في مكان الرمز (خطأ اللصق الشائع)", () => {
+    const pasted = parseAuthValue("libsql://aborof-elazamey.turso.io?authToken=eyJhbGciOiJIUzI1NiJ9.abc.def");
+    assert.equal(pasted.shape.scheme, "libsql");
+    assert.equal(pasted.shape.colonOffset, 6); // 58 = ':' ⇒ نفس ما يشرح رسالة الخادم
+    assert.equal(pasted.url, "libsql://aborof-elazamey.turso.io");
+    assert.equal(pasted.token, "eyJhbGciOiJIUzI1NiJ9.abc.def");
+
+    const jwt = parseAuthValue("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.sig");
+    assert.equal(jwt.shape.looksLikeJwt, true);
+    assert.equal(jwt.token, jwt.shape.looksLikeJwt ? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.sig" : null);
+
+    const bare = parseAuthValue("libsql://aborof-elazamey.turso.io");
+    assert.equal(bare.url, "libsql://aborof-elazamey.turso.io");
+    assert.equal(bare.token, null);
   });
 
   test("ترجمة رمز الحالة تفصل بين «لا قاعدة» و«رمز مرفوض» — وهما علاجان مختلفان", () => {
