@@ -49,7 +49,12 @@ export async function runToolLoop(opts: {
 }): Promise<ToolLoopResult> {
   const { provider, messages, options, registry } = opts;
 
-  const definitions = registry.listTools();
+  // تضييق اختياري لقائمة الأدوات (أسطول الوكلاء): تقاطع مع المرئي في السجل فقط —
+  // لا يمكن لأي قائمة معلنة أن تُظهر أداة محجوبة أو توسّع صلاحية. غيابها = السلوك القديم.
+  const allowlist = options?.allowedTools ? new Set(options.allowedTools) : null;
+  const definitions = registry
+    .listTools()
+    .filter((definition) => !allowlist || allowlist.has(definition.name));
   if (definitions.length === 0) return { reply: "", toolCalls: 0, structured: [] };
 
   const tools = definitions.map(toToolDefinition);

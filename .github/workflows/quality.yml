@@ -56,12 +56,26 @@ jobs:
       - name: Route inventory and coverage
         run: npm run routes:inventory
 
+      # بوابة الواجهة: حدود الخطأ والتحميل و404 وميتاداتا المنتج وsitemap/robots
+      # — حذف أي منها يترك المستخدم أمام صفحة بيضاء أو منتجًا غير مفهرس.
+      - name: Frontend mandatory files
+        run: npm run front:check
+
+      # مانيفست الأسطول المولَّد يجب أن يطابق الكود — لا مصدرَي حقيقة متفرّقين.
+      - name: Agent manifest in sync
+        run: npm run agents:check
+
       # الاختبارات إلزامية: لا --if-present، أي فشل يوقف الـ Pipeline.
       - name: Unit and integration tests
         run: npm test
 
       - name: Production build
         run: npm run build
+
+      # الفحص الوحيد الذي يقرأ الأثر الذي ينزّله المتصفح فعلاً: أسماء وقيم أسرار
+      # الخادم يجب ألا تظهر أبدًا في .next/static (حاجز تسريب حزمة العميل).
+      - name: Client bundle secret scan
+        run: npm run security:bundle
 
       # حفظ نتائج البناء كأثر للمراجعة والربط مع الـ SHA.
       - name: Upload build summary artifact

@@ -1,4 +1,7 @@
+/* خط النظام العربي: لا طلبات شبكية إطلاقًا، متوافق مع font-src 'self' data:.
+   الترتيب مقصود: خطوط ويندوز ثم ماك ثم أندرويد ثم لينكس. */
 :root {
+  --font-ar: "Segoe UI", "Noto Naskh Arabic", "Noto Sans Arabic", "Geeza Pro", Tahoma, Arial, sans-serif;
   --green: #0f7a4d;
   --green-d: #0b5c3a;
   --green-l: #e8f6ef;
@@ -18,7 +21,7 @@
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: "Segoe UI", Tahoma, "Cairo", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ar);
   background: var(--bg);
   color: var(--ink);
   direction: rtl;
@@ -230,6 +233,7 @@ button, input, textarea, select { font-family: inherit; font-size: 1rem; }
 .chat-quick-alt { font-size: .78rem; padding: 6px 11px; border-radius: 999px; border: 1px dashed #bfe3d3; background: #f2fbf6; color: var(--green-d); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .chat-cards { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .chat-cards-tag { font-size: .72rem; color: var(--muted); }
+.chat-agent-tag { font-size: .72rem; color: var(--muted); margin-bottom: .25rem; }
 .chat-card { display: flex; align-items: center; gap: 8px; border: 1px solid #ece7f8; border-radius: 12px; padding: 8px; background: #fdfcff; }
 .chat-card-img { width: 38px; height: 38px; border-radius: 10px; background: #f3eefe; display: grid; place-items: center; font-size: 1.2rem; flex: none; }
 .chat-card-info { flex: 1; min-width: 0; }
@@ -318,4 +322,37 @@ th { background: var(--green-l); color: var(--green-d); }
   .catalog-toolbar { align-items: stretch; flex-direction: column; }
   .sort-select { width: 100%; }
   .admin-shell { min-height: 60vh; }
+}
+
+/* ---------------------------------------------------------------------------
+   حالات الواجهة: تحميل · خطأ · 404  (المرحلة الأولى من خطة تطوير الواجهة)
+   --------------------------------------------------------------------------- */
+.state-card {
+  max-width: 620px;
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 34px 24px;
+  text-align: center;
+}
+.state-emoji { font-size: 2.6rem; line-height: 1; margin-bottom: 10px; }
+.state-title { font-size: 1.25rem; margin: 0 0 8px; }
+.state-hint { color: var(--muted); line-height: 1.9; margin: 0 0 14px; }
+.state-code { color: var(--muted); font-size: .82rem; margin: 0 0 14px; word-break: break-all; }
+.state-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.state-spinner {
+  display: inline-block;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 12px;
+  border: 3px solid var(--green-l);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: state-spin .8s linear infinite;
+}
+@keyframes state-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .state-spinner { animation: none; }
 }

@@ -20,6 +20,34 @@ export {
   resolveNimBaseUrl,
 } from "./providers/nvidia-nim";
 export { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
+// المرحلة الرابعة: أسطول وكلاء المتجر (إضافة تصريحية، معطّلة افتراضيًا).
+export {
+  AGENT_FLEET,
+  AGENT_FLEET_SIZE,
+  FLEET_DEPARTMENT_PRIORITY,
+  FLEET_PROMPT_BUDGET,
+  LOW_CONFIDENCE_THRESHOLD,
+  READ_ONLY_TOOL_NAMES,
+  disabledAgentIds,
+  effectiveFleet,
+  fleetAuditRecord,
+  fleetCatalogManifest,
+  fleetPromptSection,
+  fleetResponseMeta,
+  fleetSnapshot,
+  fleetToolAllowlist,
+  getAgentById,
+  getDefaultAgent,
+  isAgentDisabled,
+  isAgentFleetActive,
+  isAgentFleetEnabled,
+  isFleetWildcardDisabled,
+  isLowConfidence,
+  selectAgents,
+  selectionSummary,
+  validateFleet,
+} from "./agents";
+export type { AgentDepartment, AgentSelection, FleetResponseMeta, StoreAgent } from "./agents";
 export { MAX_PRODUCT_CARDS, extractProductCards } from "./cards";
 export { runToolLoop } from "./tools/run-tool-loop";
 export { openAiCompatibleChat } from "./tools/openai-compatible";

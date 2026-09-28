@@ -3,6 +3,8 @@
 الفرع: `arena/01a0b342-aborof` — نقطة الانطلاق: `7b4a506` (main).
 التاريخ: 2026-09-18. المرجع: [`DEPLOYMENT.md`](../DEPLOYMENT.md) و[`docs/security/03-ci-deployment-verification.md`](../docs/security/03-ci-deployment-verification.md).
 
+> 🔄 **تحديث 2026-09-28:** الموقع صار حيًّا على `https://aborof.vercel.app`، والنشر الآلي متوقف بسبب رمز `VERCEL_TOKEN` ملغى (`404: User not found`)، وقاعدة الإنتاج تعمل من البذرة المحلية (Turso غير مربوطة) فيفشل إنشاء الطلبات بـ `503`. سجل التحقق الحيّ والأوامر المصحّحة: [`post-deploy-verification.md`](./post-deploy-verification.md).
+
 ---
 
 ## أ) تحديث الحالة بعد دمج PR #11 (2026-09-18 06:57Z)

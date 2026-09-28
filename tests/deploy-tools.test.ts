@@ -8,7 +8,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { runMigrations, MIGRATIONS } from "../src/lib/db/migrate";
 import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/migration-checksums.mjs";
-import { isSafeBaseUrl } from "../scripts/smoke-production.mjs";
+import {
+  isSafeBaseUrl,
+  classifySecurityHeaders,
+  looksLikeSeedFallback,
+  frontPageFindings,
+  BASELINE_SECURITY_HEADERS,
+} from "../scripts/smoke-production.mjs";
+import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
+import { setDbClientForTest } from "../src/lib/db";
+import { SEED_PRODUCTS } from "../src/lib/seed";
 
 /**
  * أدوات تحقق النشر (scripts/) أدلة تشغيلية؛ نحميها باختبارات حتى لا تتقادم
@@ -81,6 +90,185 @@ describe("scripts/smoke-production — حاجز النطاقات (SSRF)", () => 
     ]) {
       assert.equal(isSafeBaseUrl(bad), false, `كان يجب رفض: ${bad}`);
     }
+  });
+});
+
+describe("scripts/smoke-production — رؤوس الأمان ووضع CSP", () => {
+  const baseline: Record<string, string> = {
+    "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "strict-origin-when-cross-origin",
+  };
+  const headersOf = (map: Record<string, string>) => ({
+    get: (name: string) => map[name.toLowerCase()] ?? null,
+  });
+
+  test("وضع المراقبة (الافتراضي في الإنتاج) لا يُحسب رأس CSP ناقصًا — كان فشلًا كاذبًا", () => {
+    const result = classifySecurityHeaders(
+      headersOf({ ...baseline, "content-security-policy-report-only": "default-src 'self'" })
+    );
+    assert.equal(result.cspMode, "report-only");
+    assert.deepEqual(result.missing, []);
+    assert.equal(result.ok, true);
+  });
+
+  test("وضع الحجب يُصنَّف enforce", () => {
+    const result = classifySecurityHeaders(
+      headersOf({ ...baseline, "content-security-policy": "default-src 'self'" })
+    );
+    assert.equal(result.cspMode, "enforce");
+    assert.equal(result.ok, true);
+  });
+
+  test("غياب CSP تمامًا يُذكر باسمه في الناقص", () => {
+    const result = classifySecurityHeaders(headersOf(baseline));
+    assert.equal(result.cspMode, "absent");
+    assert.deepEqual(result.missing, ["content-security-policy"]);
+    assert.equal(result.ok, false);
+  });
+
+  test("نقص رأس أساسي يُذكر باسمه", () => {
+    const { "x-frame-options": _omitted, ...rest } = baseline;
+    const result = classifySecurityHeaders(headersOf({ ...rest, "content-security-policy": "x" }));
+    assert.deepEqual(result.missing, ["x-frame-options"]);
+    assert.equal(result.ok, false);
+  });
+
+  test("قائمة الرؤوس الأساسية لا تتضمن CSP (لأن وضعها متغيّر بطبعه)", () => {
+    assert.ok(!BASELINE_SECURITY_HEADERS.includes("content-security-policy"));
+  });
+});
+
+describe("scripts/smoke-production — قرينة ربط قاعدة البيانات", () => {
+  test("صف بلا مفتاح old_price = قرينة بذرة محلية (الشكل الحيّ بعد كشف 2026-09-28)", () => {
+    const live = [
+      { id: "p1", price: 180, old_price: 220, stock: 40, featured: 1 },
+      { id: "p3", price: 70, stock: 80, featured: 1 }, // مسار Turso كان سيضع old_price: null
+    ];
+    assert.equal(looksLikeSeedFallback(live), true);
+  });
+
+  test("صفوف مسار Turso تحمل old_price دائمًا (ولو null) = لا قرينة", () => {
+    assert.equal(
+      looksLikeSeedFallback([
+        { id: "p1", price: 180, old_price: 220 },
+        { id: "p3", price: 70, old_price: null },
+      ]),
+      false
+    );
+  });
+
+  test("قائمة فارغة أو غير صالحة لا تُنتج قرينة", () => {
+    assert.equal(looksLikeSeedFallback([]), false);
+    assert.equal(looksLikeSeedFallback(null), false);
+    assert.equal(looksLikeSeedFallback("not-a-list"), false);
+  });
+
+  /**
+   * ثبات القرينة نفسه: نشغّل `getProducts()` فعليًا على قاعدة مهاجَرة، ونتأكد أن
+   * مسار Turso يمرّر مفتاح `old_price` في كل صف — بينما البذرة المحلية لا تفعل.
+   * إن تغيّر هذا العقد يومًا، يفشل هذا الاختبار قبل أن يصبح صف `db-binding` مضلّلًا.
+   */
+  test("عقد getProducts: مسار Turso يحمل old_price دائمًا والبذرة لا", async () => {
+    const { client } = fileClient("aborof-shape");
+    await runMigrations(client);
+    await client.execute(
+      "INSERT INTO products (id,name,description,price,category,image,stock) VALUES ('px','بلا سعر قديم','وصف',10,'x','🧴',3)"
+    );
+    setDbClientForTest(client);
+    try {
+      const { getProducts } = await import("../src/lib/db");
+      const fromDb = await getProducts();
+      assert.ok(fromDb.length > 0, "القاعدة المهاجَرة يجب أن تعطي صفًا واحدًا على الأقل");
+      for (const product of fromDb) {
+        assert.ok(
+          Object.prototype.hasOwnProperty.call(product, "old_price"),
+          "مسار Turso يجب أن يمرّر مفتاح old_price في كل صف"
+        );
+      }
+      assert.equal(looksLikeSeedFallback(fromDb), false, "صفوف قاعدة البيانات ليست قرينة بذرة");
+      assert.equal(looksLikeSeedFallback(SEED_PRODUCTS), true, "البذرة المحلية يجب أن تُكتشف كقرينة");
+    } finally {
+      setDbClientForTest(null);
+      client.close();
+    }
+  });
+});
+
+describe("scripts/scan-bundle-secrets — حاجز تسريب حزمة العميل", () => {
+  test("اسم سر خادم في الأثر المبنيّ = تسريب (بلا حاجة لقيمة)", () => {
+    const hits = scanTextForSecrets('const x = process.env.ADMIN_SESSION_SECRET;');
+    assert.deepEqual(hits, [{ kind: "name", label: "ADMIN_SESSION_SECRET" }]);
+  });
+
+  test("نص نظيف لا يُنتج أي أثر", () => {
+    assert.deepEqual(scanTextForSecrets('console.log("hello", process.env.NEXT_PUBLIC_X)'), []);
+  });
+
+  test("القيمة الحقيقية تُكتشف عند --check-env، والقيم القصيرة تُتجاهل", () => {
+    const values = [
+      { label: "ADMIN_PASSWORD", value: "super-secret-password-123" },
+      { label: "DIAGNOSTICS_KEY", value: "short" },
+    ];
+    const leaked = scanTextForSecrets('var p="super-secret-password-123";', values);
+    assert.deepEqual(leaked, [{ kind: "value", label: "ADMIN_PASSWORD" }]);
+    assert.deepEqual(scanTextForSecrets('var p="short";', values), []);
+  });
+
+  test("قائمة الأسماء تغطي أسرار الخادم الأساسية", () => {
+    for (const name of ["ADMIN_SESSION_SECRET", "ADMIN_PASSWORD", "TURSO_AUTH_TOKEN", "TURSO_DATABASE_URL"]) {
+      assert.ok(SERVER_SECRET_NAMES.includes(name), `${name} غائب عن قائمة الفحص`);
+    }
+  });
+
+  test("أمر الفحص مركّب في البوابات (quality.yml و deploy.yml)", () => {
+    for (const file of [".github/workflows/quality.yml", ".github/workflows/deploy.yml"]) {
+      const workflow = fs.readFileSync(file, "utf8");
+      assert.match(workflow, /npm run security:bundle/, `${file} لا يشغّل فحص حزمة العميل`);
+    }
+  });
+
+  test("حزمة البناء الفعلية نظيفة (يُشغَّل بعد npm run build)", () => {
+    const dir = path.join(process.cwd(), ".next", "static");
+    if (!fs.existsSync(dir)) return; // لا حزمة مبنيّة في هذه البيئة — لا حكم
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(js|mjs|css|html|json|txt)$/.test(entry.name)) files.push(full);
+      }
+    };
+    walk(dir);
+    assert.ok(files.length > 0, "الحزمة المبنيّة يجب أن تحوي ملفات");
+    for (const file of files) {
+      const hits = scanTextForSecrets(fs.readFileSync(file, "utf8"));
+      assert.deepEqual(hits, [], `تسريب محتمل في ${file}: ${JSON.stringify(hits)}`);
+    }
+  });
+});
+
+describe("scripts/security-gates — عزل العميل/الخادم", () => {
+  test("المكوّنات المعلَّمة بـ use client لا تستورد وحدات خادم فقط", () => {
+    const serverOnly = ["@/lib/auth", "@/lib/secrets", "@/lib/db", "@/lib/orders", "@/lib/rate-limit"];
+    const roots = ["src/app", "src/components"];
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name)) {
+          const src = fs.readFileSync(full, "utf8");
+          if (!/^\s*["']use client["']/m.test(src)) continue;
+          for (const mod of serverOnly) {
+            if (src.includes(`from "${mod}"`) || src.includes(`from '${mod}'`)) offenders.push(`${full} → ${mod}`);
+          }
+        }
+      }
+    };
+    for (const root of roots) if (fs.existsSync(root)) walk(root);
+    assert.deepEqual(offenders, [], `مكوّنات عميل تستورد وحدات خادم: ${offenders.join(", ")}`);
   });
 });
 
@@ -181,5 +369,82 @@ describe(".github/workflows/deploy.yml — بوابة النشر", () => {
     assert.match(workflow, /::error::vercel pull فشل/, "فشل vercel pull يجب أن يُبث كتعليق");
     assert.match(workflow, /::error::vercel build فشل/, "فشل vercel build يجب أن يُبث كتعليق");
     assert.match(workflow, /::error::vercel deploy فشل/, "فشل vercel deploy يجب أن يُبث كتعليق");
+  });
+});
+
+/**
+ * الصفوف 15–17 في الـ smoke test تغطّي العطل الإنتاجي الذي أبقى كل صفحات المنتجات
+ * 404، و«404 الناعم»، وتعقب وسمَي robots المتعارضين. لا يمكن تشغيل السكربت نفسه
+ * محليًا (isSafeBaseUrl يرفض localhost عن قصد)، لذلك نختبر الدالة النقية بأجسام مصنوعة.
+ */
+describe("smoke — الواجهة المنشورة (الصفوف 15–17)", () => {
+  const ok = (text: string, status = 200) => ({ status, text });
+  const healthy = {
+    sampleId: "p1",
+    sampleName: "منظف أرضيات برائحة اللافندر 5 لتر",
+    productPage: ok(
+      '<title>منظف أرضيات برائحة اللافندر 5 لتر — 180 جنيه | روفيده</title><link rel="canonical" href="https://aborof.vercel.app/product/p1"/>'
+    ),
+    missing: ok('<meta name="robots" content="noindex"/>', 404),
+    missingRoute: ok("", 404),
+    robotsTxt: ok("User-Agent: *\nDisallow: /admin\nSitemap: https://aborof.vercel.app/sitemap.xml"),
+    sitemapXml: ok("<urlset><url><loc>https://aborof.vercel.app/</loc></url><url><loc>https://aborof.vercel.app/product/p1</loc></url></urlset>"),
+    webmanifest: ok("{}"),
+    iconSvg: ok("<svg/>"),
+  };
+
+  test("النشر السليم: الصفوف 15 و16 و16b و17 خضراء", () => {
+    const findings = frontPageFindings(healthy);
+    assert.deepEqual(findings.map((f) => f.id), ["15", "16", "16b", "17"]);
+    for (const f of findings) assert.ok(f.ok, `${f.id} فشل: ${f.actual}`);
+  });
+
+  test("عودة عطل params (404 لكل منتج) تُكتشف برسالة عطل صريحة", () => {
+    const findings = frontPageFindings({ ...healthy, productPage: ok("404: This page could not be found.", 404) });
+    const row15 = findings.find((f) => f.id === "15");
+    assert.equal(row15?.ok, false);
+    assert.match(String(row15?.actual), /params/);
+  });
+
+  test("صفحة منتج بميتاداتا ناقصة (بلا canonical أو بعنوان عام) تفشل", () => {
+    const noCanonical = frontPageFindings({ ...healthy, productPage: ok("<title>روفيده — لأدوات ومستلزمات النظافة</title>") });
+    assert.equal(noCanonical.find((f) => f.id === "15")?.ok, false, "عنوان الـlayout العام يجب ألا يُقبل كعنوان منتج");
+    const noTitle = frontPageFindings({ ...healthy, productPage: ok('<link rel="canonical" href="/product/p1"/>') });
+    assert.equal(noTitle.find((f) => f.id === "15")?.ok, false);
+  });
+
+  test("«404 ناعم» (200 بمحتوى 404) يُكتشف ويُشرح سببه", () => {
+    const findings = frontPageFindings({ ...healthy, missing: ok("الصفحة أو المنتج غير موجود", 200) });
+    const row16 = findings.find((f) => f.id === "16");
+    assert.equal(row16?.ok, false);
+    assert.match(String(row16?.actual), /404 ناعم/);
+  });
+
+  test("404 بلا noindex أو بوسم robots متعارض يفشل", () => {
+    const noNoindex = frontPageFindings({ ...healthy, missing: ok("<html></html>", 404) });
+    assert.equal(noNoindex.find((f) => f.id === "16")?.ok, false, "404 بلا noindex يجب أن يفشل");
+    const conflict = frontPageFindings({
+      ...healthy,
+      missing: ok('<meta name="robots" content="noindex"/><meta name="robots" content="index, follow"/>', 404),
+    });
+    assert.equal(conflict.find((f) => f.id === "16")?.ok, false, "وسما robots متعارضان يجب أن يظهرا كفشل");
+    assert.match(String(conflict.find((f) => f.id === "16")?.actual), /متعارض/);
+  });
+
+  test("robots بلا حجب /admin أو خريطة تكشف /admin تفشل", () => {
+    const noBlock = frontPageFindings({ ...healthy, robotsTxt: ok("User-Agent: *\nAllow: /") });
+    assert.equal(noBlock.find((f) => f.id === "17")?.ok, false);
+    const leaky = frontPageFindings({
+      ...healthy,
+      sitemapXml: ok("<urlset><url><loc>https://aborof.vercel.app/admin</loc></url></urlset><loc>"),
+    });
+    assert.equal(leaky.find((f) => f.id === "17")?.ok, false);
+  });
+
+  test("ملف ميتاداتا مفقود (غير 200) يفشل الصف 17", () => {
+    const findings = frontPageFindings({ ...healthy, sitemapXml: ok("", 500) });
+    const row17 = findings.find((f) => f.id === "17");
+    assert.equal(row17?.ok, false);
+    assert.match(String(row17?.actual), /500/);
   });
 });

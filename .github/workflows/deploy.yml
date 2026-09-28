@@ -48,10 +48,16 @@ jobs:
         run: npm run security:gates
       - name: Migration files in sync
         run: node scripts/sync-migrations.mjs --check
+      - name: Agent manifest in sync
+        run: npm run agents:check
+      - name: Frontend mandatory files
+        run: npm run front:check
       - name: Unit and integration tests
         run: npm test
       - name: Production build
         run: npm run build
+      - name: Client bundle secret scan (لا أسرار خادم في ما ينزّله المتصفح)
+        run: npm run security:bundle
       - name: Record SHA
         id: meta
         run: echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"

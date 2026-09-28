@@ -7,7 +7,12 @@
  *  2. منع تسريب الأخطاء: يُمنع إرجاع `String(e.message)` أو `e.stack` للعميل،
  *     ويُمنع `status: 200` مع حقل error في مسارات API.
  *  3. كل مسارات API تُغلَّف بـ apiHandler الموحّد.
- *  4. لا تُطبع متغيرات البيئة الحساسة مباشرة في السجلات.
+ *  4. عزل العميل/الخادم: مكوّن عميل لا يستورد وحدة خادم فقط (auth/db/secrets/orders/rate-limit).
+ *  5. لا تُطبع متغيرات البيئة الحساسة مباشرة في السجلات.
+ *  6. ثوابت CSP: لا مصدر خارجي للخطوط أو السكربتات، و`frame-ancestors 'none'` قائمة،
+ *     و`connect-src 'self'` أساسه — أي توسيع يحتاج تذكرة أمنية صريحة.
+ *  7. أسطول الوكلاء (المرحلة الرابعة): الكتالوج بيانات لا سلوك — لا استيراد وحدات
+ *     بيانات (db/orders/auth)، ولا أدوات خارج قائمة القراءة فقط المجمّدة هنا.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -29,10 +34,34 @@ function walk(dir, out = []) {
 
 const files = walk(path.join(root, "src"));
 
+/** ملفات كتالوج الأسطول — فحوص بنيوية خاصة بها (البند 6). */
+const isFleetCatalogFile = (rel) => rel.includes(path.normalize("lib/ai/agents/catalog/"));
+
 const SESSION_SECRET_ALLOWED = new Set([
   path.normalize("src/lib/auth.ts"),
   path.normalize("src/lib/secrets.ts"),
 ]);
+
+/**
+ * قائمة الأدوات المسموح بها لكتالوج الأسطول — **مجمّدة عمدًا**.
+ * إضافة أداة جديدة تتطلب تعديل هذا الملف صراحةً (قرار واعٍ في المراجعة)،
+ * ومطابقتها للسجل الحقيقي محميّة أيضًا باختبار في tests/agent-fleet.test.ts.
+ * أي أداة كاتبة تظهر هنا = فشل بوابة فوري في CI، لا ملاحظة مراجعة.
+ */
+const FLEET_ALLOWED_TOOLS = new Set([
+  "search_products",
+  "lookup_faq",
+  "shipping_estimate",
+  "store_info",
+  "orders_create",
+  "products_upsert",
+  "order_status_update",
+]);
+const FLEET_READ_ONLY_TOOLS = new Set(["search_products", "lookup_faq", "shipping_estimate", "store_info"]);
+const FLEET_FORBIDDEN_IMPORTS = ["@/lib/db", "@/lib/orders", "@/lib/auth", "@/lib/secrets"];
+
+/** وحدات خادم فقط — استيرادها من مكوّن عميل ممنوع (فحص العزل أعلاه). */
+const SERVER_ONLY_MODULES = ["@/lib/auth", "@/lib/secrets", "@/lib/db", "@/lib/orders", "@/lib/rate-limit"];
 
 for (const file of files) {
   const rel = path.relative(root, file);
@@ -65,10 +94,101 @@ for (const file of files) {
     }
   }
 
-  // 4) منع طباعة أسرار البيئة في السجلات.
+  // 4) عزل العميل/الخادم: مكوّن عميل (`use client`) لا يستورد وحدة خادم فقط،
+  //    لأن ذلك هو الطريق الأول لتسرّب أسرار الخادم إلى حزمة المتصفح.
+  if (/^\s*["']use client["']/m.test(src)) {
+    for (const mod of SERVER_ONLY_MODULES) {
+      if (src.includes(`from "${mod}"`) || src.includes(`from '${mod}'`)) {
+        problems.push(`${rel}: مكوّن عميل يستورد وحدة خادم فقط (${mod}) — خطر تسريب أسرار إلى الحزمة.`);
+      }
+    }
+  }
+
+  // 6) كتالوج الأسطول: بيانات لا سلوك.
+  if (isFleetCatalogFile(rel)) {
+    for (const mod of FLEET_FORBIDDEN_IMPORTS) {
+      if (src.includes(`from "${mod}"`) || src.includes(`from '${mod}'`)) {
+        problems.push(`${rel}: كتالوج الأسطول يستورد وحدة بيانات/خادم (${mod}) — الكتالوج تعريفات فقط.`);
+      }
+    }
+    if (/readOnly\s*:\s*false/.test(src)) {
+      problems.push(`${rel}: تعريف وكيل يعلن أداة غير للقراءة فقط (readOnly: false).`);
+    }
+    for (const match of src.matchAll(/tools\s*:\s*\[([^\]]*)\]/g)) {
+      for (const rawName of match[1].split(",")) {
+        const name = rawName.trim().replace(/["'`]/g, "");
+        if (!name) continue;
+        if (!FLEET_ALLOWED_TOOLS.has(name)) {
+          problems.push(`${rel}: أداة غير معروفة في تعريف وكيل (${name}) — أضفها صراحةً إلى قائمة البوابة.`);
+        } else if (!FLEET_READ_ONLY_TOOLS.has(name)) {
+          problems.push(`${rel}: أداة كاتبة في كتالوج الأسطول (${name}) — مرفوضة بنيويًا.`);
+        }
+      }
+    }
+  }
+
+  // 5) منع طباعة أسرار البيئة في السجلات.
   if (/console\.(log|error|warn)\([^)]*process\.env\./.test(src) &&
       /SECRET|PASSWORD|TOKEN|KEY/.test(src.match(/console\.(log|error|warn)\([^)]*process\.env\.([A-Z_]+)/)?.[1] ?? "")) {
     problems.push(`${rel}: لا تطبع قيم البيئة الحساسة في السجلات.`);
+  }
+}
+
+/**
+ * ثوابت CSP — تُقرأ من وحدة السياسة نفسها (لا من نسخة نصية تتقادم)، وتُفرض
+ * على وضعي الحجب والمراقبة معًا. أي إضافة مصدر خارجي للخطوط أو السكربتات،
+ * أو إضعاف frame-ancestors، تُفشل البوابة في CI.
+ */
+const CSP_INVARIANTS = [
+  { directive: "font-src", rule: "self-data-only", why: "الخطوط تُستضاف محليًا أو تكون خطوط نظام — لا Google Fonts" },
+  { directive: "script-src", rule: "no-external-origin", why: "لا سكربتات طرف ثالث بلا تذكرة أمنية" },
+  { directive: "frame-ancestors", rule: "must-be-none", why: "منع التأطير (clickjacking) غير قابل للتفاوض" },
+  { directive: "object-src", rule: "must-be-none", why: "منع تضمين كائنات قابلة للتنفيذ" },
+  { directive: "base-uri", rule: "self-data-only", why: "منع اختطاف المسارات النسبية" },
+  { directive: "connect-src", rule: "self-present", why: "أي مصدر خارجي في connect-src يجب أن يكون مقصودًا ومراجعًا" },
+];
+
+function directiveSources(policy, directive) {
+  const part = policy
+    .split(";")
+    .map((p) => p.trim())
+    .find((p) => p.startsWith(directive + " "));
+  if (!part) return null;
+  return part.slice(directive.length).trim().split(/\s+/).filter(Boolean);
+}
+
+const isExternalOrigin = (source) => /^https?:\/\//.test(source) || source.startsWith("//");
+
+const headersFile = path.join(root, "src", "lib", "security", "headers.ts");
+if (fs.existsSync(headersFile)) {
+  const headersSource = fs.readFileSync(headersFile, "utf8");
+  const literal = headersSource.match(/const directives = \[([\s\S]*?)\];/);
+  if (!literal) {
+    problems.push("src/lib/security/headers.ts: تعذّر قراءة قائمة توجيهات CSP للفحص.");
+  } else {
+    // السلاسل بعلامات مزدوجة فقط، لأن القيم نفسها تحوي علامات مفردة مثل 'self'.
+    // (استخراج بالعلامات المزدوجة حول مصدر واحد كان يبتلع النصف قبل 'self'.)
+    const policy = [...literal[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]).join("; ");
+    for (const invariant of CSP_INVARIANTS) {
+      const sources = directiveSources(policy, invariant.directive);
+      if (!sources) {
+        problems.push(`CSP: التوجيه ${invariant.directive} غائب — ${invariant.why}`);
+        continue;
+      }
+      const external = sources.filter(isExternalOrigin);
+      if (invariant.rule === "must-be-none" && sources.join(" ") !== "'none'") {
+        problems.push(`CSP: ${invariant.directive} يجب أن يكون 'none' — ${invariant.why}`);
+      }
+      if (invariant.rule === "self-data-only" && external.length > 0) {
+        problems.push(`CSP: ${invariant.directive} يحتوي مصادر خارجية (${external.join(", ")}) — ${invariant.why}`);
+      }
+      if (invariant.rule === "no-external-origin" && external.length > 0) {
+        problems.push(`CSP: ${invariant.directive} يحتوي مصادر خارجية (${external.join(", ")}) — ${invariant.why}`);
+      }
+      if (invariant.rule === "self-present" && !sources.includes("'self'")) {
+        problems.push(`CSP: ${invariant.directive} يجب أن يحوي 'self' — ${invariant.why}`);
+      }
+    }
   }
 }
 
