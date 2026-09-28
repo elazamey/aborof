@@ -12,7 +12,9 @@ name: Turso evidence probe
 #    في مكانه الطبيعي بدل انتظار تشغيل يدوي بعد النشر.
 #  - `schedule` (يوميًا): المجسّ الإنتاجي — الحكم يُصدَّر كمخرج، والتقرير JSON
 #    يُرفع قطعة أثرية، ووظيفة التنبيه تفتح/تحدّث قضية تتبّع موسومة `turso-probe`
-#    عند BLOCKED وتغلقها عند التعافي (التفصيل في PRODUCTION-CONTRACT.md).
+#    عند BLOCKED وتغلقها عند التعافي. التنبيه stateful: آلة حالة
+#    (GREEN/DEGRADED/FAILED/RECOVERED + عدّاد الإخفاقات + آخر نجاح/فشل) تُحفَظ
+#    في متن القضية نفسه — التفصيل في PRODUCTION-CONTRACT.md §4.
 #  - `workflow_dispatch`: التشغيل اليدوي متى شئت.
 #
 # ‏أداة **أدلة لا بوابة**: حالة قاعدة الإنتاج لا تُحمرّ نقطة التحقق في الطلب (وإلا
@@ -200,6 +202,11 @@ jobs:
       # إدارة قضية التتبّع فقط — لا قراءة محتوى ولا تعليق على طلبات.
       issues: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Create/update/close tracking issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -214,11 +221,28 @@ jobs:
           [ "$VERDICT" = "PASS" ] || [ "$VERDICT" = "BLOCKED" ] || VERDICT="UNKNOWN"
           STAMP="$(date -u '+%F %T UTC')"
           OPEN="$(gh issue list --label turso-probe --state open --json number --jq '.[].number' | tr '\n' ' ' || true)"
-          BODY="الحكم: **$VERDICT** — التشغيل: $RUN_URL — $STAMP — الإجراء: docs/ops/INCIDENT-RUNBOOK.md"
+          # آلة الحالة (scripts/lib/alert-state.mjs — دوال نقية مُختبَرة): تُقرأ
+          # السابقة من متن أول قضية مفتوحة (أو فراغ = GREEN)، وتُحسَب التالية.
+          FIRST_OPEN="$(printf '%s' "$OPEN" | awk '{print $1}')"
+          PREV_BODY=""
+          if [ -n "$FIRST_OPEN" ]; then
+            PREV_BODY="$(gh issue view "$FIRST_OPEN" --json body --jq '.body' 2>/dev/null || true)"
+          fi
+          EVAL="$(node --input-type=module -e "
+            import { parseAlertState, nextAlertState, formatAlertStateBlock } from './scripts/lib/alert-state.mjs';
+            const now = new Date().toISOString();
+            const next = nextAlertState(parseAlertState(process.argv[1] ?? ''), process.argv[2], now);
+            process.stdout.write(next.state + '\n' + String(next.consecutive_failures) + '\n' + formatAlertStateBlock(next, now));
+          " "$PREV_BODY" "$VERDICT")"
+          NEXT_STATE="$(printf '%s' "$EVAL" | head -n 1)"
+          NEXT_FAILURES="$(printf '%s' "$EVAL" | sed -n '2p')"
+          STATE_BLOCK="$(printf '%s' "$EVAL" | tail -n +3)"
+          BODY="الحكم: **$VERDICT** — الحالة: **$NEXT_STATE** (إخفاقات متتالية: $NEXT_FAILURES) — التشغيل: $RUN_URL — $STAMP — الإجراء: docs/ops/INCIDENT-RUNBOOK.md
+          $STATE_BLOCK"
           if [ "$VERDICT" = "PASS" ]; then
             if [ -n "$OPEN" ]; then
               for n in $OPEN; do
-                gh issue close "$n" --comment "✅ تعافى المجسّ اليومي (PASS) — التشغيل: $RUN_URL"
+                gh issue close "$n" --comment "✅ تعافى المجسّ اليومي (PASS → $NEXT_STATE) — التشغيل: $RUN_URL"
               done
             else
               echo "PASS ولا قضايا مفتوحة — لا شيء يُفعل."

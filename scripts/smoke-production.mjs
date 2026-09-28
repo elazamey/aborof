@@ -28,6 +28,7 @@
  * كود الخروج: 0 = خضراء أو متدهورة (الحكم في سطر `SMOKE: PASS|DEGRADED|FAIL`)،
  * 1 = فشل حاجب، 2 = استخدام خاطئ. الصفوف الناعمة (`fallback`/`latency`)
  * الحمراء وحدها تُنتج DEGRADED لا FAIL — «يعمل لكن متدهور» حكم قائم بذاته.
+ * و⚠️ تحذير تجربة (كمون بين 1s و15s) يُعرَض ويُسجَّل لكنه لا يغيّر الحكم.
  */
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -136,10 +137,26 @@ export function dbSourceFromResponse(headers, products, productOk) {
 }
 
 /**
- * ميزانية المصباح الدخاني للمسارات الحرجة — مصباح يكشف التعلّق المرضي لا
- * SLO أداء (عينة واحدة تشمل الإقلاع البارد؛ الـ RUM الحقيقي P3).
+ * طبقتا الكمون (توفر ≠ تجربة): المصباح الدخاني يكشف التعلّق المرضي لا SLO
+ * أداء (عينة واحدة تشمل الإقلاع البارد؛ الـ RUM الحقيقي P3). فوق
+ * `LATENCY_WARN_MS` = ⚠️ تحذير تجربة (لا يحجب الحكم)؛ فوق
+ * `LATENCY_BUDGET_MS` = ❌ تعلّق (صف ناعم ⇒ DEGRADED).
  */
 export const LATENCY_BUDGET_MS = 15_000;
+export const LATENCY_WARN_MS = 1_000;
+
+/**
+ * تصنيف نقي لزمن مسار حرج: `{ok, warn}` — `warn` تُعرَض ⚠️ وتُسجَّل في JSON
+ * لكن `smokeVerdict` يتجاهلها (التوفر سليم/الأداء يستحق المراجعة).
+ * مُصدَّرة للاختبار في tests/deploy-tools.test.ts.
+ */
+export function classifyLatency(ms) {
+  const v = Number(ms);
+  if (!(v >= 0)) return { ok: false, warn: false };
+  if (v > LATENCY_BUDGET_MS) return { ok: false, warn: false };
+  if (v > LATENCY_WARN_MS) return { ok: true, warn: true };
+  return { ok: true, warn: false };
+}
 
 /**
  * حكم الـ smoke بثلاثة مستويات: أي صف صلب أحمر ⇒ FAIL؛ وإلا فأي صف ناعم
@@ -244,8 +261,8 @@ export function frontPageFindings({
 }
 
 const results = [];
-function record(id, label, ok, expected, actual) {
-  results.push({ id, label, ok, expected, actual });
+function record(id, label, ok, expected, actual, warn = false) {
+  results.push({ id, label, ok, expected, actual, warn });
 }
 
 async function request(method, pathname, body) {
@@ -418,12 +435,15 @@ async function readOnlyChecks() {
     [`GET /product/${sampleId}`, productPage.ms],
   ];
   const worstLatency = keyLatencies.reduce((a, b) => (Number(a[1]) > Number(b[1]) ? a : b));
+  const latClass = classifyLatency(Number(worstLatency[1]));
   record(
     "latency",
-    `زمن الاستجابة (الميزانية ${LATENCY_BUDGET_MS}ms)`,
-    Number(worstLatency[1]) <= LATENCY_BUDGET_MS,
-    `كل مسار حرج ≤ ${LATENCY_BUDGET_MS}ms`,
-    keyLatencies.map(([name, ms]) => `${name}: ${ms}ms`).join(" · ")
+    `زمن الاستجابة (توفر ≤ ${LATENCY_BUDGET_MS}ms · تجربة ≤ ${LATENCY_WARN_MS}ms)`,
+    latClass.ok,
+    `كل مسار حرج ≤ ${LATENCY_BUDGET_MS}ms للتوفر (و≤ ${LATENCY_WARN_MS}ms بلا تحذير)`,
+    keyLatencies.map(([name, ms]) => `${name}: ${ms}ms`).join(" · ") +
+      (latClass.warn ? " — ⚠️ فوق ميزانية التجربة: التوفر سليم والأداء يستحق المراجعة" : ""),
+    latClass.warn
   );
 
   // إضافي: وجود مسار التتبع في البناء المنشور (GET غير مدعوم ⇒ 405).
@@ -580,7 +600,8 @@ async function main() {
     console.log("| الصف | الفحص | النتيجة | المتوقع | الفعلي |");
     console.log("|---|---|---|---|---|");
     for (const r of results) {
-      console.log(`| ${r.id} | ${r.label} | ${r.ok ? "✅" : "❌"} | ${r.expected} | ${String(r.actual).replace(/\|/g, "\\|")} |`);
+      const glyph = r.ok ? (r.warn ? "⚠️" : "✅") : "❌";
+      console.log(`| ${r.id} | ${r.label} | ${glyph} | ${r.expected} | ${String(r.actual).replace(/\|/g, "\\|")} |`);
     }
     console.log(
       verdict === "PASS"

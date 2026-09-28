@@ -40,6 +40,22 @@ export function start401Stub(): Promise<Stub401> {
 /** رابط libsql لمضيف مغلق — يحاكي تعذّر الوصول (DNS/شبكة) بلا انتظار. */
 export const UNREACHABLE_LIBSQL_URL = "libsql://127.0.0.1:9";
 
+/**
+ * حارس الجمود: أي نداء شبكي ضد stub محلي يجب أن يُكمَل ضمن ميزانية ثابتة —
+ * فالتعليق الصامت (regression الـ `spawnSync` الشهير: والد محجوب + stub في
+ * نفس العملية) يتحول إلى فشل صريح سريع بدل استهلاك CI دقيقة كاملة.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms = 5_000, label = "stub"): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    // بلا unref عمدًا: المؤقّت هو ما يُبقي الـ await حيًّا حتى الميزانية،
+    // وunref كان يُفرِغ الحلقة قبل إطلاقه فيُعلَّق الاختبار (اكتُشف بالفشل).
+    // التنظيف عبر clearTimeout في finally عند النجاح المبكر.
+    timer = setTimeout(() => reject(new Error(`${label}: تجاوز ميزانية ${ms}ms — اشتباه جمود`)), ms);
+  });
+  return Promise.race([promise.finally(() => clearTimeout(timer)), timeout]);
+}
+
 export interface CannedStub {
   url: string;
   /** تغيير الاستجابة المعلّبة بين الحالات (رمز/جسم/نوع). */

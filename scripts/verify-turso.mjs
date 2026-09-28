@@ -37,7 +37,8 @@
 import { createHash } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
-import { SCHEMA_CONTRACT, checkSchemaContract } from "./lib/schema-contract.mjs";
+import { SCHEMA_CONTRACT, SCHEMA_CONTRACT_VERSION, checkSchemaContract } from "./lib/schema-contract.mjs";
+import { buildManifest } from "./lib/evidence-manifest.mjs";
 import {
   dashboardUrlToConnectionCandidates,
   describeDatabaseUrl,
@@ -189,7 +190,10 @@ function render() {
   const failed = rows.filter((r) => !r.ok);
   const verdict = failed.length === 0 ? "PASS" : "BLOCKED";
   if (asJson) {
-    console.log(JSON.stringify({ ok: failed.length === 0, verdict, local, rows }, null, 2));
+    // البيان المضاد للعبث: الالتزام/التشغيل/النشر/الطابع/النسخ/بصمة الصفوف.
+    console.log(
+      JSON.stringify({ ok: failed.length === 0, verdict, local, rows, manifest: buildManifest({ rows, verdict }) }, null, 2)
+    );
     return;
   }
   console.log(`# فحص Turso — ${local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}\n`);
@@ -471,9 +475,11 @@ try {
   const schemaViolations = await checkSchemaContract(db);
   record(
     "schema-contract",
-    "عقد السكيما (الأعمدة التي يقرؤها التطبيق)",
+    `عقد السكيما v${SCHEMA_CONTRACT_VERSION} (الأعمدة التي يقرؤها التطبيق)`,
     schemaViolations.length === 0,
-    schemaViolations.length ? schemaViolations.join(" | ") : `${SCHEMA_CONTRACT.length} جداول بأعمدتها المقروءة حاضرة`,
+    schemaViolations.length
+      ? `v${SCHEMA_CONTRACT_VERSION}: ` + schemaViolations.join(" | ")
+      : `v${SCHEMA_CONTRACT_VERSION}: ${SCHEMA_CONTRACT.length} جداول بأعمدتها المقروءة حاضرة`,
     schemaViolations.length ? "SCHEMA_CONTRACT_VIOLATION" : null
   );
 

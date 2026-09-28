@@ -228,3 +228,41 @@ export function resolveTursoToken(env, role) {
   if (token !== null) return { token, source: legacy, fallback: true };
   return { token: null, source: null, fallback: false };
 }
+
+/**
+ * عزل المعاينة عن الإنتاج — `Preview DB URL ≠ Production DB URL`.
+ *
+ * ضابط **مُخمَد (dormant)** عمدًا: منطق نقي مُختبَر هنا، وتفعيله في CI
+ * ينتظر أن يكشف Vercel الرابطين معًا للمالك (اليوم لا توجد قاعدة معاينة
+ * منفصلة بعد — انظر PRODUCTION-CONTRACT.md §4). المقارنة على الشكل
+ * المطبَّع (تشذيب + تجريد الاستعلام — فقد يحمل `?authToken=…` + تجريد
+ * الشرطة الأخيرة + أحرف صغيرة)، ولا يُطبَع أي جزء من القيمتين أبدًا.
+ *
+ * @returns {{status: "pass"|"fail"|"skip", code: string|null, verdict: string}}
+ */
+export function checkPreviewIsolation(previewUrl, prodUrl) {
+  const norm = (u) =>
+    String(u ?? "")
+      .trim()
+      .replace(/\?.*$/, "")
+      .replace(/\/+$/, "")
+      .toLowerCase();
+  const preview = norm(previewUrl);
+  const prod = norm(prodUrl);
+  if (!preview || !prod) {
+    return {
+      status: "skip",
+      code: null,
+      verdict: "أحد الرابطين غائب — الفحص مُخمَد (dormant) حتى تُكشَف القيمتان معًا",
+    };
+  }
+  if (preview === prod) {
+    return {
+      status: "fail",
+      code: "PREVIEW_PROD_SHARED",
+      verdict:
+        "رابط المعاينة يطابق رابط الإنتاج — قاعدة المعاينة يجب أن تكون معزولة (docs/ops/secret-rotation.md §1)",
+    };
+  }
+  return { status: "pass", code: null, verdict: "رابطا المعاينة والإنتاج مختلفان" };
+}

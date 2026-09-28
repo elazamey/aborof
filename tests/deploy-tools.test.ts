@@ -9,6 +9,7 @@ import path from "node:path";
 import { runMigrations, MIGRATIONS } from "../src/lib/db/migrate";
 import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/migration-checksums.mjs";
 import {
+  checkPreviewIsolation,
   dashboardUrlToConnectionCandidates,
   describeDatabaseUrl,
   interpretProbeStatus,
@@ -20,6 +21,7 @@ import {
 import { resolveAppToken } from "../src/lib/db/token";
 import {
   isSafeBaseUrl,
+  classifyLatency,
   classifySecurityHeaders,
   looksLikeSeedFallback,
   frontPageFindings,
@@ -27,10 +29,20 @@ import {
   dbSourceFromResponse,
   smokeVerdict,
   LATENCY_BUDGET_MS,
+  LATENCY_WARN_MS,
   BASELINE_SECURITY_HEADERS,
 } from "../scripts/smoke-production.mjs";
 import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
-import { checkSchemaContract } from "../scripts/lib/schema-contract.mjs";
+import { checkSchemaContract, SCHEMA_CONTRACT_VERSION } from "../scripts/lib/schema-contract.mjs";
+import {
+  ALERT_STATES,
+  formatAlertStateBlock,
+  freshAlertState,
+  nextAlertState,
+  parseAlertState,
+} from "../scripts/lib/alert-state.mjs";
+import { PROBE_VERSION, buildManifest, verifyManifest } from "../scripts/lib/evidence-manifest.mjs";
+import { REQUIRED_SCHEMA_CONTRACT_VERSION } from "../src/lib/db/schema-version";
 import { setDbClientForTest, db, hasDB, getProductsWithSource } from "../src/lib/db";
 import { snapshot as metricsSnapshot } from "../src/lib/observability/metrics";
 import { SEED_PRODUCTS } from "../src/lib/seed";
@@ -1169,11 +1181,11 @@ describe("scripts/apply-turso-secrets — الموجه-أولًا ونظافة �
     assert.match(help.stdout, /سجل الصدفة/, "تحذير الـ history في الاستخدام نفسه");
   });
 
-  test("رابط وحده بلا رموز: يُسأل عن الرمز (لا سقوط صامت) ويفشل بنظافة بلا مدخل", () => {
+  test("رابط وحده بلا رموز: إجهاض صريح غير تفاعلي (لا تعليق ولا متابعة بفارغ)", () => {
     const res = run({ TURSO_DATABASE_URL: GOOD_URL });
     assert.equal(res.status, 1);
-    assert.match(res.stderr, /أدخل TURSO_AUTH_TOKEN/);
-    assert.match(res.stderr, /لا رمز/);
+    assert.match(res.stderr, /غير تفاعلي: TURSO_AUTH_TOKEN غير مضبوط/);
+    assert.match(res.stderr, /قناة سرية معتمدة/);
   });
 
   test("--vercel-only برمز PROD وحده: ينجح بلا سؤال عن CI", () => {
@@ -1196,10 +1208,10 @@ describe("scripts/apply-turso-secrets — الموجه-أولًا ونظافة �
     assert.doesNotMatch(res.stdout, /TURSO_AUTH_TOKEN_PROD/);
   });
 
-  test("لا تلوث متبادل: رمز CI وحده لا يُستخدَم للتشغيل — يُسأل عن PROD صراحةً", () => {
+  test("لا تلوث متبادل: رمز CI وحده لا يُستخدَم للتشغيل — يُجهَض بطلب PROD صراحةً", () => {
     const res = run({ TURSO_DATABASE_URL: GOOD_URL, TURSO_AUTH_TOKEN_CI: CI_TOKEN });
-    assert.equal(res.status, 1, "بلا مدخل يفشل — المهم أنه سأل ولم يُعِد الاستخدام بصمت");
-    assert.match(res.stderr, /أدخل TURSO_AUTH_TOKEN_PROD/);
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /غير تفاعلي: TURSO_AUTH_TOKEN_PROD غير مضبوط/);
   });
 
   test("القيم من البيئة تُعلَن مع تذكير نظافة السجل", () => {
@@ -1593,5 +1605,266 @@ describe("حدّ المزوّد وNEXT_PUBLIC (P2c + سالبة)", () => {
         );
       }
     }
+  });
+});
+
+describe("الدورة 5 — الإجهاض غير التفاعلي وتصنيف القنوات (#1/#2)", () => {
+  test("الاستخدام يعلن تصنيف القنوات الثلاث صراحةً (تفاعلي/أتمتة/inline)", () => {
+    const help = spawnSync("bash", ["scripts/apply-turso-secrets.sh", "--help"], { encoding: "utf8" });
+    assert.equal(help.status, 0);
+    assert.match(help.stdout, /قنوات الأسرار/);
+    assert.match(help.stdout, /تفاعلي : مدخل مخفي فقط/);
+    assert.match(help.stdout, /أتمتة  : قناة سرية صريحة/);
+    assert.match(help.stdout, /inline  : توثيق واختبار فقط/);
+  });
+
+  test("بلا طرفية وبلا قيمة: خروج 1 فوري بلا تعليق (cron/pipe آمنة)", () => {
+    const started = Date.now();
+    const res = spawnSync("bash", ["scripts/apply-turso-secrets.sh", "--dry-run"], {
+      encoding: "utf8",
+      env: { ...process.env, TURSO_DATABASE_URL: "libsql://aborof-elazamey.turso.io" },
+      input: "",
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /غير تفاعلي/);
+    assert.ok(Date.now() - started < 10_000, "الإجهاض فوري لا معلَّق على read");
+  });
+});
+
+describe("الدورة 5 — الترويسة من الحقيقة الداخلية وcardinality العدّاد (#3/#4)", () => {
+  test("X-DB-Source تُبنى من متغير المصدر لا قيمة حرفية", () => {
+    const src = fs.readFileSync("src/app/api/products/route.ts", "utf8");
+    assert.match(src, /"X-DB-Source":\s*source/);
+    assert.doesNotMatch(src, /"X-DB-Source":\s*"turso"/);
+    assert.doesNotMatch(src, /"X-DB-Source":\s*"seed"/);
+  });
+
+  test("عدّاد السقوط بلا labels: توقيع بلا وسائط ومفتاح حرفي ثابت", () => {
+    const src = fs.readFileSync("src/lib/observability/metrics.ts", "utf8");
+    assert.match(src, /recordDbFallback\(\)\s*\{/);
+    const body = /recordDbFallback\(\)\s*\{([\s\S]*?)\n  \}/.exec(src)?.[1] ?? "";
+    assert.ok(body.length > 0, "جسم recordDbFallback موجود");
+    assert.match(body, /"db\.fallback_activations_total"/);
+    assert.doesNotMatch(body, /\$\{|request_id|user_id|product_id/i, "لا استيفاء ولا labels عالية الـ cardinality");
+  });
+});
+
+describe("الدورة 5 — طبقتا الكمون: توفر ≠ تجربة (#6)", () => {
+  test("classifyLatency: ≤1s سليم، (1s,15s] تحذير، >15s فشل", () => {
+    assert.deepEqual(classifyLatency(145), { ok: true, warn: false });
+    assert.deepEqual(classifyLatency(1_000), { ok: true, warn: false });
+    assert.deepEqual(classifyLatency(2_016), { ok: true, warn: true });
+    assert.deepEqual(classifyLatency(15_000), { ok: true, warn: true });
+    assert.deepEqual(classifyLatency(15_001), { ok: false, warn: false });
+  });
+
+  test("LATENCY_WARN_MS = 1s (ميزانية التجربة — لا تحجب الحكم)", () => {
+    assert.equal(LATENCY_WARN_MS, 1_000);
+  });
+
+  test("smokeVerdict يتجاهل التحذير: صف warn وحده ⇒ PASS", () => {
+    assert.equal(
+      smokeVerdict([
+        { id: "1", ok: true },
+        { id: "latency", ok: true, warn: true },
+      ]),
+      "PASS"
+    );
+    assert.equal(smokeVerdict([{ id: "latency", ok: false }]), "DEGRADED");
+  });
+});
+
+describe("الدورة 5 — ثابت الفشل الشامل: لا فئة تُنتج PASS (#7)", () => {
+  test("كل فئات الفشل عبر interpretProbeStatus ⇒ ok=false مع كود ثابت", () => {
+    const failures: [unknown, string][] = [
+      [401, '{"error":"JWT expired"}'],
+      [401, '{"error":"empty JWT token"}'],
+      [403, "forbidden"],
+      [404, "not found"],
+      [400, "bad request"],
+      [429, "too many"],
+      [500, "<html>garbage"],
+      [502, ""],
+      [503, ""],
+      ["down", ""],
+      [null, ""],
+      [undefined, ""],
+    ];
+    for (const [status, body] of failures) {
+      const r = interpretProbeStatus(status as number, body);
+      assert.equal(r.ok, false, `الحالة ${String(status)} يجب ألا تُنتج نجاحًا`);
+      assert.ok(r.code, `الحالة ${String(status)} تحمل كودًا ثابتًا`);
+    }
+    // فئة النجاح الوحيدة تبقى ناجحة — الثابت يميّز لا يعمي.
+    assert.equal(interpretProbeStatus(200, "anything").ok, true);
+  });
+});
+
+describe("الدورة 5 — حارس الجمود (#8)", () => {
+  test("stub يرد والمسبار يُكمل ضمن 5s (regression الـ spawnSync)", async () => {
+    const { startCannedStub, withTimeout } = await import("./stub-helpers");
+    const stub = await startCannedStub();
+    try {
+      stub.set(401, JSON.stringify({ error: "Unauthorized" }));
+      const started = Date.now();
+      const r = await withTimeout(probeHttpEndpoint(stub.url, "tok", []), 5_000, "probe-vs-stub");
+      assert.equal(r.code, "TURSO_AUTH_401");
+      assert.ok(Date.now() - started < 5_000);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  test("withTimeout يفشل صريحًا عند التجاوز بدل التعليق", async () => {
+    const { withTimeout } = await import("./stub-helpers");
+    await assert.rejects(() => withTimeout(new Promise(() => {}), 50, "never"), /اشتباه جمود/);
+  });
+});
+
+describe("الدورة 5 — نسخة عقد السكيما (#9)", () => {
+  test("التوافق: نسخة المجسّ ≥ الحد الأدنى الذي يطلبه التطبيق", () => {
+    assert.equal(SCHEMA_CONTRACT_VERSION, 1);
+    assert.equal(REQUIRED_SCHEMA_CONTRACT_VERSION, 1);
+    assert.ok(
+      (SCHEMA_CONTRACT_VERSION as number) >= (REQUIRED_SCHEMA_CONTRACT_VERSION as number),
+      "قاعدة أقدم من البناء تُحجَب بدل كسره بصمت"
+    );
+  });
+
+  test("صف schema-contract يعلن النسخة في التقرير", async () => {
+    const { client, url } = fileClient("aborof-schema-v");
+    await runMigrations(client);
+    client.close();
+    const report = JSON.parse(runVerifyTurso(url)) as {
+      rows: { id: string; label: string; detail: string }[];
+    };
+    const row = report.rows.find((r) => r.id === "schema-contract");
+    assert.match(row?.label ?? "", /v1/);
+    assert.match(row?.detail ?? "", /v1/);
+  });
+});
+
+describe("الدورة 5 — آلة حالة التنبيه (#11)", () => {
+  const T0 = "2026-09-28T00:00:00.000Z";
+  const T1 = "2026-09-29T00:00:00.000Z";
+
+  test("مفردات الحالات الأربع ثابتة", () => {
+    assert.deepEqual([...ALERT_STATES].sort(), ["DEGRADED", "FAILED", "GREEN", "RECOVERED"]);
+  });
+
+  test("GREEN + عطل ⇒ DEGRADED ثم FAILED مع عدّ تصاعدي", () => {
+    const s1 = nextAlertState(freshAlertState(), "BLOCKED", T0);
+    assert.equal(s1.state, "DEGRADED");
+    assert.equal(s1.consecutive_failures, 1);
+    assert.equal(s1.last_failure_at, T0);
+    const s2 = nextAlertState(s1, "BLOCKED", T1);
+    assert.equal(s2.state, "FAILED");
+    assert.equal(s2.consecutive_failures, 2);
+  });
+
+  test("UNKNOWN يُعامَل كعطل (حدث يستحق التنبيه لا صمت)", () => {
+    assert.equal(nextAlertState(freshAlertState(), "UNKNOWN", T0).state, "DEGRADED");
+  });
+
+  test("PASS بعد عطل ⇒ RECOVERED ثم GREEN (وآخر فشل لا يُمحى)", () => {
+    const failed = nextAlertState(nextAlertState(freshAlertState(), "BLOCKED", T0), "BLOCKED", T0);
+    const rec = nextAlertState(failed, "PASS", T1);
+    assert.equal(rec.state, "RECOVERED");
+    assert.equal(rec.consecutive_failures, 0);
+    assert.equal(rec.last_success_at, T1);
+    assert.equal(rec.last_failure_at, T0);
+    assert.equal(nextAlertState(rec, "PASS", T1).state, "GREEN");
+  });
+
+  test("parse/format دائريان على متن قضية حقيقي الشكل", () => {
+    const state = nextAlertState(freshAlertState(), "BLOCKED", T0);
+    const body = `الحكم: **BLOCKED** — الحالة: **DEGRADED**\n${formatAlertStateBlock(state, T0)}`;
+    assert.deepEqual(parseAlertState(body), state);
+  });
+
+  test("متن بلا كتلة أو بكتلة فاسدة ⇒ حالة جديدة (لا رمي)", () => {
+    assert.deepEqual(parseAlertState("نص قديم بلا حالة"), freshAlertState());
+    assert.deepEqual(parseAlertState("<!-- probe-state: {broken -->"), freshAlertState());
+    assert.deepEqual(parseAlertState('<!-- probe-state: {"state":"NOPE"} -->'), freshAlertState());
+  });
+
+  test("الـ workflow يحسب الحالة من متن القضية (ربط لا ادعاء)", () => {
+    const wf = fs.readFileSync(".github/workflows/turso-evidence.yml", "utf8");
+    assert.match(wf, /alert-state\.mjs/);
+    assert.match(wf, /nextAlertState\(parseAlertState/);
+    assert.match(wf, /gh issue view.*--json body/, "يقرأ المتن السابق قبل الحساب");
+  });
+});
+
+describe("الدورة 5 — بيان الأدلة المضاد للعبث (#12)", () => {
+  test("buildManifest يحمل الحقول الستة + بصمة SHA-256 صالحة", () => {
+    const rows = [{ id: "conn", ok: true }];
+    const m = buildManifest({
+      rows,
+      verdict: "PASS",
+      env: { GITHUB_SHA: "abc123", GITHUB_RUN_ID: "42" },
+      generatedAt: "2026-09-28T00:00:00.000Z",
+    });
+    assert.equal(m.probe_version, PROBE_VERSION);
+    assert.equal(m.schema_contract_version, 1);
+    assert.equal(m.commit, "abc123");
+    assert.equal(m.run_id, "42");
+    assert.match(m.result_sha256, /^[0-9a-f]{64}$/);
+    assert.ok(verifyManifest(m, { rows, verdict: "PASS" }));
+  });
+
+  test("أي عبث لاحق بالصفوف أو الحكم يُكشَف", () => {
+    const rows = [{ id: "conn", ok: false }];
+    const m = buildManifest({ rows, verdict: "BLOCKED", env: {}, generatedAt: "2026-09-28T00:00:00.000Z" });
+    assert.equal(verifyManifest(m, { rows: [{ id: "conn", ok: true }], verdict: "BLOCKED" }), false);
+    assert.equal(verifyManifest(m, { rows, verdict: "PASS" }), false);
+    assert.equal(verifyManifest(null, { rows, verdict: "BLOCKED" }), false);
+  });
+
+  test("تقرير المجسّ JSON يرفق البيان ويثبت عليه (ربط لا ادعاء)", async () => {
+    const { client, url } = fileClient("aborof-manifest");
+    await runMigrations(client);
+    client.close();
+    const report = JSON.parse(runVerifyTurso(url)) as {
+      verdict: string;
+      rows: unknown[];
+      manifest: { probe_version: number; schema_contract_version: number; result_sha256: string };
+    };
+    assert.equal(report.manifest.probe_version, PROBE_VERSION);
+    assert.equal(report.manifest.schema_contract_version, 1);
+    assert.ok(verifyManifest(report.manifest, { rows: report.rows, verdict: report.verdict }));
+  });
+});
+
+describe("الدورة 5 — عزل المعاينة dormant (#14) وتشديد الصلاحيات (#13)", () => {
+  test("checkPreviewIsolation: تطابق ⇒ fail، اختلاف ⇒ pass، غياب ⇒ skip", () => {
+    assert.equal(checkPreviewIsolation("libsql://a.turso.io", "libsql://a.turso.io").status, "fail");
+    assert.equal(
+      checkPreviewIsolation("libsql://a.turso.io?authToken=x", "libsql://a.turso.io/").status,
+      "fail",
+      "التطبيع يجرّد الاستعلام والشرطة"
+    );
+    assert.equal(
+      checkPreviewIsolation("libsql://preview-x.turso.io", "libsql://prod-x.turso.io").status,
+      "pass"
+    );
+    assert.equal(checkPreviewIsolation("", "libsql://prod.turso.io").status, "skip");
+    assert.equal(
+      checkPreviewIsolation("libsql://a.turso.io", "libsql://a.turso.io").code,
+      "PREVIEW_PROD_SHARED"
+    );
+  });
+
+  test("حكم العزل لا يسرّب أي جزء من القيمتين", () => {
+    const r = checkPreviewIsolation("libsql://secret-preview.turso.io", "libsql://secret-prod.turso.io");
+    assert.doesNotMatch(r.verdict, /secret/);
+  });
+
+  test("turso-evidence.yml: صلاحيات عليا دقيقة + issues:write في التنبيه فقط", () => {
+    const wf = fs.readFileSync(".github/workflows/turso-evidence.yml", "utf8");
+    assert.match(wf, /^permissions:\n  contents: read\n  #.*\n  pull-requests: write\n/m);
+    assert.equal((wf.match(/:\s*write/mg) ?? []).length, 2, "كتاباتان فقط: pull-requests عليا + issues للتنبيه");
+    const alert = wf.slice(wf.indexOf("probe-alert:"));
+    assert.match(alert, /issues: write/);
   });
 });

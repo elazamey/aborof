@@ -65,6 +65,8 @@ export const metrics = {
    * القيد الصريح: العدّاد في الذاكرة لكل نسخة serverless — يُظهر «هل يسقط
    * هذا النسخة» لا إجماليًا عالميًا؛ الإجمالي العالمي يحتاج مصرفًا خارجيًا (P3).
    * يُعرَض في `snapshot().counters["db.fallback_activations_total"]`.
+   * بلا labels أبدًا (cardinality منخفضة إجباريًا — لا request_id ولا مسارات
+   * ولا رموز)؛ التفاصيل في السجلات البنيوية لا على العدّاد. يفرضه قفل بنيوي.
    */
   recordDbFallback() {
     counters.set("db.fallback_activations_total", (counters.get("db.fallback_activations_total") ?? 0) + 1);

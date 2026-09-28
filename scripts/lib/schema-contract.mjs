@@ -8,6 +8,12 @@
  * من هذا الثابت وحده (ليست مدخلات) فلا حقن.
  */
 
+/** نسخة عقد السكيما — تُرفَع مع أي تغيير في SCHEMA_CONTRACT؛ والتطبيق يعلن
+ * الحد الأدنى المقبول في `src/lib/db/schema-version.ts` (نسخة المجسّ ≥ نسخة
+ * التطبيق — يفرضها اختبار التوافق). تُسجَّل في صف `schema-contract` وفي بيان
+ * الأدلة (`evidence-manifest.mjs`). */
+export const SCHEMA_CONTRACT_VERSION = 1;
+
 /** @returns {{table: string, columns: string[]}[]} */
 export const SCHEMA_CONTRACT = [
   {

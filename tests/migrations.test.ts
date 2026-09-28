@@ -207,10 +207,37 @@ describe("migration policy lock (additive + approved backfill)", () => {
     assert.deepEqual(
       checkMigrationSql(
         file,
-        `-- @backfill:approved: PR-9\n-- @backfill:rollback: restore-from-backup\nUPDATE products SET stock=0 WHERE id='p1' LIMIT 100;`
+        `-- @backfill:approved: PR-9\n-- @backfill:purpose: تعبئة رصيد افتتاحي\n-- @backfill:owner: team-db\n-- @backfill:batch_limit: 100\n-- @backfill:expected_rows: ~50\n-- @backfill:rollback: restore-from-backup\n-- @backfill:verification_query: SELECT COUNT(*) FROM products WHERE stock IS NULL\nUPDATE products SET stock=0 WHERE id='p1' LIMIT 100;`
       ),
       [],
-      "backfill مصرّح ومحدود مقبول"
+      "backfill مصرّح وكامل البيانات ومحدود مقبول"
+    );
+  });
+
+  test("backfill metadata: purpose/owner/batch_limit/expected_rows/verification_query required; batch_limit numeric", () => {
+    const file = "0004_stock_backfill.sql";
+    const full = (mutate = (s: string) => s) =>
+      mutate(
+        `-- @backfill:approved: PR-9\n-- @backfill:purpose: تعبئة عمود جديد\n-- @backfill:owner: team-db\n-- @backfill:batch_limit: 500\n-- @backfill:expected_rows: ~12000\n-- @backfill:rollback: restore-from-backup\n-- @backfill:verification_query: SELECT COUNT(*) FROM products WHERE stock IS NULL\nUPDATE products SET stock=0 WHERE stock IS NULL LIMIT 500;`
+      );
+    assert.deepEqual(checkMigrationSql(file, full()), [], "بيانات وصفية كاملة مقبولة");
+    for (const key of ["purpose", "owner", "batch_limit", "expected_rows", "verification_query"]) {
+      const without = full((s) =>
+        s
+          .split("\n")
+          .filter((l) => !l.includes(`@backfill:${key}:`))
+          .join("\n")
+      );
+      assert.ok(
+        checkMigrationSql(file, without).some((v) => v.includes(key)),
+        `غياب ${key} مرفوض`
+      );
+    }
+    assert.ok(
+      checkMigrationSql(file, full((s) => s.replace("batch_limit: 500", "batch_limit: lots"))).some((v) =>
+        v.includes("batch_limit")
+      ),
+      "batch_limit غير رقمي مرفوض"
     );
   });
 
