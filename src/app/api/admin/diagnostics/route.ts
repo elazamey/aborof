@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler, Errors } from "@/lib/errors/handler";
-import { hasDB } from "@/lib/db";
+import { getDbConfigDiagnosis, hasDB } from "@/lib/db";
 import { auditSecretConfiguration, diagnosticsKeyMatches, isDiagnosticsEnabled } from "@/lib/secrets";
 import { actorCan, resolveActor } from "@/lib/rbac";
 import { snapshot } from "@/lib/observability/metrics";
@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 /**
  * نقطة تشخيص محمية بمفتاح مستقل (DIAGNOSTICS_KEY) لا علاقة له بسر الجلسات.
  * معطلة في الإنتاج افتراضيًا (DIAGNOSTICS_ENABLED != true) — عندها تعيد 404
- * موحّدًا حتى لا يُكشف وجودها. لا تُعرض أي قيم أسرار، فقط تحذيرات ومقاييس.
+ * موحّدًا حتى لا يُكشف وجودها. لا تُعرض أي قيم أسرار، فقط تحذيرات ومقاييس
+ * ووصف شكلي لإعداد قاعدة البيانات (نوع القيمة وطولها بلا القيمة).
  */
 export const GET = apiHandler("/api/admin/diagnostics", async (request) => {
   if (!isDiagnosticsEnabled()) throw Errors.diagnosticsDisabled();
@@ -34,6 +35,8 @@ export const GET = apiHandler("/api/admin/diagnostics", async (request) => {
     env: process.env.NODE_ENV ?? "development",
     diagnostics_enabled: true,
     db_configured: hasDB(),
+    // أنواع وأطوال وأسباب فقط (لا قيم): يسمّي بدقة ما يمنع الاتصال بـTurso.
+    db_config: getDbConfigDiagnosis(),
     secret_warnings: warnings,
     metrics: metricsSnapshot,
   });

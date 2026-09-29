@@ -3,21 +3,23 @@ import { SEED_PRODUCTS, type Product } from "@/lib/seed";
 import { runMigrations } from "@/lib/db/migrate";
 import { DomainError, Errors, isProduction, redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
+import {
+  describeDatabaseError,
+  describeTursoConfig,
+  resolveTursoCredentials,
+  type TursoConfigDiagnosis,
+  type TursoCredentialResolution,
+} from "@/lib/db/turso-config";
 
 let _client: Client | null = null;
 let _ready: Promise<void> | null = null;
 let _clientOverride: Client | null = null;
+let _lastConfigReportAt = 0;
 
-function databaseErrorLabel(error: unknown): string {
-  const candidate = error as { name?: unknown; code?: unknown } | null;
-  const name = typeof candidate?.name === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/.test(candidate.name)
-    ? candidate.name
-    : "UnknownError";
-  const code = typeof candidate?.code === "string" && /^[A-Za-z0-9_.-]{1,40}$/.test(candidate.code)
-    ? `, code=${candidate.code}`
-    : "";
-  return `${name}${code}`;
-}
+/** أقصى تكرار لسطر تشخيص الإعداد في السجل (لكل نسخة تشغيل) — يكفي للعثور عليه دون إغراق. */
+const CONFIG_REPORT_INTERVAL_MS = 60_000;
+
+const databaseErrorLabel = describeDatabaseError;
 
 function failDatabaseRead<T>(operation: string, error: unknown, fallback: T): T {
   if (isProduction() && error instanceof DomainError && error.code === "SERVICE_UNAVAILABLE") {
@@ -38,73 +40,93 @@ function databaseNotConfigured<T>(fallback: T): T {
   return fallback;
 }
 
-function isTursoDashboardUrl(value: string): boolean {
-  try {
-    return new URL(value).hostname.toLowerCase() === "app.turso.tech";
-  } catch {
-    return false;
+/** ذاكرة قصيرة لنتيجة الاستخراج: `db()` يُستدعى عدة مرات في الطلب الواحد والقيم لا تتغير. */
+let _resolutionMemo: {
+  url: string | undefined;
+  token: string | undefined;
+  at: number;
+  value: TursoCredentialResolution;
+} | null = null;
+const RESOLUTION_MEMO_MS = 60_000;
+
+function resolveConfig(): TursoCredentialResolution {
+  const url = process.env.TURSO_DATABASE_URL;
+  const token = process.env.TURSO_AUTH_TOKEN;
+  const now = Date.now();
+  if (_resolutionMemo && _resolutionMemo.url === url && _resolutionMemo.token === token && now - _resolutionMemo.at < RESOLUTION_MEMO_MS) {
+    return _resolutionMemo.value;
   }
+  const value = resolveTursoCredentials(url, token, now);
+  _resolutionMemo = { url, token, at: now, value };
+  return value;
 }
 
-function stripEnvWrapper(raw: string | undefined, keyName: string): string {
-  if (!raw) return "";
-  let v = raw.trim();
-  const prefix = `${keyName}=`;
-  if (v.startsWith(prefix)) v = v.slice(prefix.length).trim();
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-    v = v.slice(1, -1).trim();
-  }
-  return v;
-}
-
-function looksLikeJwtToken(v: string): boolean {
-  return /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v);
-}
-
-function normalizeTursoCredentials(): { url: string; authToken: string | undefined } {
-  let url = stripEnvWrapper(process.env.TURSO_DATABASE_URL, "TURSO_DATABASE_URL");
-  let token = stripEnvWrapper(process.env.TURSO_AUTH_TOKEN, "TURSO_AUTH_TOKEN");
-
-  // معالجة تبديل الحقلين بالخطأ (وضع JWT في خانة الرابط ورابط libsql في خانة التوكن)
-  if (looksLikeJwtToken(url) && /^(libsql|wss?|https?):\/\//i.test(token) && !isTursoDashboardUrl(token)) {
-    const tmp = url;
-    url = token;
-    token = tmp;
-  }
-
-  // معالجة كتابة اسم المضيف `.turso.io` بدون البادئة `libsql://`
-  if (/^[a-z0-9][a-z0-9.-]*\.turso\.io(\/.*)?$/i.test(url)) {
-    url = `libsql://${url}`;
-  }
-
-  return { url, authToken: token || undefined };
+/**
+ * وصف آمن (أنواع وأطوال وأسباب بلا أي قيمة) لحالة إعداد Turso الحالية — للتشخيص
+ * المحمي فقط. لا يُكشف في أي استجابة عامة.
+ */
+export function getDbConfigDiagnosis(): TursoConfigDiagnosis {
+  return describeTursoConfig(resolveConfig());
 }
 
 export function hasDB() {
-  return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL?.trim());
+  return Boolean(_clientOverride) || resolveConfig().status !== "unset";
+}
+
+/**
+ * يكتب سطرًا واحدًا منظَّمًا يسمّي سبب فشل الإعداد بدقة (نوع القيمة في كل متغيّر،
+ * لا القيمة). هذا ما يحوّل «إعداد الاتصال غير صالح» من لغز إلى إجراء محدّد:
+ * ابحث في سجلات Vercel عن `db_config_invalid`.
+ */
+function reportConfig(resolution: TursoCredentialResolution, clientError?: string): void {
+  const now = Date.now();
+  if (now - _lastConfigReportAt < CONFIG_REPORT_INTERVAL_MS) return;
+  _lastConfigReportAt = now;
+  const invalid = resolution.status === "invalid" || clientError !== undefined;
+  const line = JSON.stringify({
+    level: invalid ? "error" : "warn",
+    event: invalid ? "db_config_invalid" : "db_config_repaired",
+    ...describeTursoConfig(resolution),
+    ...(clientError ? { client_error: clientError } : {}),
+  });
+  if (invalid) console.error(line);
+  else console.warn(line);
 }
 
 export function db(): Client | null {
   if (_clientOverride) return _clientOverride;
-  const { url: databaseUrl, authToken } = normalizeTursoCredentials();
-  if (!databaseUrl) return null;
 
-  // رابط لوحة Turso ليس endpoint لقاعدة البيانات، وقد يجعل تهيئة العميل نفسها
-  // ترمي استثناءً قبل الوصول إلى معالج أخطاء الاستعلام.
-  if (isTursoDashboardUrl(databaseUrl)) {
-    throw Errors.serviceUnavailable("إعداد رابط قاعدة البيانات غير صالح.");
+  // القيم تُقرأ من البيئة في كل استدعاء (غيابها يعني «غير مهيأ» حتى لو بُني عميل سابقًا)،
+  // أما العميل نفسه فيُبنى مرة واحدة.
+  const resolution = resolveConfig();
+  if (resolution.status === "unset") return null;
+
+  // رابط لوحة Turso ليس endpoint لقاعدة البيانات؛ نشتق منه رابط الاتصال إن أمكن،
+  // وإلا فالإعداد غير صالح. وفي كل حالة فشل تُسجَّل الأسباب بلا أي قيمة.
+  if (resolution.status === "invalid" || !resolution.url) {
+    reportConfig(resolution);
+    throw Errors.serviceUnavailable(
+      resolution.problem === "URL_DASHBOARD_INCOMPLETE"
+        ? "إعداد رابط قاعدة البيانات غير صالح."
+        : "إعداد الاتصال بقاعدة البيانات غير صالح.",
+      { turso_config: describeTursoConfig(resolution) },
+    );
   }
 
   if (!_client) {
     try {
-      _client = createClient({
-        url: databaseUrl,
-        authToken,
+      _client = createClient({ url: resolution.url, authToken: resolution.authToken });
+    } catch (error) {
+      const label = databaseErrorLabel(error);
+      reportConfig(resolution, label);
+      throw Errors.serviceUnavailable("إعداد الاتصال بقاعدة البيانات غير صالح.", {
+        turso_config: describeTursoConfig(resolution),
+        client_error: label,
       });
-    } catch {
-      throw Errors.serviceUnavailable("إعداد الاتصال بقاعدة البيانات غير صالح.");
     }
   }
+  // قيم صالحة بعد إصلاح آلي: يعمل المتجر، ونُنبّه المالك مرة بعد مرة لتصحيحها في Vercel.
+  if (resolution.status === "repaired") reportConfig(resolution);
   return _client;
 }
 
@@ -116,6 +138,18 @@ export function db(): Client | null {
 export function setDbClientForTest(client: Client | null): void {
   _clientOverride = client;
   _ready = null;
+  // العميل المبني من البيئة وحدّ تكرار سطر التشخيص يُصفَّران، كي يبدأ كل اختبار
+  // من حالة نظيفة ولا يرث عميلًا بُني من قيم بيئة اختبار سابق.
+  if (_client) {
+    try {
+      _client.close();
+    } catch {
+      // الإغلاق محاولة فقط.
+    }
+  }
+  _client = null;
+  _lastConfigReportAt = 0;
+  _resolutionMemo = null;
   // إلغاء تخزين Drizzle المرتبط بالعميل السابق — يضمن أن getDrizzle() يلتفّ
   // حول العميل المحقون نفسه في الاختبارات (ملف مؤقت لكل اختبار).
   // يُستدعى resetDrizzleForTest صراحةً في الاختبارات أيضًا؛ هذا هنا احتياط.

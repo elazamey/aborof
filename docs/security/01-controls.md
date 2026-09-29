@@ -72,8 +72,9 @@
   في هذا المتجر (مستأجر واحد) العزل هو فصل الأوامر الإدارية عن الواجهة العامة؛
   بنية العقود و`.strict()` تمنع تمرير أي معرّف نطاق من العميل.
 
-## 6. رؤوس HTTP والمراقبة — `src/middleware.ts`, `src/lib/security/headers.ts`
+## 6. رؤوس HTTP والمراقبة — `src/proxy.ts`, `src/lib/security/headers.ts`
 
+- الملف `src/proxy.ts` (كان `src/middleware.ts` قبل أن يُوقف Next.js 16 اصطلاح `middleware`؛ السلوك والمطابِق كما هما).
 - رؤوس مفعّلة فورًا: `Strict-Transport-Security`، `X-Content-Type-Options: nosniff`،
   `X-Frame-Options: DENY`، `Referrer-Policy`، `Permissions-Policy`،
   `Cross-Origin-Opener-Policy`.
