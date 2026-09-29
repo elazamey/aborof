@@ -177,17 +177,26 @@ if [ -z "$DB" ]; then
       # هو الإنتاجية. لكل سجل تُسكّ توكن قراءة قصير (5m — ينتهي وحده) ويُقرأ
       # verify بلا أي كتابة؛ «المستخدمة» = schema_migrations أو جدول order_items.
       # واحدة مُستخدمة فقط ⇒ هي المختارة؛ وإلا اسم صريح مطلوب (لا يُطبع أي اسم).
+      # برهنة ثانية حين كل السجلات فارغة: رابط لوحة التحكم في التقرير موثّق
+      # بطوله (47 حرفًا · مقاطع 8/9/5) ⇒ اسم الإنتاجية محصور بـ 5 أحرف — إن كان
+      # سجل واحد بهذه الصفة فهو المختار. المحتوى (أعلاه) يبقى أولوية أولى.
       TOUCHED_N=0
+      LEN5_N=0
       CANDIDATES="$(printf '%s' "$DB_JSON" | jq -r '.databases[] | [(.Name // .name // .db_name), (.Hostname // .hostname)] | @tsv' 2>/dev/null || true)"
       EVIDENCE_I=0
       while IFS=$'\t' read -r cname chost; do
         [ -n "${cname:-}" ] && [ -n "${chost:-}" ] || continue
         EVIDENCE_I=$((EVIDENCE_I + 1))
+        clen="${#cname}"
+        if [ "$clen" = 5 ]; then
+          LEN5_N=$((LEN5_N + 1))
+          DB="$cname"
+        fi
         api POST "$API_BASE/v1/organizations/$ORG/databases/$cname/auth/tokens?authorization=read-only&expiration=5m" '{}'
         cjwt="$(printf '%s' "$API_BODY" | jq -r '.jwt // empty' 2>/dev/null || true)"
         if [ "$API_STATUS" != 200 ] || [ -z "$cjwt" ]; then
           # فحص مرشّح فشل — يُعلَن بالحالة فقط (لا اسم، لا جسم استجابة).
-          echo "EVIDENCE i=${EVIDENCE_I} mint=${API_STATUS} jwt=$([ -n "$cjwt" ] && echo yes || echo no)"
+          echo "EVIDENCE i=${EVIDENCE_I} len=${clen} mint=${API_STATUS} jwt=$([ -n "$cjwt" ] && echo yes || echo no)"
           continue
         fi
         cv="$(verify_pair "libsql://${chost}" "$cjwt")"
@@ -197,7 +206,7 @@ if [ -z "$DB" ]; then
         r8="$(row_ok "$cv" row-8)"
         r9="$(row_ok "$cv" row-9)"
         if [ -z "$cv" ]; then conn="empty"; fi
-        echo "EVIDENCE i=${EVIDENCE_I} mint=200 conn=${conn:-none} mig=${mig:-none} row7=${r7:-none} row8=${r8:-none} row9=${r9:-none}"
+        echo "EVIDENCE i=${EVIDENCE_I} len=${clen} mint=200 conn=${conn:-none} mig=${mig:-none} row7=${r7:-none} row8=${r8:-none} row9=${r9:-none}"
         # «مستخدمة» بأي أثر محتوى: جدول هجرات أو إصلاح P0 أو FTS أو تزامنه — لأن
         # الإنتاجية القديمة قد تسبق schema_migrations (يُثبتها FTS أو الجداول لا الهجرة).
         if [ "$mig" = "true" ] || [ "$r7" = "true" ] || [ "$r8" = "true" ] || [ "$r9" = "true" ]; then
@@ -207,8 +216,10 @@ if [ -z "$DB" ]; then
       done <<< "$CANDIDATES"
       if [ "$TOUCHED_N" = 1 ]; then
         echo "✅ اختيرت بالبرهنة القاعدة المستخدمة وحدها (من ${DB_COUNT} سجلًا — جداول فعلية، قراءة فقط، توكن الفحص ينتهي خلال 5 دقائق)."
+      elif [ "$TOUCHED_N" = 0 ] && [ "$LEN5_N" = 1 ]; then
+        echo "✅ كل السجلات فارغة — اختيرت بالبرهنة الدокументية: سجل واحد طول اسمه 5 أحرف (طول رابط اللوحة الموثّق 47 · مقاطع 8/9/5)."
       elif [ "$TOUCHED_N" = 0 ]; then
-        fail "لا جداول في أي من ${DB_COUNT} سجل — لا يمكن التعرّف على الإنتاجية؛ حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
+        fail "لا جداول في أي من ${DB_COUNT} سجل ولا طول اسم فريد (=5) — حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
       else
         fail "أكثر من سجل به جداول فعلية (${TOUCHED_N} من ${DB_COUNT}) — حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
       fi

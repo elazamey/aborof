@@ -593,15 +593,39 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
       // في بيئة الاختبار لا جداول حقيقية ⇒ صفر مُستخدمة ⇒ فشل مغلق يطلب الاسم الصريح.
       assert.equal(res.status, 1, out);
       // المسح يشمل كل السجلات الثلاثة (حتى ذات parent) بحالة واحدة لكل واحد.
-      assert.match(out, /EVIDENCE i=1 mint=200/);
-      assert.match(out, /EVIDENCE i=2 mint=200/);
-      assert.match(out, /EVIDENCE i=3 mint=200/);
+      assert.match(out, /EVIDENCE i=1 len=7 mint=200/);
+      assert.match(out, /EVIDENCE i=2 len=8 mint=200/);
+      assert.match(out, /EVIDENCE i=3 len=8 mint=200/);
       assert.match(out, /TURSO_DB/);
       assert.match(out, /vars\.TURSO_DB/);
       assert.doesNotMatch(out, /base-db/, "لا اسم قاعدة في المخرج");
       assert.doesNotMatch(out, /branch-a/, "لا اسم فرع في المخرج");
       const log = fs.readFileSync(logFile, "utf8");
       assert.match(log, /auth\/tokens\?authorization=read-only&expiration=5m/, "توكن فحص قصير لكل سجل");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  test("برهنة طول الرابط: بين سجلات فارغة يُختار سجل الاسم الخماسي (طول لوحة موثّق 5)", () => {
+    const { binDir } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--dry-run", "--skip-verify"], {
+        encoding: "utf8",
+        input: "",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_PLATFORM_TOKEN: "platform-fake-token",
+          FAKE_DBS:
+            '{"databases":[{"Name":"rofyd","Hostname":"rofyd-elazamey.turso.io"},' +
+            '{"Name":"sevenxx","Hostname":"sevenxx-elazamey.turso.io"}]}',
+        },
+      });
+      const out = res.stdout + res.stderr;
+      assert.equal(res.status, 0, out);
+      assert.match(res.stdout, /سجل واحد طول اسمه 5 أحرف/);
+      assert.doesNotMatch(out, /rofyd/, "لا اسم قاعدة في المخرج");
     } finally {
       fs.rmSync(binDir, { recursive: true, force: true });
     }
