@@ -26,6 +26,13 @@ import {
 } from "../scripts/smoke-production.mjs";
 import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
 import {
+  DEFAULT_THRESHOLD_DAYS,
+  LIFECYCLE_STATUSES,
+  classifyLifecycle,
+  decodeTokenExpiry,
+  renderEvidence,
+} from "../scripts/audit-token-lifecycle.mjs";
+import {
   AUTHORIZATION_LEVELS,
   DEFAULT_EXPIRATION,
   connectionUrlFor,
@@ -1285,5 +1292,567 @@ describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ �
     assert.equal(pkg.scripts["migrations:plan"], "node scripts/apply-migrations.mjs");
     assert.match(pkg.scripts["migrations:apply"], /--import tsx/);
     assert.match(pkg.scripts["migrations:apply"], /apply-migrations\.mjs --apply/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* مراقبة دورة حياة الرمز (exp): التدقيق ← غلاف CI ← عقد الـ workflow    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * سياسة المستودع صارت `90d` لا `never`، والعمر المحدود يُلزم بالتدوير؛ لكن أسرار
+ * Actions لا تُقرأ إلا داخل runner، فلا موعد يُعرف إلا بفكّ `exp` هناك. هذه الاختبارات
+ * تثبت العقد حرفيًا: >14d ⇒ PASS · ≤14d ⇒ WARNING (اليوم الرابع عشر نفسه داخل
+ * البوابة) · منتهي أو قيمة لا تُفكّ ⇒ FAIL · `never` ⇒ ليس خطأً لكنه معروض بوضوح.
+ * ومعها: Issue واحد دائم (فتح عند الدخول، تحديث جسمه أثناءه، إغلاق عند الخروج) بلا
+ * ضوضاء أسبوعية، ولا تسريب لأي جزء من الرمز، ولا قدرة على التدوير من الـ workflow.
+ */
+const LIFECYCLE_NOW_ISO = "2026-09-29T12:00:00.000Z";
+const LIFECYCLE_NOW_MS = Date.parse(LIFECYCLE_NOW_ISO);
+const LIFECYCLE_CANARY = "LIFECYCLE-CANARY-SIGNATURE";
+const LIFECYCLE_ISSUE_TITLE = "تدوير رمز قاعدة Turso — مراقبة دورة الحياة";
+
+/** رمز عمره `days` من ساعة الاختبار المثبتة (تُقبل الكسور: 13.99999 يومًا مثلًا). */
+function lifecycleToken(days: number, payloadExtra: Record<string, unknown> = {}): string {
+  const exp = Math.floor(LIFECYCLE_NOW_MS / 1000) + Math.round(days * 86_400);
+  return syntheticJwt({ a: "full_access", exp, ...payloadExtra }, LIFECYCLE_CANARY);
+}
+
+/** رمز `never`: بلا مطالبة exp — كما يعيده Turso عند expiration=never. */
+function lifecycleTokenNever(): string {
+  return syntheticJwt({ a: "full_access" }, LIFECYCLE_CANARY);
+}
+
+function lifecycleVerdict(token: string, thresholdDays = DEFAULT_THRESHOLD_DAYS) {
+  return classifyLifecycle({
+    decoded: decodeTokenExpiry(token),
+    nowMs: LIFECYCLE_NOW_MS,
+    thresholdDays,
+  });
+}
+
+/** بيئة CLI معزولة: لا قيمة متسربة من البيئة الخارجية تُفسد الحكم. */
+function auditEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    TURSO_AUTH_TOKEN: "",
+    TURSO_TOKEN_ENV: "",
+    TURSO_ROTATION_THRESHOLD_DAYS: "",
+    ...extra,
+  };
+}
+
+function runAudit(args: string[], env: NodeJS.ProcessEnv) {
+  return spawnSync("node", ["scripts/audit-token-lifecycle.mjs", ...args], { encoding: "utf8", env });
+}
+
+/** كل مقطع من الرمز الاصطناعي — لإثبات أن **أي** جزء منه لا يصل إلى مخرج. */
+function tokenFragments(token: string): string[] {
+  return token.split(".").filter((part) => part.length >= 8);
+}
+
+describe("scripts/audit-token-lifecycle — بوابة exp عند حدودها", () => {
+  test("أكثر من 14 يومًا ⇒ PASS بلا إجراء", () => {
+    const verdict = lifecycleVerdict(lifecycleToken(15));
+    assert.equal(verdict.status, "PASS");
+    assert.equal(verdict.action, "NONE");
+    assert.equal(verdict.remainingDays, 15);
+    assert.equal(verdict.expiresAt, "2026-10-14");
+    assert.equal(verdict.thresholdDays, DEFAULT_THRESHOLD_DAYS);
+  });
+
+  test("14 يومًا بالضبط ⇒ WARNING (البوابة ≤ لا <)", () => {
+    const verdict = lifecycleVerdict(lifecycleToken(14));
+    assert.equal(verdict.status, "WARNING");
+    assert.equal(verdict.action, "OPEN_OR_UPDATE_ISSUE");
+    assert.equal(verdict.remainingDays, 14);
+    assert.equal(verdict.remainingMs, 14 * 86_400_000, "اليوم الرابع عشر نفسه داخل البوابة");
+  });
+
+  test("ثانية على أي جانب من البوابة ⇒ المقارنة بالميلي ثانية لا بالأيام المقرّبة", () => {
+    const justInside = lifecycleVerdict(lifecycleToken(14 - 1 / 86_400));
+    assert.equal(justInside.status, "WARNING");
+    assert.equal(justInside.remainingDays, 13);
+    const justOutside = lifecycleVerdict(lifecycleToken(14 + 1 / 86_400));
+    assert.equal(justOutside.status, "PASS");
+    assert.equal(justOutside.remainingDays, 14);
+  });
+
+  test("أقل من 14 يومًا ⇒ WARNING مع الأيام المتبقية", () => {
+    const verdict = lifecycleVerdict(lifecycleToken(3));
+    assert.equal(verdict.status, "WARNING");
+    assert.equal(verdict.remainingDays, 3);
+    assert.match(verdict.note, /داخل بوابة التدوير/);
+  });
+
+  test("منتهي ⇒ FAIL بتدوير فوري والأيام بالسالب", () => {
+    const verdict = lifecycleVerdict(lifecycleToken(-2));
+    assert.equal(verdict.status, "FAIL");
+    assert.equal(verdict.action, "OPEN_OR_UPDATE_ISSUE");
+    assert.equal(verdict.remainingDays, -2);
+    assert.equal(verdict.expiresAt, "2026-09-27");
+    assert.match(verdict.note, /منتهي/);
+  });
+
+  test("بلا exp (never) ⇒ NO_EXPIRY: ليس خطأً لكنه معروض بوضوح وخلاف سياسة 90d", () => {
+    const verdict = lifecycleVerdict(lifecycleTokenNever());
+    assert.equal(verdict.status, "NO_EXPIRY");
+    assert.equal(verdict.action, "NONE");
+    assert.equal(verdict.remainingDays, null);
+    assert.equal(verdict.expiresAt, "", "لا موعد يُخترع لرمز أبدي");
+    assert.match(verdict.note, /سياسة 90d/);
+  });
+
+  test("قيمة لا تُفكّ ⇒ FAIL (مقطع واحد، وحمولة فاسدة، و exp ليست رقمًا)", () => {
+    const single = lifecycleVerdict("ليس-رمزًا-أصلًا");
+    assert.equal(single.status, "FAIL");
+    assert.match(single.note, /ليست JWT/);
+
+    const brokenPayload = lifecycleVerdict("eyJhbGciOiJFZERTQSJ9.ليس-base64-صالح!.SIG");
+    assert.equal(brokenPayload.status, "FAIL");
+    assert.match(brokenPayload.note, /غير قابلة للفك/);
+
+    const expNotNumber = lifecycleVerdict(syntheticJwt({ a: "full_access", exp: "غدًا" }, LIFECYCLE_CANARY));
+    assert.equal(expNotNumber.status, "FAIL");
+    assert.match(expNotNumber.note, /exp/);
+  });
+
+  test("رابط اتصال لُصق في حقل الرمز ⇒ FAIL باسمه (عطل الإنتاج المرصود)", () => {
+    const libsql = lifecycleVerdict("libsql://aborof-elazamey.turso.io?authToken=x");
+    assert.equal(libsql.status, "FAIL");
+    assert.equal(libsql.action, "OPEN_OR_UPDATE_ISSUE");
+    assert.match(libsql.note, /MISPLACED_VALUE/);
+    assert.match(libsql.note, /TURSO_DATABASE_URL/, "الملاحظة تقول أين ينتمي الرابط");
+
+    const dashboard = lifecycleVerdict("https://app.turso.tech/elazamey/databases/aborof");
+    assert.equal(dashboard.status, "FAIL");
+    assert.match(dashboard.note, /MISPLACED_VALUE/);
+  });
+
+  test("لا قيمة ⇒ NOT_CONFIGURED تخطٍّ لا فشل", () => {
+    const verdict = lifecycleVerdict("");
+    assert.equal(verdict.status, "NOT_CONFIGURED");
+    assert.equal(verdict.action, "NONE");
+    assert.equal(verdict.remainingDays, null);
+  });
+
+  test("البوابة قابلة للضبط: 20 يومًا PASS افتراضيًا و WARNING عند بوابة 30", () => {
+    const token = lifecycleToken(20);
+    assert.equal(lifecycleVerdict(token).status, "PASS");
+    assert.equal(lifecycleVerdict(token, 30).status, "WARNING");
+    assert.equal(lifecycleVerdict(token, 30).thresholdDays, 30);
+  });
+
+  test("الأحكام الخمسة ثابتة الاسم (يقرؤها الغلاف والـ workflow)", () => {
+    assert.deepEqual(LIFECYCLE_STATUSES, ["PASS", "WARNING", "FAIL", "NO_EXPIRY", "NOT_CONFIGURED"]);
+    assert.equal(DEFAULT_THRESHOLD_DAYS, 14);
+  });
+
+  test("الفكّ لا يُعيد أي مطالبة غير exp: لا sub ولا id ولا توقيع ولا حمولة", () => {
+    const token = syntheticJwt(
+      { sub: "platform-canary-subject", id: 4242, a: "full_access", exp: Math.floor(LIFECYCLE_NOW_MS / 1000) + 86_400 },
+      LIFECYCLE_CANARY
+    );
+    const decoded = decodeTokenExpiry(token);
+    assert.deepEqual(Object.keys(decoded).sort(), ["exp", "kind", "length", "parseNote", "shape"]);
+    const serialized = JSON.stringify(decoded);
+    assert.doesNotMatch(serialized, /platform-canary-subject|LIFECYCLE-CANARY|full_access/);
+    assert.ok(!serialized.includes(token.split(".")[1]), "ولا نص الحمولة المشفّر");
+    assert.equal(decoded.kind, "JWT");
+    assert.ok(typeof decoded.length === "number" && decoded.length > 0);
+  });
+
+  test("كتلة الأدلة بالحرف المطلوب — المفاتيح الستة بالترتيب", () => {
+    const evidence = renderEvidence(lifecycleVerdict(lifecycleToken(3)), { tokenEnv: "TURSO_AUTH_TOKEN" });
+    assert.deepEqual(evidence.split("\n").slice(0, 6), [
+      "Turso token lifecycle audit",
+      "Status: WARNING",
+      "Expires: 2026-10-02",
+      "Remaining: 3 days",
+      "Rotation threshold: 14 days",
+      "Action: OPEN_OR_UPDATE_ISSUE",
+    ]);
+    // الرمز الأبدي يُعرض بوضوح لا كرقم مخترع.
+    const never = renderEvidence(lifecycleVerdict(lifecycleTokenNever()));
+    assert.match(never, /^Expires: never$/m);
+    assert.match(never, /^Remaining: n\/a$/m);
+    assert.match(never, /^Status: NO_EXPIRY$/m);
+  });
+});
+
+describe("scripts/audit-token-lifecycle — عقد CLI وأكواد الخروج", () => {
+  const baseArgs = ["--now", LIFECYCLE_NOW_ISO];
+
+  test("أكواد الخروج: 0 أخضر · 10 تحذير · 1 أحمر · 2 غير مهيأ · 64 استخدام خاطئ", () => {
+    const cases: Array<[string, string, number]> = [
+      ["PASS", lifecycleToken(40), 0],
+      ["NO_EXPIRY", lifecycleTokenNever(), 0],
+      ["WARNING", lifecycleToken(5), 10],
+      ["FAIL منتهي", lifecycleToken(-1), 1],
+      ["FAIL لا يُفكّ", "ليس-رمزًا", 1],
+      ["NOT_CONFIGURED", "", 2],
+    ];
+    for (const [label, token, expected] of cases) {
+      const res = runAudit([...baseArgs, "--json"], auditEnv({ TURSO_AUTH_TOKEN: token }));
+      assert.equal(res.status, expected, `${label}: كود الخروج`);
+      const report = JSON.parse(res.stdout);
+      assert.equal(report.checkedAt, LIFECYCLE_NOW_ISO, `${label}: --now يثبّت الساعة`);
+      assert.equal(report.tokenEnv, "TURSO_AUTH_TOKEN");
+    }
+    const badThreshold = runAudit([...baseArgs, "--threshold-days", "abc"], auditEnv());
+    assert.equal(badThreshold.status, 64);
+    assert.equal(badThreshold.stdout.trim(), "", "خطأ الاستخدام لا يُنتج تقريرًا (الغلاف يفشل بصوت عالٍ)");
+    const badNow = runAudit(["--now", "ليس-تاريخًا", "--json"], auditEnv());
+    assert.equal(badNow.status, 64);
+  });
+
+  test("التقرير الآلي يحمل حقول الملخّص: الحكم والتاريخ والأيام والبوابة والإجراء", () => {
+    const res = runAudit([...baseArgs, "--json"], auditEnv({ TURSO_AUTH_TOKEN: lifecycleToken(9) }));
+    assert.equal(res.status, 10);
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.status, "WARNING");
+    assert.equal(report.remainingDays, 9);
+    assert.equal(report.expiresAt, "2026-10-08");
+    assert.equal(report.thresholdDays, 14);
+    assert.equal(report.action, "OPEN_OR_UPDATE_ISSUE");
+    assert.equal(report.kind, "JWT");
+    assert.match(report.shape, /JWT بثلاثة مقاطع/);
+  });
+
+  test("المخرج المقروء يطبع كتلة الأدلة حرفيًا في ملخّص التشغيل", () => {
+    const res = runAudit(baseArgs, auditEnv({ TURSO_AUTH_TOKEN: lifecycleToken(40) }));
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /^Turso token lifecycle audit$/m);
+    assert.match(res.stdout, /^Status: PASS$/m);
+    assert.match(res.stdout, /^Remaining: 40 days$/m);
+    assert.match(res.stdout, /^Rotation threshold: 14 days$/m);
+    assert.match(res.stdout, /^Action: NONE$/m);
+    assert.match(res.stdout, /^Source: TURSO_AUTH_TOKEN/m, "يُقال من أين قُرئت القيمة");
+    assert.match(res.stdout, /### /, "عنوان markdown صالح للملخّص");
+  });
+
+  test("لا قيمة ولا جزء منها في أي مخرج — لكل حكم (canary)", () => {
+    const tokens = [lifecycleToken(40), lifecycleToken(5), lifecycleToken(-1), lifecycleTokenNever()];
+    for (const token of tokens) {
+      for (const args of [baseArgs, [...baseArgs, "--json"]]) {
+        const res = runAudit(args, auditEnv({ TURSO_AUTH_TOKEN: token }));
+        const combined = res.stdout + res.stderr;
+        assert.doesNotMatch(combined, /LIFECYCLE-CANARY/, "التوقيع لا يُطبع");
+        for (const fragment of tokenFragments(token)) {
+          assert.ok(!combined.includes(fragment), `مقطع من الرمز ظهر في المخرج: ${args.join(" ")}`);
+        }
+      }
+    }
+  });
+
+  test("البوابة من CLI ومن البيئة، ومتغير الرمز قابل للتبديل", () => {
+    const token = lifecycleToken(20);
+    const cli = runAudit([...baseArgs, "--json", "--threshold-days", "30"], auditEnv({ TURSO_AUTH_TOKEN: token }));
+    assert.equal(JSON.parse(cli.stdout).status, "WARNING");
+    const envThreshold = runAudit([...baseArgs, "--json"], auditEnv({ TURSO_AUTH_TOKEN: token, TURSO_ROTATION_THRESHOLD_DAYS: "30" }));
+    assert.equal(JSON.parse(envThreshold.stdout).status, "WARNING");
+    const otherEnv = runAudit([...baseArgs, "--json", "--token-env", "TURSO_ROTATION_TOKEN"], auditEnv({ TURSO_ROTATION_TOKEN: token }));
+    assert.equal(otherEnv.status, 0);
+    assert.equal(JSON.parse(otherEnv.stdout).tokenEnv, "TURSO_ROTATION_TOKEN");
+  });
+
+  test("--help يطبع العقد من الترويسة: الأحكام والأكواد ومبدأ عدم الطباعة", () => {
+    const res = runAudit(["--help"], auditEnv());
+    assert.equal(res.status, 0);
+    for (const status of LIFECYCLE_STATUSES) assert.match(res.stdout, new RegExp(status));
+    assert.match(res.stdout, /14/);
+    assert.match(res.stdout, /مراقبة فقط/);
+    assert.match(res.stdout, /لا تُطبع قيمة الرمز/);
+  });
+
+  test("سلسلة الاستيراد مبنية على Node وحده — التدقيق يعمل بلا تثبيت تبعيات", () => {
+    for (const file of [
+      "scripts/audit-token-lifecycle.mjs",
+      "scripts/lib/turso-api.mjs",
+      "scripts/lib/db-url.mjs",
+      "scripts/lib/migration-checksums.mjs",
+    ]) {
+      const source = fs.readFileSync(file, "utf8");
+      // ‏node: وحدات قياسية، و./ و../ ملفات المستودع — الباقي (لو وُجد) حزمة خارجية.
+      const bare = [...source.matchAll(/^import\s[^;]*?from\s+"((?!node:)[^".][^"]*)"/gm)].map((match) => match[1]);
+      assert.deepEqual(bare, [], `${file}: لا استيراد من حزمة خارجية (لا سلسلة توريد في مسار المراقبة)`);
+    }
+  });
+
+  test("أمر npm للتدقيق المحلي", () => {
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    assert.equal(pkg.scripts["audit:token"], "node scripts/audit-token-lifecycle.mjs");
+  });
+});
+
+/**
+ * يحذف أسطر الشرح (`#…`) من shell أو YAML: العقود **السلبية** تُقاس على الأوامر لا على
+ * النثر — وترويسة كل أداة تشرح ما لا تفعله، فتذكر بالأسماء ما تنفيه (`set -x`،
+ * ‏`TURSO_PLATFORM_TOKEN`، `npm ci`…). الإيجابيات تبقى على النص كاملًا.
+ */
+function withoutComments(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+}
+
+/**
+ * `gh` وهمي يسجّل argv ويردّ بقائمة Issues قابلة للضبط — لإثبات قاعدة «Issue واحد
+ * دائم»: فتح عند الدخول إلى منطقة الخطر، **تحديث جسمه** أثناء البقاء فيها (لا تعليق
+ * جديد أسبوعيًا)، وإغلاقه عند الخروج. والقراءة وحدها (`issue list`) حين يكون كل شيء سليمًا.
+ */
+function writeFakeGhForIssues(dir: string, logFile: string, openIssues: Array<{ number: number; title: string }>): void {
+  const target = path.join(dir, "gh");
+  fs.writeFileSync(
+    target,
+    [
+      "#!/usr/bin/env bash",
+      `echo "CALL gh $*" >> "${logFile}"`,
+      `if [ "$1 $2" = "issue list" ]; then printf '%s' '${JSON.stringify(openIssues)}'; fi`,
+      "exit 0",
+      "",
+    ].join("\n")
+  );
+  fs.chmodSync(target, 0o755);
+}
+
+function runLifecycleCi(options: {
+  token: string;
+  openIssues?: Array<{ number: number; title: string }>;
+  thresholdDays?: string;
+  ghToken?: string;
+}) {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "lifecycle-ci-"));
+  const logFile = path.join(dir, "gh-calls.log");
+  const summaryFile = path.join(dir, "step-summary.md");
+  writeFakeGhForIssues(dir, logFile, options.openIssues ?? []);
+  const res = spawnSync("bash", ["scripts/token-lifecycle-ci.sh"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${dir}:${process.env.PATH}`,
+      TURSO_AUTH_TOKEN: options.token,
+      THRESHOLD_DAYS: options.thresholdDays ?? "14",
+      SCOPE: "أسرار نطاق المستودع (production)",
+      GITHUB_STEP_SUMMARY: summaryFile,
+      GH_TOKEN: options.ghToken ?? "fake-gh-token",
+      RUN_URL: "https://github.com/elazamey/aborof/actions/runs/1",
+    },
+  });
+  const calls = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+  const summary = fs.existsSync(summaryFile) ? fs.readFileSync(summaryFile, "utf8") : "";
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, combined: res.stdout + res.stderr, calls, summary };
+}
+
+describe("scripts/token-lifecycle-ci.sh — Issue واحد دائم، بلا ضوضاء أسبوعية", () => {
+  const openIssues = [{ number: 7, title: LIFECYCLE_ISSUE_TITLE }];
+  const unrelatedIssue = [{ number: 9, title: "عطل آخر في المتجر" }];
+
+  test("الدخول إلى منطقة الخطر ⇒ Issue واحد جديد + تحذير + ملخّص (خروج 10)", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(12) });
+    assert.equal(run.status, 10, "التحذير يُحمرّ التشغيل المجدول عمدًا ليبقى ظاهرًا");
+    assert.match(run.calls, /CALL gh issue create --title /);
+    assert.match(run.calls, /--body-file/, "جسم الـ Issue من ملف لا من وسيط سطر أوامر");
+    assert.doesNotMatch(run.calls, /issue edit|issue close/);
+    assert.match(run.stdout, /::warning::/);
+    assert.match(run.summary, /^Turso token lifecycle audit$/m);
+    assert.match(run.summary, /^Status: WARNING$/m);
+    assert.match(run.summary, /^Rotation threshold: 14 days$/m);
+  });
+
+  test("البقاء داخلها أسبوعًا بعد آخر ⇒ تحديث جسم Issue نفسه، لا Issue جديد ولا تعليق", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(6), openIssues });
+    assert.equal(run.status, 10);
+    assert.match(run.calls, /CALL gh issue edit 7 --body-file/);
+    assert.doesNotMatch(run.calls, /issue create|issue close|issue comment/);
+    assert.match(run.stdout, /بلا تعليق جديد/);
+  });
+
+  test("Issue بعنوان آخر لا يُحتسب: المطابقة بالعنوان حرفيًا لا بالبحث النصي", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(6), openIssues: unrelatedIssue });
+    assert.equal(run.status, 10);
+    assert.match(run.calls, /CALL gh issue create/, "لا يُعدَّل Issue غريب");
+    assert.doesNotMatch(run.calls, /issue edit 9/);
+  });
+
+  test("الخروج من منطقة الخطر ⇒ إغلاق الـ Issue تلقائيًا (خروج 0)", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(80), openIssues });
+    assert.equal(run.status, 0);
+    assert.match(run.calls, /CALL gh issue close 7 --reason completed/);
+    assert.doesNotMatch(run.calls, /issue create|issue edit/);
+    assert.match(run.stdout, /::notice::/);
+    assert.match(run.summary, /^Status: PASS$/m);
+  });
+
+  test("كل شيء سليم وبلا Issue ⇒ قراءة واحدة فقط وصفر نداءات كاتبة", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(80) });
+    assert.equal(run.status, 0);
+    assert.match(run.calls, /CALL gh issue list/);
+    assert.doesNotMatch(run.calls, /issue create|issue edit|issue close|issue comment/);
+    assert.equal((run.calls.match(/CALL gh/g) ?? []).length, 1, "قراءة واحدة لا غير");
+  });
+
+  test("الرمز الأبدي ⇒ أخضر (خروج 0) مع تحذير واضح وإغلاق أي Issue قديم", () => {
+    const run = runLifecycleCi({ token: lifecycleTokenNever(), openIssues });
+    assert.equal(run.status, 0, "never ليس خطأً");
+    assert.match(run.summary, /^Status: NO_EXPIRY$/m);
+    assert.match(run.summary, /^Expires: never$/m);
+    assert.match(run.stdout, /::warning::.*بلا انتهاء/);
+    assert.match(run.calls, /CALL gh issue close 7/);
+  });
+
+  test("منتهي ⇒ أحمر (خروج 1) و Issue واحد", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(-3) });
+    assert.equal(run.status, 1);
+    assert.match(run.stdout, /::error::/);
+    assert.match(run.calls, /CALL gh issue create/);
+    assert.match(run.summary, /^Status: FAIL$/m);
+  });
+
+  test("غير مهيأ ⇒ تخطٍّ أخضر (خروج 0) بلا أي نداء كاتب", () => {
+    const run = runLifecycleCi({ token: "", openIssues });
+    assert.equal(run.status, 0);
+    assert.match(run.summary, /^Status: NOT_CONFIGURED$/m);
+    assert.match(run.stdout, /::warning::TURSO_AUTH_TOKEN غير مضبوط/);
+    assert.doesNotMatch(run.calls, /issue create|issue edit|issue close/);
+  });
+
+  test("بلا GH_TOKEN (تشغيل من fork مثلًا) ⇒ التحذير كامل بلا Issue وبلا فشل إضافي", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(4), openIssues, ghToken: "" });
+    assert.equal(run.status, 10);
+    assert.doesNotMatch(run.calls, /CALL gh/, "لا نداء إطلاقًا بلا رمز GitHub");
+    assert.match(run.stdout, /gh\/GH_TOKEN غير متاحين/);
+    assert.match(run.summary, /^Status: WARNING$/m, "التقرير يبقى كاملًا في الملخّص");
+  });
+
+  test("البوابة تُمرَّر إلى التدقيق: 30 يومًا تجعل رمز 20 يومًا تحذيرًا", () => {
+    const run = runLifecycleCi({ token: lifecycleToken(20), thresholdDays: "30" });
+    assert.equal(run.status, 10);
+    assert.match(run.summary, /^Rotation threshold: 30 days$/m);
+    assert.match(run.calls, /CALL gh issue create/);
+  });
+
+  test("لا تسريب: لا الرمز ولا أي مقطع منه في السجل أو الملخّص أو نداءات gh", () => {
+    const token = lifecycleToken(11);
+    const run = runLifecycleCi({ token, openIssues });
+    for (const haystack of [run.combined, run.summary, run.calls]) {
+      assert.doesNotMatch(haystack, /LIFECYCLE-CANARY/);
+      for (const fragment of tokenFragments(token)) assert.ok(!haystack.includes(fragment));
+    }
+    assert.match(run.calls, /--body-file/, "القيمة تصل عبر ملف مؤقّت لا عبر argv");
+  });
+
+  test("عقد الغلاف النصي: بلا set -x، بلا تدوير، بلا لمس للأسرار", () => {
+    const script = fs.readFileSync("scripts/token-lifecycle-ci.sh", "utf8");
+    // السلبيات على **الأوامر**: الترويسة تشرح ما لا يفعله الغلاف فتذكر هذه الأسماء نفيًا.
+    const code = withoutComments(script);
+    assert.doesNotMatch(code, /set -x/, "لا تتبّع shell يطبع القيم");
+    assert.doesNotMatch(code, /TURSO_PLATFORM_TOKEN/, "لا قدرة على السكّ أو التدوير");
+    assert.doesNotMatch(code, /gh secret set|vercel env|gh secret edit/, "لا كتابة في الأسرار");
+    assert.doesNotMatch(code, /\$\{?TURSO_AUTH_TOKEN/, "لا قراءة مباشرة للسرّ: التدقيق وحده يلمسه");
+    assert.match(script, /--body-file/, "أجسام الـ Issues من ملفات");
+    assert.match(script, /issue edit/, "تحديث بدل تكرار");
+    assert.match(script, /issue close/, "إغلاق عند الخروج من منطقة الخطر");
+    assert.match(script, /GITHUB_STEP_SUMMARY/);
+    assert.match(script, /^set -uo pipefail$/m);
+  });
+});
+
+describe(".github/workflows/token-lifecycle.yml — عقد المراقبة الأسبوعية", () => {
+  const workflow = fs.readFileSync(".github/workflows/token-lifecycle.yml", "utf8");
+  // الترويسة تشرح الممنوعات بالأسماء؛ العقود السلبية تُقاس على خطوات التشغيل وحدها.
+  const steps = withoutComments(workflow);
+
+  test("جدولة أسبوعية + تشغيل يدوي بعتبة قابلة للضبط", () => {
+    assert.match(workflow, /schedule:/);
+    assert.match(workflow, /- cron: ["']?\d+ \d+ \* \* \d["']?/, "cron أسبوعي");
+    assert.match(workflow, /workflow_dispatch:/);
+    assert.match(workflow, /threshold_days:/);
+    assert.match(workflow, /default: ["']?14["']?/);
+  });
+
+  test("مراقبة فقط: قراءة محتوى + كتابة Issues، ولا صلاحية لتغيير الأسرار أو الـ Actions", () => {
+    assert.match(workflow, /contents: read/);
+    assert.match(workflow, /issues: write/);
+    assert.doesNotMatch(steps, /actions:\s*write/, "لا قدرة على تعديل الأسرار أو الـ workflows");
+    assert.doesNotMatch(steps, /contents:\s*write/, "لا قدرة على تعديل الكود أو عمل commit");
+    assert.doesNotMatch(steps, /pull-requests:\s*write|deployments:\s*write|id-token:\s*write/);
+  });
+
+  test("رمز المنصة لا يصل إلى الـ runner إطلاقًا — فالتدوير مستحيل من المراقبة", () => {
+    assert.doesNotMatch(steps, /TURSO_PLATFORM_TOKEN/, "ولا حتى ذكره: لا مادة للسكّ في الـ runner");
+    assert.doesNotMatch(steps, /gh secret set|vercel env/, "لا كتابة في الأسرار");
+    // ذكر أمر التدوير في رسالة إرشادية مقبول؛ **تنفيذه** ممنوع — فالسطر المنفَّذ لا يكون echo.
+    const executed = steps
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => /bash\s+scripts\/(mint-turso-token\.sh|apply-turso-secrets\.sh)/.test(line))
+      .filter((line) => !/echo|::(notice|warning|error)::/.test(line));
+    assert.deepEqual(executed, [], "المراقبة لا تسكّ ولا تطبّق أسرارًا؛ السكّ يد المشغّل");
+  });
+
+  test("السرّ عبر env: في الخطوة، لا داخل نص run، ولا set -x", () => {
+    const secretLines = steps
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.includes("secrets.TURSO_AUTH_TOKEN"));
+    assert.ok(secretLines.length >= 1, "السرّ مستخدم (وإلا فلا مراقبة)");
+    for (const line of secretLines) {
+      assert.match(line, /^TURSO_AUTH_TOKEN:\s*\$\{\{\s*secrets\.TURSO_AUTH_TOKEN\s*\}\}$/, `خارج نمط env: ${line}`);
+    }
+    assert.doesNotMatch(steps, /set -x|set -o xtrace/);
+    assert.doesNotMatch(steps, /echo\s+"\$TURSO_AUTH_TOKEN"|echo\s+\$\{TURSO_AUTH_TOKEN\}/);
+  });
+
+  test("الغلاف يُستدعى بالمتغيرات الأربع (النطاق، البوابة، رمز GitHub، رابط التشغيل)", () => {
+    assert.match(workflow, /bash scripts\/token-lifecycle-ci\.sh/);
+    for (const name of ["SCOPE:", "THRESHOLD_DAYS:", "GH_TOKEN:", "RUN_URL:"]) {
+      assert.match(workflow, new RegExp(name.replace(":", ":")), `${name} مفقود`);
+    }
+  });
+
+  /**
+   * مقطع وظيفة واحدة من نص الـ YAML — بلا محلّل YAML (js-yaml اعتمادية غير معلنة)،
+   * وبلا اعتماد على ترتيب الوظائف في الملف.
+   */
+  function jobSection(name: "env-scope" | "repo-scope"): string {
+    const marker = `\n  ${name}:`;
+    const start = workflow.indexOf(marker);
+    assert.ok(start >= 0, `وظيفة ${name} مفقودة من الـ workflow`);
+    const others = (["env-scope", "repo-scope"] as const).filter((job) => job !== name);
+    const ends = others
+      .map((job) => workflow.indexOf(`\n  ${job}:`, start + marker.length))
+      .filter((index) => index > start);
+    return workflow.slice(start, ends.length ? Math.min(...ends) : workflow.length);
+  }
+
+  test("نطاقا السرّ: بيئة production أساسية (تحذيرها يُحمرّ التشغيل)، ونطاق المستودع احتياط متسامح", () => {
+    // السرّان مضبوطان على بيئة production فعلًا (handoff/turso-probe-report.md)، فمنها
+    // يُقرأ الحكم؛ ولو سُمح لها بالفشل بصمت لضاع شرط «التحذير يبقى ظاهرًا أسبوعين».
+    const primary = jobSection("env-scope");
+    assert.match(primary, /environment: production/);
+    assert.doesNotMatch(primary, /continue-on-error/, "الوظيفة الأساسية يجب أن تقدر على إحمرار التشغيل");
+    assert.match(primary, /bash scripts\/token-lifecycle-ci\.sh/);
+    assert.match(primary, /GITHUB_OUTPUT/, "قرار «مضبوط أم لا» يُمرَّر كمخرج وظيفة");
+    assert.match(primary, /GITHUB_STEP_SUMMARY/, "غياب السرّ نفسه يُسجَّل دليلًا في الملخّص");
+
+    const fallback = jobSection("repo-scope");
+    assert.match(fallback, /needs: env-scope/);
+    assert.match(fallback, /if: needs\.env-scope\.outputs\.configured != 'true'/, "الاحتياط يعمل فقط عند غياب السرّ");
+    assert.match(fallback, /continue-on-error: true/, "لا قاعدة مربوطة بعد ⇒ لا فشل دائم");
+    assert.doesNotMatch(fallback, /environment:/);
+  });
+
+  test("لا تثبيت تبعيات في مسار المراقبة — سلسلة التوريد خارج الصورة", () => {
+    assert.doesNotMatch(steps, /npm ci|npm install|npm i |cache: npm/);
+    assert.match(workflow, /actions\/checkout@v4/);
+    assert.match(workflow, /actions\/setup-node@v4/);
+  });
+
+  test("لا تشغيلين متزامنين يلغي أحدهما الآخر أثناء كتابة Issue", () => {
+    assert.match(workflow, /concurrency:/);
+    assert.match(workflow, /cancel-in-progress: false/);
   });
 });

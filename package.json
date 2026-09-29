@@ -16,6 +16,7 @@
     "migrations:apply": "node --import tsx scripts/apply-migrations.mjs --apply",
     "mint:turso": "bash scripts/mint-turso-token.sh",
     "mint:turso:dry": "bash scripts/mint-turso-token.sh --dry-run",
+    "audit:token": "node scripts/audit-token-lifecycle.mjs",
     "smoke:prod": "node scripts/smoke-production.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "security:gates": "node scripts/security-gates.mjs",

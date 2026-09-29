@@ -212,6 +212,27 @@ bash scripts/mint-turso-token.sh                    # المعاملة الحق�
 مطالبة `exp` في الرمز نفسه، والتدوير = إعادة الأمر نفسه قبله. الهروب الصريح
 `--expiration never` (ويُعلن في السجل أنه أبدي).
 
+### 6-هـ) إغلاق الدورة: مراقبة `exp` أسبوعيًا (بلا تدوير تلقائي)
+
+`90d` سياسة، والسياسة بلا عدّاد تصير عطلًا في اليوم التسعين. لذلك أُضيف
+`.github/workflows/token-lifecycle.yml` (كل اثنين 04:17Z + `workflow_dispatch` ببوابة
+`threshold_days`) مع `scripts/audit-token-lifecycle.mjs` (التدقيق) و
+`scripts/token-lifecycle-ci.sh` (غلاف CI):
+
+- يفكّ مطالبة `exp` **داخل الـ runner** ويحكم: `PASS` (أكثر من البوابة) · `WARNING` (≤14
+  يومًا) · `FAIL` (منتهي أو قيمة لا تُفكّ أو رابط في حقل الرمز — عطل §3 نفسه) ·
+  `NO_EXPIRY` (`never`: ليس خطأً لكنه خلاف السياسة) · `NOT_CONFIGURED` (تخطٍّ).
+- كتلة أدلة ثابتة في ملخّص التشغيل (`Turso token lifecycle audit / Status / Expires /
+  Remaining / Rotation threshold / Action`) + إشعار `::notice|warning|error` في تبويب الفحوص.
+- **Issue واحد** لمنطقة الخطر: يُفتح عند الدخول، يُعدَّل جسمه كل فحص (لا تعليقات متراكمة)،
+  ويُغلق عند الخروج — فلا ضوضاء أسبوعية، والتحذير مع ذلك **يُحمرّ التشغيل المجدول** (خروج 10).
+- **مراقبة فقط**: لا `TURSO_PLATFORM_TOKEN` في الـ workflow (لا قدرة على السكّ)، ولا كتابة
+  أسرار (`contents: read` + `issues: write`)، ولا قيمة في السجل (`env:` لا داخل `run:`، وبلا
+  تتبّع shell)، ولا تبعيات تُثبَّت في هذا الفحص.
+- النطاق الأساسي بيئة `production` (خلاصة §2 هنا) واحتياط لنطاق المستودع؛ والجدولة تعمل من
+  الفرع الافتراضي فقط ⇒ أول فحص أسبوعي بعد دمج هذا العمل في `main`.
+- التدوير يبقى يد المشغّل: `bash scripts/mint-turso-token.sh` ثم `vercel deploy --prod`.
+
 بلا `gh` ولا `vercel` (حالة هذا المستودع حين كان `VERCEL_TOKEN` ميتًا):
 `bash scripts/mint-turso-token.sh --save-env .env.local` — يكتب الزوج `0600` ويُبقي بقية
 المفاتيح، فتلصقه في اللوحتين. وإن غابت الجهتان ولم يُمرَّر `--save-env` **يرفض السكّ
