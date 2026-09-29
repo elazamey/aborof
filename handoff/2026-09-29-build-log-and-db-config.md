@@ -20,6 +20,7 @@
 | `GET /cart` | يعمل (صفحة ثابتة لا تلمس القاعدة) |
 | `GET /sitemap.xml` | وثيقة فارغة على الإنتاج؛ وعلى `next start` محلي بقيمة رابط غير صالحة يعطي **500** بجسم فارغ — نفس العرَض (الخريطة تقرأ المنتجات). وكذلك `/product/p1` ⇒ 500 والرئيسية ⇒ 200 بواجهة الخطأ |
 | حالة الالتزام `bdd7376` | ثلاثة مشاريع Vercel تبني المستودع: `aborof` و`aborof-store-v2` و`aborof-updated-17d3397` — **لكل منها متغيّراتها**. الـ Redeploy في السجل كان لمشروع `aborof` (حالة `Vercel – aborof` 20:36:29Z) |
+| مجسّ `Turso evidence probe` على PR #28 (أسرار بيئة GitHub `production`) | الرابط **سليم الشكل** (`libsql://` + مضيف Turso من 53 حرفًا يبدأ بـ`rof`، بلا مسار) لكن الاتصال يفشل بـ`HTTP 401` و**`empty JWT token`** ⇒ خانة `TURSO_AUTH_TOKEN` هناك **فارغة/مسافة فقط**. هذا دليل على أن الرمز — لا الرابط — هو الناقص على الأقل في GitHub، ويُرجَّح أن الحال نفسه في Vercel (لم أستطع قراءتها) |
 | بيئات GitHub | يوجد **بيئة باسم `TURSO_AUTH_TOKEN`** (أُنشئت 19:53Z) — أثر خطأ ترتيب معاملات في أمر `gh secret set … --env …`؛ لا تأثير لها ويمكن حذفها |
 | `Deploy to Vercel` (GitHub Actions) | يفشل في الفحص التمهيدي (`TOKEN_SEES_NO_PROJECTS`) — مسألة منفصلة موثّقة في `2026-09-29-production-state.md`؛ النشر الفعلي يجري عبر تكامل Git |
 
@@ -42,6 +43,8 @@
 `eslint@9.39.5` (ESLint 10 يفشل مع `eslint-config-next@16.3.7`: `eslint-plugin-react` لا يدعمه بعد) و`@esbuild-kit/*` (تبعية `drizzle-kit` نفسه؛ ترقيته إلى 0.31.11 لا تزيلها).
 
 ## 4) المطلوب من المالك لعودة المتجر (لا يمكن تنفيذه من المستودع)
+
+> الأرجح أن **الرمز** هو المفقود (انظر مجسّ GitHub أعلاه: `empty JWT token`). الكود يصلح شكل الرابط والرمز الملصوقين، لكنه لا يستطيع اختراع رمز غير موجود: رابط Turso بلا رمز صالح يبقى `503` مغلقًا ويُكتب سببه `TOKEN_MISSING`.
 
 1. **Turso** ← القاعدة ← **Connect**: انسخ رابط الاتصال (`libsql://<db>-<org>.turso.io`) وأنشئ رمزًا بصلاحية Full access (`eyJ…`).
 2. **Vercel** ← مشروع **`aborof`** (هو الذي يخدم `aborof.vercel.app`) ← Settings ← Environment Variables ← **Production**:
