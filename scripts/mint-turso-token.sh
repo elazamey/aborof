@@ -186,14 +186,24 @@ if [ -z "$DB" ]; then
       # صفر أو أكثر من واحدة مُستخدمة ⇒ اسم صريح مطلوب (لا يُطبع أي اسم قاعدة).
       TOUCHED_N=0
       CANDIDATES="$(printf '%s' "$DB_JSON" | jq -r '.databases[] | select((.parent // null) == null) | [(.Name // .name // .db_name), (.Hostname // .hostname)] | @tsv' 2>/dev/null || true)"
+      EVIDENCE_I=0
       while IFS=$'\t' read -r cname chost; do
         [ -n "${cname:-}" ] && [ -n "${chost:-}" ] || continue
+        EVIDENCE_I=$((EVIDENCE_I + 1))
         api POST "$API_BASE/v1/organizations/$ORG/databases/$cname/auth/tokens?authorization=read-only&expiration=5m" '{}'
-        [ "$API_STATUS" = 200 ] || continue
-        cjwt="$(printf '%s' "$API_BODY" | jq -r '.jwt // empty')"
-        [ -n "$cjwt" ] || continue
+        cjwt="$(printf '%s' "$API_BODY" | jq -r '.jwt // empty' 2>/dev/null || true)"
+        if [ "$API_STATUS" != 200 ] || [ -z "$cjwt" ]; then
+          # فحص مرشّح فشل — يُعلَن بالحالة فقط (لا اسم، لا جسم استجابة).
+          echo "EVIDENCE i=${EVIDENCE_I} mint=${API_STATUS} jwt=$([ -n "$cjwt" ] && echo yes || echo no)"
+          continue
+        fi
         cv="$(verify_pair "libsql://${chost}" "$cjwt")"
-        if [ "$(row_ok "$cv" mig-table)" = "true" ] || [ "$(row_ok "$cv" row-7)" = "true" ]; then
+        conn="$(row_ok "$cv" conn)"
+        mig="$(row_ok "$cv" mig-table)"
+        r7="$(row_ok "$cv" row-7)"
+        if [ -z "$cv" ]; then conn="empty"; fi
+        echo "EVIDENCE i=${EVIDENCE_I} mint=200 conn=${conn:-none} mig=${mig:-none} row7=${r7:-none}"
+        if [ "$mig" = "true" ] || [ "$r7" = "true" ]; then
           TOUCHED_N=$((TOUCHED_N + 1))
           DB="$cname"
         fi
