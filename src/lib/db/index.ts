@@ -82,6 +82,17 @@ export function db(): Client | null {
 export function setDbClientForTest(client: Client | null): void {
   _clientOverride = client;
   _ready = null;
+  // إلغاء تخزين Drizzle المرتبط بالعميل السابق — يضمن أن getDrizzle() يلتفّ
+  // حول العميل المحقون نفسه في الاختبارات (ملف مؤقت لكل اختبار).
+  // يُستدعى resetDrizzleForTest صراحةً في الاختبارات أيضًا؛ هذا هنا احتياط.
+  try {
+    if (typeof require !== "undefined") {
+      const mod = require("./drizzle") as { resetDrizzleForTest?: () => void };
+      mod.resetDrizzleForTest?.();
+    }
+  } catch {
+    // drizzle غير مُحمَّل بعد أو البيئة ESM — لا شيء لإلغائه.
+  }
 }
 
 /**

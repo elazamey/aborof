@@ -10,6 +10,7 @@ export type ErrorCode =
   | "VALIDATION_FAILED"
   | "AUTH_INVALID"
   | "AUTH_REQUIRED"
+  | "FORBIDDEN"
   | "RATE_LIMITED"
   | "NOT_FOUND"
   | "CONFLICT"
@@ -58,6 +59,8 @@ export const Errors = {
     new DomainError("AUTH_INVALID", 401, message),
   authRequired: (message = "غير مصرح بهذا الإجراء") =>
     new DomainError("AUTH_REQUIRED", 401, message),
+  forbidden: (message = "غير مصرح بهذا الإجراء") =>
+    new DomainError("FORBIDDEN", 403, message),
   rateLimited: (retryAfterSeconds: number, message = "محاولات كثيرة، حاول بعد قليل") =>
     new DomainError("RATE_LIMITED", 429, message, { retryAfterSeconds }),
   notFound: (message = "العنصر غير موجود") => new DomainError("NOT_FOUND", 404, message),

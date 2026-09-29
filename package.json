@@ -22,10 +22,14 @@
     "security:gates": "node scripts/security-gates.mjs",
     "security:bundle": "node scripts/scan-bundle-secrets.mjs --check-env",
     "agents:export": "node --import tsx scripts/export-agent-manifests.mjs",
-    "agents:check": "node --import tsx scripts/export-agent-manifests.mjs --check"
+    "agents:check": "node --import tsx scripts/export-agent-manifests.mjs --check",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "drizzle-orm": "^0.38.3",
     "next": "^16.3.2",
     "react": "^18",
     "react-dom": "^18",
@@ -35,6 +39,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "drizzle-kit": "^0.30.4",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.2",
     "tsx": "^4.23.13",
