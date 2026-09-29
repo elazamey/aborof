@@ -49,4 +49,14 @@ describe("provider chain order resolution", () => {
     const order = resolveProviderOrder();
     assert.equal(order[order.length - 1], "local");
   });
+
+  test("ai-gateway sits last, just before the local reply", () => {
+    const order = resolveProviderOrder(undefined);
+    assert.equal(order[order.length - 2], "ai-gateway");
+    assert.equal(order[order.length - 1], "local");
+  });
+
+  test("ai-gateway is a known name (not silently ignored)", () => {
+    assert.deepEqual(resolveProviderOrder("ai-gateway"), ["ai-gateway", "local"]);
+  });
 });

@@ -35,6 +35,9 @@
 | `GEMINI_API_KEY` أو `GROQ_API_KEY` | Secret اختياري | مفتاح مزود الدردشة |
 | `ENABLE_AI_AGENT` | Variable اختياري | `true` لتوجيه `/api/chat` إلى محرك الوكيل النمطي الموحّد (المرحلة الأولى)؛ غيابه أو أي قيمة أخرى تُبقي السلوك القديم حرفيًا |
 | `NVIDIA_NIM_API_KEY` (أو `NVIDIA_API_KEY`) | Secret اختياري | مفتاح مزود NVIDIA NIM (المرحلة الثانية)؛ غيابه يعني أن المزود غير متاح فيُتخطى صامتًا في السلسلة |
+| `AI_GATEWAY_API_KEY` | Secret اختياري | مفتاح **Vercel AI Gateway** (بادئته `vck_`) — نقطة نهاية واحدة متوافقة مع OpenAI تخدم أي موديل بصيغة `creator/model` (مثل `openai/gpt-5.5`). يدخل سلسلة التراجع في آخرها قبل الرد المحلي، فغيابه لا يغيّر أي سلوك قائم. ⚠️ ليس رمز المنصة `vcp_` من Account Settings → Tokens، وليس توكن `vercel login`. التفاصيل في `docs/ai/phase-5-ai-gateway.md` |
+| `AI_GATEWAY_MODEL` | Variable اختياري | اسم الموديل على البوابة؛ يجب أن يحمل شكل `creator/model` حصرًا. الافتراضي `openai/gpt-5.5`؛ أي قيمة بلا `/` تُلغي المزود (fail-closed) بدل خطأ غامض |
+| `AI_GATEWAY_BASE_URL` | Variable اختياري | لتوجيه المزود إلى مٌحاكي محلي في الاختبارات فقط — **https حصرًا** (لا يمر مفتاح على قناة غير مشفّرة). الافتراضي `https://ai-gateway.vercel.sh/v1` |
 | `NVIDIA_NIM_BASE_URL` / `NVIDIA_NIM_MODEL` | Variable اختياري | رابط NIM مخصّص (**https فقط**؛ أي مخطط آخر يُخرج المزود من السلسلة) واسم النموذج |
 | `ENABLE_MCP_TOOLS` | Variable اختياري | `true` لتفعيل طبقة MCP المحكومة للأدوات (المرحلة الثانية)؛ غيابه أو أي قيمة أخرى تُبقي السلوك القديم حرفيًا |
 | `MCP_ALLOWED_TOOLS` | Variable اختياري | قائمة أسماء أدوات مفصولة بفواصل؛ غيابها يعني المجموعة الافتراضية للقراءة فقط، وما عداها غير مرئي وغير قابل للتنفيذ |

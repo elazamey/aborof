@@ -61,6 +61,14 @@ describe("errors layer", () => {
     assert.ok(masked.includes("[REDACTED"));
   });
 
+  test("redactSecrets masks Vercel AI Gateway keys outside an Authorization header", () => {
+    // البوابة قد ترد بالمفتاح داخل جسم الخطأ، فلا يكفي الاعتماد على نمط Bearer.
+    const gatewayKey = "vck" + "_" + "a".repeat(40);
+    const masked = redactSecrets(`upstream said: invalid key ${gatewayKey} for model openai/gpt-5.5`);
+    assert.ok(!masked.includes(gatewayKey), "مفتاح vck_ يجب ألا يظهر في السجل");
+    assert.ok(masked.includes("[REDACTED_VERCEL_KEY]"));
+  });
+
   test("request id prefers incoming header, otherwise generates one", () => {
     const withHeader = getRequestId(new Request("http://x", { headers: { "x-request-id": "abc-123" } }));
     assert.equal(withHeader, "abc-123");

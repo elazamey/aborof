@@ -10,6 +10,14 @@
 import { SmartAgentEngine } from "./agent-engine";
 
 export { SmartAgentEngine } from "./agent-engine";
+export {
+  AiGatewayProvider,
+  DEFAULT_GATEWAY_BASE_URL,
+  DEFAULT_GATEWAY_MODEL,
+  gatewayApiKey,
+  resolveGatewayBaseUrl,
+  resolveGatewayModel,
+} from "./providers/ai-gateway";
 export { GeminiRestProvider } from "./providers/gemini-rest";
 export { GroqProvider } from "./providers/groq";
 export { LocalFallbackProvider, buildLocalAnswer } from "./providers/local-fallback";

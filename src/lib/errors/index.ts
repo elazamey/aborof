@@ -82,6 +82,10 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/AIza[0-9A-Za-z_-]{20,}/g, "[REDACTED_GEMINI_KEY]"],
   [/gsk_[0-9A-Za-z_-]{20,}/g, "[REDACTED_GROQ_KEY]"],
   [/nvapi-[0-9A-Za-z_-]{16,}/g, "[REDACTED_NVIDIA_KEY]"],
+  // مفاتيح Vercel المسبوقة: `vck_…` (AI Gateway) و`vcp_…` (رمز منصة) وغيرهما.
+  // البوابة قد ترد بالمفتاح داخل جسم الخطأ، فالحجب يجب أن يسبق الطباعة لا يعتمد
+  // على ترويسة Authorization فقط.
+  [/v(?:ck|cp|ci|ca|cr)_[0-9A-Za-z_-]{16,}/g, "[REDACTED_VERCEL_KEY]"],
   [/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]"],
   [/(key|token|secret|password)[=:]\s*[^\s"&]+/gi, "$1=[REDACTED]"],
 ];
