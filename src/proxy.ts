@@ -5,8 +5,13 @@ import { buildSecurityHeaders } from "@/lib/security/headers";
 /**
  * يطبّق رؤوس الأمان على كل الاستجابات. CSP في وضع المراقبة (Report-Only)
  * حتى تُجمع التقارير وتُشدد لاحقًا؛ يمكن تبديلها بمتغير بيئة.
+ *
+ * كان هذا الملف `src/middleware.ts`. Next.js 16 أوقف اصطلاح `middleware`
+ * («The "middleware" file convention is deprecated. Please use "proxy" instead»)
+ * وصار الملف `src/proxy.ts` والدالة المصدَّرة `proxy`، ويعمل على Node.js لا Edge.
+ * السلوك واحد حرفيًا: نفس الرؤوس ونفس المطابِق.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const response = NextResponse.next();
   const reportOnly = process.env.CSP_ENFORCE !== "true";
   const headers = buildSecurityHeaders(reportOnly);
