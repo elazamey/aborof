@@ -5,7 +5,7 @@
 
 | الرمز | الخطر | الضابط المركزي | الاختبار/الحاجز | الدليل القابل لإعادة التحقق |
 |---|---|---|---|---|
-| P0-A | اعتماديات عالية الخطورة | تثبيت `package-lock.json`؛ `npm ci` | بوابة audit في quality وdeploy | `npm audit --omit=dev --audit-level=high` |
+| P0-A | اعتماديات عالية الخطورة | تثبيت `package-lock.json`؛ `npm ci` | بوابة audit في quality وdeploy | `npm audit --omit=dev --audit-level=high`؛ سجل الترقيات الأمنية: [`05-dependency-upgrades.md`](./05-dependency-upgrades.md) |
 | P0-B | تسريب الأخطاء الداخلية | `src/lib/errors/` + `apiHandler` + `redactSecrets` + `request_id` | `tests/errors.test.ts`, `tests/routes.test.ts`, `security-gates.mjs` | `npm test`؛ فحص استجابة `/api/chat` لخطأ لا تحوي stack/رسالة مزود |
 | P0-C | خلط سر الجلسات بالتشخيص | `src/lib/secrets.ts`: `DIAGNOSTICS_KEY` مستقل، تشخيص معطّل في الإنتاج | `tests/secrets.test.ts`, حاجز static في `security-gates.mjs` | `npm run security:gates` |
 | P1-A | بوابات CI غير إلزامية | `quality.yml` + `deploy.yml`: audit/lint/typecheck/gates/tests/build، فحص أسرار، أقل صلاحيات، artifacts | الـ Workflow نفسه (لا `exit 0`، لا `--if-present`) | أي فشل يوقف النشر؛ راجع تبويب Actions |
