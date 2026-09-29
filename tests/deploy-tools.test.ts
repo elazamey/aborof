@@ -27,6 +27,7 @@ import {
 import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
 import {
   AUTHORIZATION_LEVELS,
+  DEFAULT_EXPIRATION,
   connectionUrlFor,
   describeMintedToken,
   describeTokenShape,
@@ -685,7 +686,7 @@ type MockTursoApi = {
  * نفسها لما خدم أي طلب قبل انتهاء الطفل (مهلة كاملة لكل نداء).
  */
 function startMockTursoApi(
-  options: { jwt?: string; databases?: string[]; orgs?: number } = {}
+  options: { jwt?: string; jwtNever?: string; databases?: string[]; orgs?: number } = {}
 ): Promise<MockTursoApi> {
   return new Promise((resolve, reject) => {
     const dir = fs.mkdtempSync(path.join(tmpdir(), "mock-turso-"));
@@ -698,6 +699,7 @@ function startMockTursoApi(
         MOCK_PORT_FILE: portFile,
         MOCK_LOG_FILE: logFile,
         MOCK_JWT: options.jwt ?? syntheticJwt({ a: "full_access" }, "MINTED-CANARY-SIGNATURE"),
+        MOCK_JWT_NEVER: options.jwtNever ?? syntheticJwt({ a: "full_access" }, "MINTED-CANARY-SIGNATURE"),
         MOCK_DATABASES: (options.databases ?? ["aborof"]).join(","),
         MOCK_ORGS_COUNT: String(options.orgs ?? 1),
       },
@@ -795,6 +797,12 @@ describe("scripts/lib/turso-api — اشتقاق الهدف وأوصاف بلا 
     assert.equal(isLocalDatabaseUrl("file:/tmp/x.db"), true);
     assert.equal(isLocalDatabaseUrl(":memory:"), true);
     assert.equal(isLocalDatabaseUrl("libsql://a-b.turso.io"), false);
+  });
+
+  test("العمر الافتراضي سياسة مستودع (90d) لا افتراضي API (never)", () => {
+    assert.equal(DEFAULT_EXPIRATION, "90d");
+    assert.equal(isValidExpiration(DEFAULT_EXPIRATION), true);
+    assert.equal(isValidExpiration("never"), true, "الهروب الصريح يبقى مقبولًا");
   });
 
   test("مدة الانتهاء ومستوى الصلاحية يُتحقق منهما قبل أي نداء", () => {
@@ -962,12 +970,18 @@ describe("scripts/apply-migrations — بوابة الهجرات الصريحة"
 });
 
 describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ ← هجرات ← أسرار)", () => {
-  const mintedJwt = syntheticJwt({ a: "full_access" }, "MINTED-CANARY-SIGNATURE");
+  // ‏exp ضمن المطالبات لأن موعد التدوير يُؤخذ من الرمز نفسه (الخادم هو المصدر).
+  const mintedJwt = syntheticJwt(
+    { a: "full_access", exp: Math.floor(Date.now() / 1000) + 90 * 86_400 },
+    "MINTED-CANARY-SIGNATURE"
+  );
   const platformJwt = syntheticJwt({ sub: "platform" }, "PLATFORM-CANARY-SIGNATURE");
+  // الرمز الذي يعيده الخادم عند expiration=never: بلا مطالبة exp.
+  const mintedJwtNever = syntheticJwt({ a: "full_access" }, "MINTED-CANARY-SIGNATURE");
   let api: MockTursoApi;
 
   before(async () => {
-    api = await startMockTursoApi({ jwt: mintedJwt });
+    api = await startMockTursoApi({ jwt: mintedJwt, jwtNever: mintedJwtNever });
   });
   after(() => {
     api.close();
@@ -1035,7 +1049,7 @@ describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ �
     assert.equal(res.status, 0, res.stdout + res.stderr);
     const posts = api.readLog().filter((entry) => entry.startsWith("POST"));
     assert.equal(posts.length, 1, "سكّ واحد فقط لكل معاملة");
-    assert.match(posts[0], /\/auth\/tokens\?expiration=never&authorization=full-access$/);
+    assert.match(posts[0], /\/auth\/tokens\?expiration=90d&authorization=full-access$/, "العمر الافتراضي 90 يومًا لا never");
     const calls = callsLog(logFile);
     assert.match(calls, /CALL gh secret set TURSO_DATABASE_URL --env production\nSTDIN_LEN=[1-9]\d*/);
     assert.match(calls, /CALL gh secret set TURSO_AUTH_TOKEN --env production\nSTDIN_LEN=[1-9]\d*/);
@@ -1046,6 +1060,7 @@ describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ �
     assert.deepEqual(rows.rows.map((row) => String(row.version)), ["0001", "0002"], "بوابة الهجرات طبّقت فعلًا");
     client.close();
     assert.match(res.stdout, /MIGRATIONS_APPLIED/);
+    assert.match(res.stdout, /تدوير الرمز: ينتهي \d{4}-\d{2}-\d{2}/, "موعد التدوير يُعلن في الخلاصة");
     assert.doesNotMatch(res.stdout + res.stderr, /MINTED-CANARY|PLATFORM-CANARY/, "لا سرّ في أي مخرج");
     assert.doesNotMatch(res.stdout + res.stderr, /aborof-elazamey/, "ولا مضيف كامل");
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1072,6 +1087,53 @@ describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ �
     const count = await client.execute("SELECT COUNT(*) AS n FROM schema_migrations");
     assert.equal(Number(count.rows[0]?.n), 2);
     client.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("--expiration never هروب صريح يصل إلى الخادم كما هو", () => {
+    const dir = workDir();
+    const dbFile = path.join(dir, "target.db");
+    api.resetLog();
+    const res = runMint(
+      [
+        "--api-base",
+        api.url,
+        "--org",
+        "elazamey",
+        "--db",
+        "aborof",
+        "--expiration",
+        "never",
+        "--migrations-url",
+        `file:${dbFile}`,
+        "--skip-verify",
+        "--skip-secrets",
+        "--save-env",
+        path.join(dir, "env.local"),
+      ],
+      envFor(dir)
+    );
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    const posts = api.readLog().filter((entry) => entry.startsWith("POST"));
+    assert.equal(posts.length, 1);
+    assert.match(posts[0], /expiration=never/);
+    // العقد: موعد التدوير المعروض يُؤخذ من مطالبة `exp` في الرمز نفسه، لا من
+    // النص الممرَّر في الطلب — فلو اختلفا صدّقنا الرمز.
+    assert.match(res.stdout + res.stderr, /بلا انتهاء/, "رمز بلا exp ⇒ يُعلن أنه أبدي");
+    assert.doesNotMatch(res.stdout, /تدوير الرمز: ينتهي/, "ولا يُختلق موعد تدوير لرمز أبدي");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("مدة انتهاء غير صالحة ⇒ رفض قبل أي نداء (لا تُرسل للخادم)", () => {
+    const dir = workDir();
+    api.resetLog();
+    const res = runMint(
+      ["--api-base", api.url, "--org", "elazamey", "--db", "aborof", "--expiration", "forever and ever", "--skip-verify"],
+      envFor(dir)
+    );
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /مدة انتهاء غير مقبولة/);
+    assert.deepEqual(api.readLog(), [], "التحقق الشكلي يسبق أي نداء شبكة");
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

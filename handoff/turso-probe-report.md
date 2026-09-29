@@ -65,7 +65,7 @@
 
 1. **من Turso:** افتح <https://app.turso.tech/elazamey> → القاعدة (اسمها 5 أحرف — هي نفسها في رابط اللوحة الحالي) →
    - **Connect** → انسخ **Database URL** (يبدأ `libsql://` — وهذا كل المطلوب من هذه الخطوة).
-   - تبويب **Tokens** → **Create Token** → Full Access → **Never expire** → انسخ الرمز (يبدأ بـ `eyJ`).
+   - تبويب **Tokens** → **Create Token** → Full Access → مدة محدودة (**90 يومًا** هي افتراضي المستودع الآن؛ كان الاختيار وقتها Never expire) → انسخ الرمز (يبدأ بـ `eyJ`).
    - إن تفضّل CLI: `turso db show <db> --url` و`turso db tokens create <db>` (لو أن CLI الجديد لا يدعم الأمرين فزر Connect في اللوحة هو المرجع).
 2. **في Vercel (بيئة Production)** — عدّل الحقلين ثم **Redeploy**:
    - `TURSO_DATABASE_URL` = رابط `libsql://…` (وليس صفحة اللوحة).

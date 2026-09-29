@@ -23,6 +23,9 @@ import http from "node:http";
 const portFile = process.env.MOCK_PORT_FILE ?? "";
 const logFile = process.env.MOCK_LOG_FILE ?? "";
 const mintedJwt = process.env.MOCK_JWT ?? "";
+// رمز «بلا انتهاء»:Turso الحقيقي يعيد رمزًا بلا مطالبة `exp` حين يكون
+// expiration=never — وموعد التدوير المعروض يجب أن يتبع الرمز لا الطلب.
+const neverJwt = process.env.MOCK_JWT_NEVER ?? "";
 const org = process.env.MOCK_ORG ?? "elazamey";
 const db = process.env.MOCK_DB ?? "aborof";
 const databases = (process.env.MOCK_DATABASES ?? db).split(",").filter(Boolean);
@@ -72,7 +75,8 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && url.pathname === `/v1/organizations/${org}/databases/${db}/auth/tokens`) {
     if (!mintedJwt) return send(500, { error: "MOCK_JWT غير مُعيَّن" });
-    return send(200, { jwt: mintedJwt });
+    const wantsNever = url.searchParams.get("expiration") === "never";
+    return send(200, { jwt: wantsNever && neverJwt ? neverJwt : mintedJwt });
   }
   return send(404, { error: `not found: ${url.pathname}` });
 });

@@ -3,7 +3,8 @@
 # سكّ رمز قاعدة Turso وتفعيلها بأمر واحد — من رمز المنصة إلى قاعدة مهاجَرة وأسرار مضبوطة:
 #   1. حلّ الهدف (المنظمة + القاعدة) من الأعلام أو من القيم المضبوطة حاليًا أو من
 #      Platform API، وأخذ رابط الاتصال القانوني من ردّ الخادم نفسه (لا من تخمين).
-#   2. سكّ رمز القاعدة (POST …/auth/tokens) — الرمز لا يُطبع ولا يمرّ في argv.
+#   2. سكّ رمز القاعدة (POST …/auth/tokens) بعمر محدود افتراضيًا (90 يومًا) — الرمز
+#      لا يُطبع ولا يمرّ في argv، ويُسجَّل موعد تدويره في الخلاصة.
 #   3. بوابة الهجرات الصريحة: `scripts/apply-migrations.mjs --apply` تُطبّق هجرات
 #      المستودع (اليوم 0001+0002) عبر `runMigrations` نفسه المستخدم في الإنتاج.
 #   4. تطبيق الأسرار: `scripts/apply-turso-secrets.sh` بالزوج الجديد (GitHub + Vercel).
@@ -23,7 +24,8 @@
 #   bash scripts/mint-turso-token.sh --dry-run   # معاينة: يطابق ما رأته CI الآن
 #   bash scripts/mint-turso-token.sh             # المعاملة الحقيقية
 #   bash scripts/mint-turso-token.sh --org elazamey --db aborof
-#   bash scripts/mint-turso-token.sh --expiration 90d --expect 0001,0002
+#   bash scripts/mint-turso-token.sh --expect 0001,0002       # الرمز ينتهي بعد 90 يومًا (الافتراضي)
+#   bash scripts/mint-turso-token.sh --expiration never       # هروب صريح من التدوير (غير موصى به)
 #   bash scripts/mint-turso-token.sh --github-only --skip-migrations
 #   bash scripts/mint-turso-token.sh --save-env .env.local   # بلا gh/vercel: ملف محلي 0600
 #   bash scripts/mint-turso-token.sh --env-file .env.local --dry-run
@@ -40,7 +42,10 @@ ORG="${TURSO_ORG:-}"
 DB="${TURSO_DB:-}"
 API_BASE="${TURSO_API_BASE:-https://api.turso.tech/v1}"
 API_BASE_EXPLICIT=false   # --api-base على السطر أولى من أي ملف بيئة
-EXPIRATION="never"
+# العمر الافتراضي 90 يومًا لا `never`: رموز Turso لا تُسترجع بعد إنشائها ولا تُلغى
+# فرديًا، فالرمز الأبدي المسرَّب يبقى صالحًا إلى الأبد — والتدوير أمر واحد (أعد
+# هذا السكربت). الهروب الصريح: --expiration never.
+EXPIRATION="${TURSO_TOKEN_EXPIRATION:-90d}"
 AUTHORIZATION="full-access"
 EXPECT=""
 CURRENT_URL="${TURSO_DATABASE_URL:-}"
@@ -76,7 +81,7 @@ while [ $# -gt 0 ]; do
     --db) shift; DB="${1:-}" ;;
     --repo) shift; REPO="${1:-}" ;;
     --env) shift; ENV_NAME="${1:-production}" ;;
-    --expiration) shift; EXPIRATION="${1:-never}" ;;
+    --expiration) shift; EXPIRATION="${1:-90d}" ;;
     --expect) shift; EXPECT="${1:-}" ;;
     --api-base) shift; API_BASE="${1:-}"; API_BASE_EXPLICIT=true ;;
     --save-env) shift; SAVE_ENV="${1:-}" ;;
@@ -364,7 +369,7 @@ echo "2) سكّ رمز القاعدة (POST …/auth/tokens · expiration=$EXPIR
 [ -n "$PLATFORM_TOKEN" ] || fail "TURSO_PLATFORM_TOKEN مطلوب للسكّ (من البيئة أو --env-file أو المدخل المخفي)."
 MINT_JSON="$(turso_api mint --org "$TARGET_ORG" --db "$TARGET_DB" --expiration "$EXPIRATION" --authorization "$AUTHORIZATION" --api-base "$API_BASE")"
 load_json_vars "$MINT_JSON" \
-  "MINT_OK=ok,MINT_ERROR=error,MINT_JWT=jwt,MINT_DESC=description,MINT_URL=url,MINT_HOST=hostname,MINT_MASK_URL=masked.url,MINT_MASK_HOST=masked.host" \
+  "MINT_OK=ok,MINT_ERROR=error,MINT_JWT=jwt,MINT_DESC=description,MINT_URL=url,MINT_HOST=hostname,MINT_MASK_URL=masked.url,MINT_MASK_HOST=masked.host,MINT_EXPIRES_AT=expiresAt,MINT_EXPIRES_IN=expiresInDays" \
   || fail "تعذّر تحليل ردّ السكّ (JSON غير صالح)."
 [ "$MINT_OK" = "true" ] || fail "فشل سكّ الرمز: ${MINT_ERROR:-سبب غير معروف}"
 [ -n "$MINT_JWT" ] || fail "ردّ السكّ بلا رمز — لم يُنشأ شيء؛ تحقّق من نطاق رمز المنصة."
@@ -446,6 +451,12 @@ MIGRATIONS_SUMMARY="هجرات مطبَّقة"
 SECRETS_SUMMARY="أسرار ← ${DESTINATIONS:-لا جهة}"
 [ "$SKIP_SECRETS" = true ] && [ -z "$SAVE_ENV" ] && SECRETS_SUMMARY="الأسرار مُتخطّاة صراحة"
 echo "✅ اكتملت المعاملة: رمز مسكوك ($MINT_DESC) · $MIGRATIONS_SUMMARY · $SECRETS_SUMMARY"
+if [ -n "$MINT_EXPIRES_AT" ]; then
+  echo "🗓️  تدوير الرمز: ينتهي $MINT_EXPIRES_AT${MINT_EXPIRES_IN:+ (بعد $MINT_EXPIRES_IN يومًا)} — أعد هذا الأمر نفسه قبله."
+  echo "    رموز Turso لا تُسترجع بعد إنشائها ولا تُلغى فرديًا؛ التدوير = سكّ جديد وتسليم للوجهات نفسها."
+else
+  warn "الرمز بلا انتهاء (طلبت ذلك صراحة بـ --expiration never) — يبقى التدوير اليدوي موصى به."
+fi
 echo "➡️  الخطوات التالية:"
 echo "   1. نشر جديد ليلتقط المتغيرات: vercel deploy --prod (أو Redeploy من اللوحة)."
 echo "   2. إعادة مجسّ الأدلة بعد النشر: gh workflow run turso-evidence.yml --ref main (أو أي دفع إلى فرعك)."

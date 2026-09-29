@@ -183,7 +183,7 @@ bash scripts/mint-turso-token.sh            # المعاملة الحقيقية:
 |---|---|
 | `--dry-run` | قراءة فقط: `GET` وحدها + خطة المراحل + **نفس مجسّ CI** (`verify-turso.mjs --allow-secret-repair`) على القيم المضبوطة حاليًا؛ لا سكّ ولا هجرة ولا أسرار |
 | `--org <slug>` / `--db <name>` | تحديد الهدف صراحة — وإلا اشتُقّ من `TURSO_DATABASE_URL` الحالي (رابط اتصال أو لوحة تحكم) أو من قائمة API |
-| `--expiration <never\|90d\|2w1d30m>` | مدة انتهاء الرمز المسكوك (افتراضي `never` كما في «Create Token · Never expire») |
+| `--expiration <90d\|never\|2w1d30m>` | عمر الرمز المسكوك — **افتراضي `90d`** (أو المتغير `TURSO_TOKEN_EXPIRATION`) لا `never` كما في افتراضي Platform API؛ الهروب الصريح `--expiration never` ويُعلَن في السجل |
 | `--read-only` | رمز قراءة فقط — يُرفض فورًا مع بوابة الهجرات لأن الهجرة كتابة |
 | `--expect 0001,0002` | الهجرات المطلوبة صراحة في البوابة (افتراضي: كل هجرات المستودع) |
 | `--skip-migrations` / `--skip-secrets` | تخطي مرحلة صراحة — وتخطي الأسرار بلا `--save-env` **مرفوض قبل السكّ** |
@@ -199,7 +199,13 @@ bash scripts/mint-turso-token.sh            # المعاملة الحقيقية:
 فرديًا (الإلغاء تدوير يُبطل كل الرموز)، فأي نسخة مطبوعة منه في طرفية أو سجل CI تسريب
 دائم. لذلك قنوات التسليم محصورة في ثلاث: stdin إلى `gh secret set`، وstdin إلى
 `vercel env add`، وملف `0600` مُتجاهَل بـ `--save-env`. والمعروض في السجل وصف شكلي
-فقط: `JWT · طول 512 · وصول كامل · بلا انتهاء`.
+فقط: `JWT · طول 512 · وصول كامل · ينتهي 2026-12-28 (بعد 90 يومًا)`.
+
+**تدوير الرمز:** الافتراضي `90d` لأن رموز Turso لا تُسترجع بعد إنشائها ولا تُلغى فرديًا،
+فالرمز الأبدي المسرَّب يبقى صالحًا إلى الأبد بينما يجعل العمر المحدود التسريب حادثًا
+مؤقّتًا. الخلاصة تطبع موعد الانتهاء **محسوبًا من مطالبة `exp` في الرمز نفسه** لا من النص
+المطلوب (فلو اختلفا صُدِّق الرمز)، والتدوير = إعادة الأمر نفسه قبل ذلك الموعد: يسكّ
+ويُسلّم إلى الوجهات نفسها، ثم نشر جديد ليلتقط القيمة.
 
 **المتطلبات:** `npm ci` كاملة (devDependencies لـ `tsx` الذي يُحمّل مشغّل الهجرات)،
 و`gh` مصادَق بصلاحية كتابة أسرار البيئة، و`vercel` CLI لجهة Vercel — وإن غابت الجهتان
@@ -233,7 +239,7 @@ npm run migrations:apply -- --expect 0001,0002 --json                 # لخط �
 
 ```bash
 export TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io"   # من زر Connect في لوحة Turso
-export TURSO_AUTH_TOKEN="eyJ…"                              # من Tokens → Create Token (Full access · Never expire)
+export TURSO_AUTH_TOKEN="eyJ…"                              # من Tokens → Create Token (Full access · 90 يومًا)
 bash scripts/apply-turso-secrets.sh --dry-run               # معاينة بلا تطبيق
 bash scripts/apply-turso-secrets.sh                         # التنفيذ الفعلي
 ```

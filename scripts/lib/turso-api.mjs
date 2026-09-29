@@ -15,6 +15,9 @@
  *   POST /organizations/{org}/databases/{db}/auth/tokens?expiration&authorization
  *                                                                    ← سكّ الرمز ⇒ { jwt }
  *
+ * العمر الافتراضي للرمز المسكوك `90d` (لا `never` كما في افتراضي API) — انظر
+ * `DEFAULT_EXPIRATION`؛ والهروب الصريح `--expiration never`.
+ *
  * ضبط إضافي من البيئة: `TURSO_API_TIMEOUT_MS` (مهلة النداء بالمللي ثانية، افتراضي
  * 20000) — لشبكة بطيئة أو لفشل سريع في الاختبارات.
  *
@@ -32,6 +35,18 @@ export const DEFAULT_API_BASE = "https://api.turso.tech/v1";
 
 /** مستويا الصلاحية المقبولة لرمز القاعدة (توثيق Turso). */
 export const AUTHORIZATION_LEVELS = ["full-access", "read-only"];
+
+/**
+ * العمر الافتراضي للرمز المسكوك: **90 يومًا** لا `never`.
+ *
+ * `never` هو افتراضي Platform API نفسه، وهو ممارسة شائعة لأنها تُنسي صاحبها
+ * الرمز — لكن رموز Turso لا تُسترجع بعد إنشائها ولا تُلغى فرديًا (الإلغاء
+ * تدوير يُبطل كل الرموز)، فأي نسخة مسرَّبة من رمز أبدي تبقى صالحة إلى الأبد.
+ * العمر المحدود يجعل التسريب حادثًا مؤقّتًا، وإعادة السكّ أمر واحد:
+ * `bash scripts/mint-turso-token.sh` (يُسلّم الرمز الجديد إلى نفس الوجهات).
+ * الهروب صريح: `--expiration never`.
+ */
+export const DEFAULT_EXPIRATION = "90d";
 
 /** `never` أو مدة بأسلوب Go: `2w1d30m` (وحدات s/m/h/d/w/y). */
 const EXPIRATION_RE = /^(?:never|\d+[smhdwy](?:\d+[smhdwy])*)$/i;
@@ -449,7 +464,7 @@ export async function mintDatabaseToken(options = {}) {
     platformToken,
     org,
     db,
-    expiration = "never",
+    expiration = DEFAULT_EXPIRATION,
     authorization = "full-access",
     timeoutMs = 20_000,
   } = options;
@@ -483,7 +498,18 @@ export async function mintDatabaseToken(options = {}) {
       error: res.ok && !jwt ? "ردّ الخادم بلا حقل jwt — تحقّق من نطاق رمز المنصة." : classifyApiFailure(res.status, res.text, res.error),
     };
   }
-  return { ok: true, jwt, expiration, authorization, description: describeMintedToken(jwt) };
+  // تاريخ الانتهاء يُؤخذ من مطالبة `exp` في الرمز نفسه (الخادم هو المصدر)، لا من
+  // النص الممرَّر — فيُعرض على المشغّل موعد التدوير الفعلي.
+  const claims = decodeJwtOperationsClaims(jwt);
+  return {
+    ok: true,
+    jwt,
+    expiration,
+    authorization,
+    description: describeMintedToken(jwt),
+    expiresAt: claims?.exp ? new Date(claims.exp * 1000).toISOString().slice(0, 10) : "",
+    expiresInDays: claims?.exp ? Math.max(0, Math.round((claims.exp * 1000 - Date.now()) / 86_400_000)) : null,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -556,7 +582,7 @@ async function cli(argv) {
       ...common,
       org: target.org,
       db: target.db,
-      expiration: argValue(argv, "--expiration", "never"),
+      expiration: argValue(argv, "--expiration", DEFAULT_EXPIRATION),
       authorization: argValue(argv, "--authorization", "full-access"),
     });
     if (!minted.ok) {
@@ -581,6 +607,8 @@ async function cli(argv) {
         jwt: minted.jwt,
         description: minted.description,
         expiration: minted.expiration,
+        expiresAt: minted.expiresAt,
+        expiresInDays: minted.expiresInDays,
         authorization: minted.authorization,
         org: target.org,
         db: target.db,
