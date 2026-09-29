@@ -385,6 +385,117 @@ describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان",
   });
 });
 
+describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إلى زوج قاعدة", () => {
+  // نفس عقد api() في السكربت: الجسم في سطر (أو أكثر) ثم سطر رمز الحالة.
+  const MINTED_JWT = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJtaW50ZWQifQ.c2lnbmF0dXJl";
+
+  function makeFakes() {
+    const binDir = fs.mkdtempSync(path.join(tmpdir(), "mint-fake-bin-"));
+    const logFile = path.join(binDir, "calls.log");
+    // curl وهمي يرد بردود المنصّة المصنوعة حسب المسار (لا شبكة في الاختبار).
+    const curl = [
+      "#!/usr/bin/env bash",
+      `echo "CURL $*" >> "${logFile}"`,
+      'url=""',
+      'for a in "$@"; do case "$a" in https://*) url="$a" ;; esac; done',
+      'case "$url" in',
+      `  */auth/tokens*) printf '%s\\n%s' '{"jwt":"${MINTED_JWT}"}' 200 ;;`,
+      `  */databases) printf '%s\\n%s' '{"databases":[{"Name":"rofyd","Hostname":"rofyd-elazamey.turso.io"}]}' 200 ;;`,
+      `  */v1/organizations) printf '%s\\n%s' '{"organizations":[{"slug":"elazamey"}]}' 200 ;;`,
+      `  *) printf '%s\\n%s' '{}' 404 ;;`,
+      "esac",
+      "",
+    ].join("\n");
+    // gh/vercel وهميان يستهلكان stdin (apply تمرّر القيم عبر stdin) ثم يسجّلان.
+    const consumer = ["#!/usr/bin/env bash", "cat > /dev/null", `echo "$0 $*" >> "${logFile}"`, ""].join("\n");
+    for (const [name, body] of [
+      ["curl", curl],
+      ["gh", consumer],
+      ["vercel", consumer],
+    ] as const) {
+      const p = path.join(binDir, name);
+      fs.writeFileSync(p, body);
+      fs.chmodSync(p, 0o755);
+    }
+    return { binDir, logFile };
+  }
+
+  test("بدون TURSO_API_TOKEN يسقط فورًا برسالة تحدّد المتغير — بلا أي نداء شبكة", () => {
+    const { binDir, logFile } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh"], {
+        encoding: "utf8",
+        input: "",
+        env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, TURSO_API_TOKEN: "" },
+      });
+      assert.equal(res.status, 1);
+      assert.match(res.stderr, /TURSO_API_TOKEN/);
+      assert.equal(fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "", "", "لا نداء curl قبل التحقق من التوكن");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  test("المسار الجاف (--dry-run --skip-verify): يسكّ من المنصّة ولا يكتب شيئًا ولا يطبع قيمة", () => {
+    const { binDir, logFile } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--dry-run", "--skip-verify"], {
+        encoding: "utf8",
+        input: "",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_API_TOKEN: "platform-fake-token",
+        },
+      });
+      const out = res.stdout + res.stderr;
+      assert.equal(res.status, 0, out);
+      assert.match(res.stdout, /توكن المنصّة صالح \(HTTP 200\)/);
+      assert.match(res.stdout, /أُنشئ توكن القاعدة/);
+      assert.match(out, /--dry-run: لن يُطبَّق/);
+      const log = fs.readFileSync(logFile, "utf8");
+      assert.match(log, /auth\/tokens\?authorization=full-access&expiration=never/, "التوريد عبر Platform API");
+      // لا تسريب: لا الرمز المسكوك ولا المضيف الكامل ولا اسم المؤسسة كاملًا.
+      assert.doesNotMatch(out, new RegExp(MINTED_JWT));
+      assert.doesNotMatch(out, /c2lnbmF0dXJl/);
+      assert.doesNotMatch(out, /rofyd-elazamey/);
+      assert.doesNotMatch(out, /elazamey/);
+      // بلا gh/vercel في المعاينة إطلاقًا.
+      assert.doesNotMatch(log, /^\S*gh /m);
+      assert.doesNotMatch(log, /^\S*vercel /m);
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  test("التنفيذ الفعلي يمرّر الزوج إلى gh وvercel عبر stdin — بلا تسريب في أي مخرج", () => {
+    const { binDir, logFile } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--skip-verify"], {
+        encoding: "utf8",
+        input: "",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_API_TOKEN: "platform-fake-token",
+        },
+      });
+      const out = res.stdout + res.stderr;
+      assert.equal(res.status, 0, out);
+      const log = fs.readFileSync(logFile, "utf8");
+      assert.match(log, /secret set TURSO_DATABASE_URL --env production/);
+      assert.match(log, /secret set TURSO_AUTH_TOKEN --env production/);
+      assert.match(log, /env add TURSO_DATABASE_URL production/);
+      assert.match(log, /env add TURSO_AUTH_TOKEN production/);
+      assert.doesNotMatch(out, new RegExp(MINTED_JWT));
+      assert.doesNotMatch(out, /rofyd-elazamey/);
+      assert.match(res.stdout, /حُدِّث السرّان/);
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("scripts/smoke-production — حاجز النطاقات (SSRF)", () => {
   test("يسمح بروابط https العامة فقط", () => {
     assert.equal(isSafeBaseUrl("https://aborof.vercel.app"), true);
