@@ -69,7 +69,11 @@
    - **لا تضف** `DIAGNOSTICS_KEY`/`DIAGNOSTICS_ENABLED` في الإنتاج إلا عند الحاجة
      للتشخيص، وبمفتاح مستقل تمامًا عن `ADMIN_SESSION_SECRET`.
 3. **الهجرة على Turso الحقيقية:** تُطبَّق تلقائيًا عند أول طلب بعد النشر
-   (`runMigrations`)، وتسجَّل في جدول `schema_migrations`. يُتحقَّق بعد النشر بـ:
+   (`runMigrations`)، والمسار الموصى به الآن **بوابة صريحة قبل النشر**:
+   `npm run migrations:plan` (قراءة فقط) ثم `npm run migrations:apply`، أو المعاملة
+   الكاملة `bash scripts/mint-turso-token.sh` (سكّ رمز ← هجرات ← أسرار) — فالبوابة
+   ترفض هدفًا غير Turso (كود 3) وتوقف المعاملة قبل تطبيق الأسرار إن فشلت.
+   وتُسجَّل الهجرات في جدول `schema_migrations`. يُتحقَّق بعد النشر بـ:
    ```sql
    SELECT version, checksum FROM schema_migrations;       -- يُتوقع 0001
    SELECT name FROM sqlite_master WHERE name='order_items'; -- يُتوقع الصف موجود

@@ -1,7 +1,9 @@
-import { test, describe } from "node:test";
+import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { execFileSync, spawnSync } from "node:child_process";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createClient, type Client } from "@libsql/client";
 import { tmpdir } from "node:os";
@@ -23,6 +25,21 @@ import {
   BASELINE_SECURITY_HEADERS,
 } from "../scripts/smoke-production.mjs";
 import { scanTextForSecrets, SERVER_SECRET_NAMES } from "../scripts/scan-bundle-secrets.mjs";
+import {
+  AUTHORIZATION_LEVELS,
+  connectionUrlFor,
+  describeMintedToken,
+  describeTokenShape,
+  isLocalDatabaseUrl,
+  isValidAuthorization,
+  isValidExpiration,
+  maskTarget,
+  orgAndDbFromConnectionUrl,
+  orgAndDbFromDashboardUrl,
+  orgAndDbFromValue,
+  pickField,
+  resolveApiBase,
+} from "../scripts/lib/turso-api.mjs";
 import { setDbClientForTest } from "../src/lib/db";
 import { SEED_PRODUCTS } from "../src/lib/seed";
 
@@ -636,5 +653,575 @@ describe("smoke — الواجهة المنشورة (الصفوف 15–17)", () 
     const row17 = findings.find((f) => f.id === "17");
     assert.equal(row17?.ok, false);
     assert.match(String(row17?.actual), /500/);
+  });
+});
+
+/* ========================================================================== */
+/* سكّ رمز Turso + بوابة الهجرات الصريحة + تطبيق الأسرار                      */
+/* ========================================================================== */
+
+/**
+ * يبني JWT اصطناعيًا **وقت التشغيل**: لا قيمة سرية ثابتة في ملف متتبَّع (بوابة
+ * Secret Scan في quality.yml)، وفي الوقت نفسه يسمح بادّعاء «canary» في التوقيع
+ * لإثبات أن الرمز لا يتسرب إلى أي مخرج.
+ */
+function syntheticJwt(payload: Record<string, unknown>, signature = "synthetic-signature"): string {
+  const encode = (value: unknown) =>
+    Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "EdDSA", typ: "JWT" })}.${encode(payload)}.${signature}`;
+}
+
+type MockTursoApi = {
+  url: string;
+  /** كل نداء وصل إلى الخادم، بالترتيب — دليل «معاينة بلا POST» و«معاملة بواحدة». */
+  readLog: () => string[];
+  resetLog: () => void;
+  close: () => void;
+};
+
+/**
+ * يشغّل خادم Platform API الوهمي في **عملية مستقلة** (`tests/fixtures/mock-turso-api.mjs`):
+ * `spawnSync` في الاختبار يحبس حلقة الأحداث، فلو عاش الخادم في عملية الاختبار
+ * نفسها لما خدم أي طلب قبل انتهاء الطفل (مهلة كاملة لكل نداء).
+ */
+function startMockTursoApi(
+  options: { jwt?: string; databases?: string[]; orgs?: number } = {}
+): Promise<MockTursoApi> {
+  return new Promise((resolve, reject) => {
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "mock-turso-"));
+    const portFile = path.join(dir, "port");
+    const logFile = path.join(dir, "requests.log");
+    const child = spawn("node", ["tests/fixtures/mock-turso-api.mjs"], {
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        MOCK_PORT_FILE: portFile,
+        MOCK_LOG_FILE: logFile,
+        MOCK_JWT: options.jwt ?? syntheticJwt({ a: "full_access" }, "MINTED-CANARY-SIGNATURE"),
+        MOCK_DATABASES: (options.databases ?? ["aborof"]).join(","),
+        MOCK_ORGS_COUNT: String(options.orgs ?? 1),
+      },
+    });
+    const startedAt = Date.now();
+    const poll = setInterval(() => {
+      const port = fs.existsSync(portFile) ? fs.readFileSync(portFile, "utf8").trim() : "";
+      if (port && port !== "0") {
+        clearInterval(poll);
+        resolve({
+          url: `http://127.0.0.1:${port}/v1`,
+          readLog: () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean) : []),
+          resetLog: () => fs.writeFileSync(logFile, ""),
+          close: () => {
+            child.kill("SIGKILL");
+            fs.rmSync(dir, { recursive: true, force: true });
+          },
+        });
+        return;
+      }
+      if (Date.now() - startedAt > 15_000) {
+        clearInterval(poll);
+        child.kill("SIGKILL");
+        reject(new Error("لم يبدأ خادم Turso الوهمي خلال 15 ثانية"));
+      }
+    }, 40);
+  });
+}
+
+/**
+ * أدوات كتابة وهمية (gh/vercel) تُسجّل argv وطول stdin — فيُثبت الاختبار أن
+ * القيم وصلت عبر **stdin** لا عبر وسائط سطر الأوامر المرئية في `ps`.
+ */
+function writeFakeTools(dir: string, logFile: string): void {
+  for (const tool of ["gh", "vercel"]) {
+    const target = path.join(dir, tool);
+    fs.writeFileSync(
+      target,
+      `#!/usr/bin/env bash\n{\n  echo "CALL ${tool} $*"\n  input="$(cat)"\n  echo "STDIN_LEN=\${#input}"\n} >> "${logFile}"\nexit 0\n`
+    );
+    fs.chmodSync(target, 0o755);
+  }
+}
+
+function callsLog(logFile: string): string {
+  return fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+}
+
+describe("scripts/lib/turso-api — اشتقاق الهدف وأوصاف بلا أسرار", () => {
+  test("رابط الاتصال القانوني يُبنى كنمط Turso الموثّق <db>-<org>.turso.io", () => {
+    assert.equal(connectionUrlFor("elazamey", "aborof"), "libsql://aborof-elazamey.turso.io");
+    assert.equal(connectionUrlFor("ELAZAMEY", "Aborof"), "libsql://aborof-elazamey.turso.io");
+  });
+
+  test("رابط لوحة التحكم يعطي المنظمة والقاعدة بلا التباس", () => {
+    assert.deepEqual(orgAndDbFromDashboardUrl("https://app.turso.tech/elazamey/databases/aborof"), {
+      org: "elazamey",
+      db: "aborof",
+      source: "dashboard-url",
+      tentative: false,
+    });
+  });
+
+  test("رابط الاتصال يُقطَع عند آخر شَرّة ويُعلَّم مرجَّحًا (يُحسم من ردّ الخادم)", () => {
+    const derived = orgAndDbFromConnectionUrl("libsql://my-store-elazamey.turso.io");
+    assert.equal(derived?.db, "my-store");
+    assert.equal(derived?.org, "elazamey");
+    assert.equal(derived?.tentative, true);
+  });
+
+  test("نطاق تطبيق أو قيمة موضعية لا يُشتق منهما هدف (لا تخمين)", () => {
+    assert.equal(orgAndDbFromValue("https://aborof.vercel.app"), null);
+    assert.equal(orgAndDbFromValue("libsql://<db>.turso.io"), null);
+    assert.equal(orgAndDbFromValue(""), null);
+  });
+
+  test("التقنيع: لا اسم كامل ولا مضيف كامل ولا رابط كامل في الوصف", () => {
+    const masked = maskTarget({
+      org: "elazamey",
+      db: "aborof",
+      hostname: "aborof-elazamey.turso.io",
+      url: "libsql://aborof-elazamey.turso.io",
+    });
+    assert.equal(masked.org, "ela…");
+    assert.equal(masked.db, "abo…");
+    assert.equal(masked.host, "abo….turso.io");
+    assert.ok(!masked.url.includes("aborof-elazamey"), "الرابط المقنّع لا يحوي المضيف كاملًا");
+    assert.equal(masked.urlShape?.kind, "Turso");
+  });
+
+  test("قاعدة محلية تُقنَّع بطولها فقط — لا مسار كامل في السجل", () => {
+    const masked = maskTarget({ url: "file:/tmp/some-local-database.db" });
+    assert.equal(masked.local, true);
+    assert.ok(!masked.url.includes("some-local"));
+    assert.equal(isLocalDatabaseUrl("file:/tmp/x.db"), true);
+    assert.equal(isLocalDatabaseUrl(":memory:"), true);
+    assert.equal(isLocalDatabaseUrl("libsql://a-b.turso.io"), false);
+  });
+
+  test("مدة الانتهاء ومستوى الصلاحية يُتحقق منهما قبل أي نداء", () => {
+    assert.equal(isValidExpiration("never"), true);
+    assert.equal(isValidExpiration("2w1d30m"), true);
+    assert.equal(isValidExpiration("90d"), true);
+    assert.equal(isValidExpiration("forever"), false);
+    assert.equal(isValidExpiration("../../etc"), false);
+    assert.deepEqual(AUTHORIZATION_LEVELS, ["full-access", "read-only"]);
+    assert.equal(isValidAuthorization("full-access"), true);
+    assert.equal(isValidAuthorization("admin"), false);
+  });
+
+  test("قاعدة API: https إلزامي، وhttp المحلي اختباري صريح لا يتسع لأي مضيف", () => {
+    assert.equal(resolveApiBase("https://api.turso.tech/v1/").base, "https://api.turso.tech/v1");
+    assert.equal(resolveApiBase("http://127.0.0.1:9/v1").ok, false);
+    assert.equal(resolveApiBase("http://127.0.0.1:9/v1", { allowInsecure: true }).ok, true);
+    assert.equal(resolveApiBase("http://evil.example/v1", { allowInsecure: true }).ok, false);
+  });
+
+  test("pickField يقرأ مفاتيح Turso بأحرفها الكبيرة كما يعيدها ردّ القائمة", () => {
+    assert.equal(pickField({ Name: "aborof", Hostname: "h" }, "name"), "aborof");
+    assert.equal(pickField({ name: "aborof" }, "Name"), "aborof");
+    assert.equal(pickField({ Name: "", name: "fallback" }, "name"), "fallback");
+    assert.equal(pickField(null, "name"), undefined);
+  });
+
+  test("وصف الرمز المسكوك: الانتهاء ومستوى الصلاحية بلا أي جزء من التوقيع", () => {
+    const signature = "CANARY-SIGNATURE-SEGMENT";
+    const jwt = syntheticJwt({ a: "full_access", exp: Math.floor(Date.now() / 1000) + 90 * 86400 }, signature);
+    const description = describeMintedToken(jwt);
+    assert.match(description, /وصول كامل/);
+    assert.match(description, /ينتهي/);
+    assert.ok(!description.includes(signature), "لا يُطبع أي جزء من التوقيع");
+    assert.ok(!description.includes(jwt));
+  });
+
+  test("رمز بلا انتهاء يُعلن كذلك، ومطالبة وصول غير معروفة لا تُطبع خامًا", () => {
+    const readOnly = describeMintedToken(syntheticJwt({ a: "ro" }));
+    assert.match(readOnly, /قراءة فقط/);
+    assert.match(readOnly, /بلا انتهاء/);
+    const weird = describeMintedToken(syntheticJwt({ a: "libsql://attacker.example/x" }));
+    assert.match(weird, /غير معروف/);
+    assert.ok(!weird.includes("attacker"), "لا يُطبع محتوى مطالبة غير معروفة");
+  });
+
+  test("رابط اتصال لُصق في حقل الرمز يُرصد (نفس عطل الإنتاج المرصود)", () => {
+    assert.equal(describeTokenShape("libsql://aborof-elazamey.turso.io").kind, "رابط لا رمز");
+    assert.equal(describeTokenShape(syntheticJwt({ sub: "platform" })).kind, "JWT");
+    assert.equal(describeTokenShape("").kind, "فارغ");
+  });
+});
+
+describe("scripts/apply-migrations — بوابة الهجرات الصريحة", () => {
+  const run = (args: string[], env: Record<string, string> = {}) =>
+    spawnSync("node", ["--import", "tsx", "scripts/apply-migrations.mjs", ...args], {
+      encoding: "utf8",
+      env: { ...process.env, TURSO_DATABASE_URL: "", TURSO_AUTH_TOKEN: "", ...env },
+    });
+  const freshDb = () =>
+    path.join(tmpdir(), `aborof-migrations-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+
+  test("وضع الخطة لا يكتب شيئًا إطلاقًا ويخرج 0 (⏳ معلَّق لا ❌ فشل)", async () => {
+    const file = freshDb();
+    const res = run(["--url", `file:${file}`]);
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.match(res.stdout, /وضع الخطة/);
+    for (const migration of expectedMigrations(process.cwd())) {
+      assert.match(res.stdout, new RegExp(`${migration.version}_${migration.name}`));
+    }
+    const client = createClient({ url: `file:${file}` });
+    const tables = await client.execute("SELECT name FROM sqlite_master");
+    assert.deepEqual(tables.rows, [], "الخطة قراءة فقط حرفيًا: لا جدول ولا صف");
+    client.close();
+  });
+
+  test("--apply يطبّق هجرات المستودع عبر المسار الإنتاجي ويسجّل بصمات مطابقة", async () => {
+    const file = freshDb();
+    const res = run(["--url", `file:${file}`, "--apply"]);
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.match(res.stdout, /طُبِّقت الآن: 0001، 0002/);
+    const expected = expectedMigrations(process.cwd());
+    const client = createClient({ url: `file:${file}` });
+    const rows = await client.execute("SELECT version, checksum FROM schema_migrations ORDER BY version");
+    const applied = rows.rows.map((row) => ({ version: String(row.version), checksum: String(row.checksum) }));
+    assert.deepEqual(applied.map((row) => row.version), expected.map((migration) => migration.version));
+    for (const migration of expected) {
+      assert.equal(applied.find((row) => row.version === migration.version)?.checksum, migration.checksum);
+    }
+    // الجدولان اللذان تفحصهما CI (الصفان 7 و8) صارا موجودين.
+    const essentials = await client.execute(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('order_items','product_search') ORDER BY name"
+    );
+    assert.deepEqual(essentials.rows.map((row) => String(row.name)), ["order_items", "product_search"]);
+    client.close();
+  });
+
+  test("التطبيق الثاني idempotent: لا هجرة تُنفَّذ مرتين", () => {
+    const file = freshDb();
+    assert.equal(run(["--url", `file:${file}`, "--apply"]).status, 0);
+    const second = run(["--url", `file:${file}`, "--apply", "--expect", "0001,0002"]);
+    assert.equal(second.status, 0, second.stdout + second.stderr);
+    assert.match(second.stdout, /لا شيء للتطبيق/);
+  });
+
+  test("--expect بإصدار غير موجود في المستودع ⇒ خروج 2 (لا كتابة على التخمين)", () => {
+    const res = run(["--url", `file:${freshDb()}`, "--apply", "--expect", "0099"]);
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /غير موجود في المستودع/);
+  });
+
+  test("رابط لوحة تحكم ⇒ رفض 3: بوابة الكتابة لا تلمس نطاقًا غير Turso", () => {
+    const res = run(["--url", "https://app.turso.tech/elazamey/databases/aborof", "--apply"]);
+    assert.equal(res.status, 3);
+    assert.match(res.stderr, /MIGRATIONS_TARGET_REFUSED/);
+    assert.match(res.stderr, /رابط لوحة تحكم/);
+    assert.doesNotMatch(res.stderr, /app\.turso\.tech/, "لا يُطبع المضيف كاملًا");
+  });
+
+  test("قيمة موضعية لم تُستبدل ⇒ رفض 3", () => {
+    const res = run(["--url", "libsql://<db>.turso.io", "--apply"]);
+    assert.equal(res.status, 3);
+    assert.match(res.stderr, /MIGRATIONS_TARGET_PLACEHOLDER/);
+  });
+
+  test("بلا هدف ⇒ 2، وهدف بعيد بلا رمز ⇒ 2 (لا كتابة بلا مصادقة)", () => {
+    assert.equal(run(["--apply"]).status, 2);
+    const noToken = run(["--url", "libsql://aborof-elazamey.turso.io", "--apply"], { TURSO_AUTH_TOKEN: "" });
+    assert.equal(noToken.status, 2);
+    assert.match(noToken.stderr, /MIGRATIONS_TOKEN_MISSING/);
+  });
+
+  test("انحراف بصمة بعد التطبيق ⇒ خروج 1 (يُرصد تعديل هجرة مطبَّقة)", async () => {
+    const file = freshDb();
+    assert.equal(run(["--url", `file:${file}`, "--apply"]).status, 0);
+    const client = createClient({ url: `file:${file}` });
+    await client.execute("UPDATE schema_migrations SET checksum='tampered' WHERE version='0001'");
+    client.close();
+    const res = run(["--url", `file:${file}`, "--apply"]);
+    assert.equal(res.status, 1, res.stdout + res.stderr);
+    assert.match(res.stdout, /بصمة مختلفة عن المستودع/);
+  });
+
+  test("الرمز لا يُطبع في أي مخرج (يُقرأ من البيئة وحدها)", () => {
+    const token = syntheticJwt({ a: "full_access" }, "CANARY-SIGNATURE");
+    const res = run(["--url", `file:${freshDb()}`, "--apply"], { TURSO_AUTH_TOKEN: token });
+    assert.doesNotMatch(res.stdout + res.stderr, /CANARY-SIGNATURE/);
+    assert.doesNotMatch(res.stdout + res.stderr, new RegExp(token));
+  });
+
+  test("--json تقرير آلي بحالات صفوف صريحة وبلا مسار الهدف", () => {
+    const file = freshDb();
+    const res = run(["--url", `file:${file}`, "--json"]);
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.mode, "plan");
+    assert.equal(report.ok, true);
+    const ids = report.rows.map((row: { id: string }) => row.id);
+    for (const id of ["target", "plan", "conn", "before", "apply", "parity", "expect"]) {
+      assert.ok(ids.includes(id), `صف ناقص في التقرير: ${id}`);
+    }
+    assert.ok(report.rows.some((row: { state: string }) => row.state === "pending"), "الخطة تُعلن التعليق لا الفشل");
+    assert.ok(!res.stdout.includes(file), "لا مسار الهدف في التقرير الآلي");
+  });
+});
+
+describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ ← هجرات ← أسرار)", () => {
+  const mintedJwt = syntheticJwt({ a: "full_access" }, "MINTED-CANARY-SIGNATURE");
+  const platformJwt = syntheticJwt({ sub: "platform" }, "PLATFORM-CANARY-SIGNATURE");
+  let api: MockTursoApi;
+
+  before(async () => {
+    api = await startMockTursoApi({ jwt: mintedJwt });
+  });
+  after(() => {
+    api.close();
+  });
+
+  const workDir = () => fs.mkdtempSync(path.join(tmpdir(), "mint-run-"));
+  // ‏ProcessEnv لا Record<string,string>: Next.js يجعل NODE_ENV حقلًا مطلوبًا فيه،
+  // والتوقيع الأدق يمنع خطأ تجميع في CI (npm run typecheck).
+  const envFor = (dir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv => ({
+    ...process.env,
+    PATH: `${dir}:${process.env.PATH}`,
+    TURSO_PLATFORM_TOKEN: platformJwt,
+    TURSO_DATABASE_URL: "",
+    TURSO_AUTH_TOKEN: "",
+    TURSO_API_ALLOW_INSECURE_BASE: "true",
+    // فشل سريع بدل مهلة 20 ثانية لكل نداء إن تعذّر الوصول إلى الخادم الوهمي.
+    TURSO_API_TIMEOUT_MS: "5000",
+    ...extra,
+  });
+  const runMint = (args: string[], env: NodeJS.ProcessEnv, input?: string) =>
+    spawnSync("bash", ["scripts/mint-turso-token.sh", ...args], { encoding: "utf8", env, input });
+
+  test("--help يطبع العقد (الاستخدام + المبادئ) من ترويسة الملف", () => {
+    const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--help"], { encoding: "utf8" });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /TURSO_PLATFORM_TOKEN/);
+    assert.match(res.stdout, /--dry-run/);
+    assert.match(res.stdout, /لا تُطبع أي قيمة سرية/);
+  });
+
+  test("--dry-run قراءة فقط: GET وحدها، بلا POST ولا هجرة ولا لمس لـ gh/vercel", () => {
+    const dir = workDir();
+    const logFile = path.join(dir, "calls.log");
+    writeFakeTools(dir, logFile);
+    const dbFile = path.join(dir, "target.db");
+    api.resetLog();
+    const res = runMint(
+      ["--dry-run", "--api-base", api.url, "--org", "elazamey", "--db", "aborof", "--migrations-url", `file:${dbFile}`],
+      envFor(dir)
+    );
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.deepEqual(api.readLog().filter((entry) => entry.startsWith("POST")), [], "لا نداء كاتب في المعاينة");
+    assert.ok(api.readLog().some((entry) => entry.startsWith("GET")), "المعاينة تقرأ من الخادم لتطابق ما سيراه التنفيذ");
+    assert.equal(callsLog(logFile).trim(), "", "لا gh ولا vercel في المعاينة");
+    assert.ok(!fs.existsSync(dbFile), "المعاينة لا تنشئ قاعدة ولا تكتب فيها");
+    assert.match(res.stdout, /بوابة الهجرات الصريحة/);
+    assert.match(res.stdout, /0001_initial/);
+    assert.match(res.stdout, /0002_search_fts5/);
+    assert.match(res.stdout, /لم يُسكّ رمز/);
+    assert.doesNotMatch(res.stdout + res.stderr, /aborof-elazamey/, "لا يُطبع المضيف كاملًا");
+    assert.doesNotMatch(res.stdout + res.stderr, /MINTED-CANARY|PLATFORM-CANARY/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("المعاملة الحقيقية: POST واحدة للسكّ، ثم 0001+0002 على الهدف، ثم الأسرار عبر stdin", async () => {
+    const dir = workDir();
+    const logFile = path.join(dir, "calls.log");
+    writeFakeTools(dir, logFile);
+    const dbFile = path.join(dir, "target.db");
+    api.resetLog();
+    const res = runMint(
+      ["--api-base", api.url, "--org", "elazamey", "--db", "aborof", "--migrations-url", `file:${dbFile}`, "--skip-verify"],
+      envFor(dir)
+    );
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    const posts = api.readLog().filter((entry) => entry.startsWith("POST"));
+    assert.equal(posts.length, 1, "سكّ واحد فقط لكل معاملة");
+    assert.match(posts[0], /\/auth\/tokens\?expiration=never&authorization=full-access$/);
+    const calls = callsLog(logFile);
+    assert.match(calls, /CALL gh secret set TURSO_DATABASE_URL --env production\nSTDIN_LEN=[1-9]\d*/);
+    assert.match(calls, /CALL gh secret set TURSO_AUTH_TOKEN --env production\nSTDIN_LEN=[1-9]\d*/);
+    assert.match(calls, /CALL vercel env add TURSO_AUTH_TOKEN production\nSTDIN_LEN=[1-9]\d*/);
+    assert.ok(!calls.includes(mintedJwt), "قيمة الرمز لا تمرّ في argv الأدوات");
+    const client = createClient({ url: `file:${dbFile}` });
+    const rows = await client.execute("SELECT version FROM schema_migrations ORDER BY version");
+    assert.deepEqual(rows.rows.map((row) => String(row.version)), ["0001", "0002"], "بوابة الهجرات طبّقت فعلًا");
+    client.close();
+    assert.match(res.stdout, /MIGRATIONS_APPLIED/);
+    assert.doesNotMatch(res.stdout + res.stderr, /MINTED-CANARY|PLATFORM-CANARY/, "لا سرّ في أي مخرج");
+    assert.doesNotMatch(res.stdout + res.stderr, /aborof-elazamey/, "ولا مضيف كامل");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("الإعداد المعطوب الحالي يُشفى: لوحة تحكم في حقل الرابط ورابط في حقل الرمز", async () => {
+    const dir = workDir();
+    const logFile = path.join(dir, "calls.log");
+    writeFakeTools(dir, logFile);
+    const dbFile = path.join(dir, "target.db");
+    api.resetLog();
+    const res = runMint(["--api-base", api.url, "--migrations-url", `file:${dbFile}`, "--skip-verify"], envFor(dir, {
+      TURSO_DATABASE_URL: "https://app.turso.tech/elazamey/databases/aborof",
+      TURSO_AUTH_TOKEN: "libsql://aborof-elazamey.turso.io",
+    }));
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.match(res.stdout + res.stderr, /رابط لوحة تحكم لا رابط اتصال/);
+    // الهدف حُلّ من API بلا --org/--db، والرابط المسلَّم للأسرار مشتق لا معطوب.
+    assert.equal(api.readLog().filter((entry) => entry.startsWith("POST")).length, 1);
+    const calls = callsLog(logFile);
+    assert.match(calls, /CALL gh secret set TURSO_DATABASE_URL --env production\nSTDIN_LEN=[1-9]\d*/);
+    assert.ok(!calls.includes("app.turso.tech"), "رابط اللوحة لا يُسلَّم كسرّ اتصال");
+    const client = createClient({ url: `file:${dbFile}` });
+    const count = await client.execute("SELECT COUNT(*) AS n FROM schema_migrations");
+    assert.equal(Number(count.rows[0]?.n), 2);
+    client.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("لا يُسكّ رمز بلا وجهة تسليم — رفض قبل أي POST", () => {
+    const dir = workDir();
+    api.resetLog();
+    const res = runMint(
+      ["--api-base", api.url, "--org", "elazamey", "--db", "aborof", "--skip-secrets", "--skip-verify"],
+      envFor(dir)
+    );
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /لا وجهة تسليم/);
+    assert.deepEqual(api.readLog().filter((entry) => entry.startsWith("POST")), [], "لا سكّ قبل حسم الوجهة");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("--save-env على ملف متتبَّع في Git ⇒ رفض قبل السكّ", () => {
+    const dir = workDir();
+    api.resetLog();
+    const res = runMint(
+      ["--api-base", api.url, "--org", "elazamey", "--db", "aborof", "--save-env", "DEPLOYMENT.md", "--skip-verify"],
+      envFor(dir)
+    );
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /ملف متتبَّع في Git/);
+    assert.deepEqual(api.readLog().filter((entry) => entry.startsWith("POST")), []);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("--save-env يكتب الزوج 0600 في ملف غير متتبَّع ويُبقي بقية المفاتيح", () => {
+    const dir = workDir();
+    const envFile = path.join(dir, "env.local");
+    fs.writeFileSync(envFile, "ADMIN_PASSWORD=keep-me\nTURSO_AUTH_TOKEN=stale-value\n");
+    const dbFile = path.join(dir, "target.db");
+    const res = runMint(
+      [
+        "--api-base",
+        api.url,
+        "--org",
+        "elazamey",
+        "--db",
+        "aborof",
+        "--skip-secrets",
+        "--save-env",
+        envFile,
+        "--skip-verify",
+        "--migrations-url",
+        `file:${dbFile}`,
+      ],
+      envFor(dir)
+    );
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    const written = fs.readFileSync(envFile, "utf8");
+    assert.match(written, /ADMIN_PASSWORD=keep-me/, "بقية المفاتيح تُحفظ كما هي");
+    assert.ok(!written.includes("TURSO_AUTH_TOKEN=stale-value"), "القيمة القديمة تُستبدل لا تُكرَّر");
+    assert.ok(written.includes(mintedJwt), "الرمز الجديد في ملف محلي مُتجاهَل — وهو مقصود");
+    assert.equal(fs.statSync(envFile).mode & 0o777, 0o600, "صلاحيات الملف 0600");
+    assert.doesNotMatch(res.stdout + res.stderr, /MINTED-CANARY/, "ولا يُطبع في السجل");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("--read-only مع بوابة الهجرات ⇒ رفض فوري بلا أي نداء", () => {
+    const dir = workDir();
+    api.resetLog();
+    const res = runMint(["--api-base", api.url, "--org", "elazamey", "--db", "aborof", "--read-only", "--skip-verify"], envFor(dir));
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /--read-only/);
+    assert.deepEqual(api.readLog(), [], "لا نداء إطلاقًا قبل حسم التعارض");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("فشل بوابة الهجرات يوقف المعاملة قبل تطبيق الأسرار", () => {
+    const dir = workDir();
+    const logFile = path.join(dir, "calls.log");
+    writeFakeTools(dir, logFile);
+    api.resetLog();
+    const res = runMint(
+      [
+        "--api-base",
+        api.url,
+        "--org",
+        "elazamey",
+        "--db",
+        "aborof",
+        "--migrations-url",
+        "https://app.turso.tech/elazamey/databases/aborof",
+        "--skip-verify",
+      ],
+      envFor(dir)
+    );
+    assert.equal(res.status, 1);
+    assert.match(res.stdout + res.stderr, /MIGRATIONS_GATE_FAILED/);
+    assert.equal(api.readLog().filter((entry) => entry.startsWith("POST")).length, 1, "السكّ تمّ قبل البوابة");
+    assert.equal(callsLog(logFile).trim(), "", "لا gh ولا vercel بعد فشل بوابة الهجرات");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("بلا رمز منصة في وضع التنفيذ ⇒ فشل قبل أي نداء (stdin مغلق)", () => {
+    const dir = workDir();
+    api.resetLog();
+    const res = runMint(
+      ["--api-base", api.url, "--org", "elazamey", "--db", "aborof", "--skip-verify"],
+      envFor(dir, { TURSO_PLATFORM_TOKEN: "" }),
+      ""
+    );
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /TURSO_PLATFORM_TOKEN/);
+    assert.deepEqual(api.readLog(), [], "لا نداء API بلا رمز منصة");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("هدف غامض (أكثر من قاعدة) ⇒ رفض بلا تخمين مع عرض المرشّحين", async () => {
+    const ambiguous = await startMockTursoApi({ databases: ["aborof", "aborof-staging"] });
+    const dir = workDir();
+    try {
+      const res = runMint(["--dry-run", "--api-base", ambiguous.url, "--org", "elazamey"], envFor(dir));
+      assert.equal(res.status, 1);
+      assert.match(res.stderr, /أكثر من قاعدة/);
+      assert.match(res.stderr, /aborof-staging/, "المرشّحون يُعرضون بالاسم ليُحسم الهدف");
+      assert.deepEqual(ambiguous.readLog().filter((entry) => entry.startsWith("POST")), []);
+    } finally {
+      ambiguous.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("رمز منصة مرفوض (401) ⇒ حكم قابل للتنفيذ بلا طباعة الرمز", () => {
+    const dir = workDir();
+    const res = runMint(["--dry-run", "--api-base", api.url], envFor(dir, { TURSO_PLATFORM_TOKEN: "not-a-bearer-token" }));
+    assert.equal(res.status, 1);
+    assert.match(res.stdout + res.stderr, /رمز المنصة مرفوض|db:mint-token|تعذّر تحديد الهدف/);
+    assert.doesNotMatch(res.stdout + res.stderr, /not-a-bearer-token/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("العقد النصي: الرمز المسكوك يمرّ عبر بيئة الطفل ولا يُمرَّر كوسيط ولا يُتتبع", () => {
+    const script = fs.readFileSync("scripts/mint-turso-token.sh", "utf8");
+    assert.match(script, /TURSO_AUTH_TOKEN="\$MINT_JWT"/, "القيم تُمرَّر عبر بيئة الطفل");
+    assert.match(script, /bash scripts\/apply-turso-secrets\.sh/, "تسليم الأسرار مفوَّض لأداته الوحيدة");
+    assert.match(script, /scripts\/apply-migrations\.mjs/, "بوابة الهجرات هي أداة المستودع لا SQL مكرَّر");
+    assert.doesNotMatch(script, /set -x/, "لا تتبّع shell يطبع القيم");
+    assert.doesNotMatch(script, /--(token|body|value|auth-token)[ =]"?\$\{?MINT_JWT/, "لا يُمرَّر الرمز كوسيط سطر أوامر");
+  });
+
+  test("أوامر npm مركّبة للأدوات الثلاث", () => {
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    assert.equal(pkg.scripts["mint:turso"], "bash scripts/mint-turso-token.sh");
+    assert.equal(pkg.scripts["mint:turso:dry"], "bash scripts/mint-turso-token.sh --dry-run");
+    assert.equal(pkg.scripts["migrations:plan"], "node scripts/apply-migrations.mjs");
+    assert.match(pkg.scripts["migrations:apply"], /--import tsx/);
+    assert.match(pkg.scripts["migrations:apply"], /apply-migrations\.mjs --apply/);
   });
 });
