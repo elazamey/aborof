@@ -69,7 +69,11 @@
    - **لا تضف** `DIAGNOSTICS_KEY`/`DIAGNOSTICS_ENABLED` في الإنتاج إلا عند الحاجة
      للتشخيص، وبمفتاح مستقل تمامًا عن `ADMIN_SESSION_SECRET`.
 3. **الهجرة على Turso الحقيقية:** تُطبَّق تلقائيًا عند أول طلب بعد النشر
-   (`runMigrations`)، وتسجَّل في جدول `schema_migrations`. يُتحقَّق بعد النشر بـ:
+   (`runMigrations`)، والمسار الموصى به الآن **بوابة صريحة قبل النشر**:
+   `npm run migrations:plan` (قراءة فقط) ثم `npm run migrations:apply`، أو المعاملة
+   الكاملة `bash scripts/mint-turso-token.sh` (سكّ رمز ← هجرات ← أسرار) — فالبوابة
+   ترفض هدفًا غير Turso (كود 3) وتوقف المعاملة قبل تطبيق الأسرار إن فشلت.
+   وتُسجَّل الهجرات في جدول `schema_migrations`. يُتحقَّق بعد النشر بـ:
    ```sql
    SELECT version, checksum FROM schema_migrations;       -- يُتوقع 0001
    SELECT name FROM sqlite_master WHERE name='order_items'; -- يُتوقع الصف موجود
@@ -83,3 +87,11 @@
    بيئة `production` أولًا، مع الرجوع إلى متغير المستودع). وظيفة النشر معلَّمة
    بـ `environment: production`، فتأكد من إنشاء البيئة في
    **Settings → Environments** ومن تقييد أسرار النشر داخل نطاقها.
+7. **مراقبة عمر الرمز (تدوير `90d`):** `token-lifecycle.yml` يفكّ مطالبة `exp` من
+   `TURSO_AUTH_TOKEN` داخل الـ runner كل اثنين 04:17Z، فيحذّر قبل 14 يومًا من الانتهاء
+   (`WARNING` ⇒ خروج 10 ⇒ تشغيل مجدول أحمر) ويفتح **Issue واحدًا** يُعدَّل جسمه أسبوعيًا
+   ويُغلق عند الخروج من منطقة الخطر. وهو **مراقبة فقط** بأقل صلاحية: `contents: read` +
+   `issues: write` (لا كتابة أسرار، ولا `TURSO_PLATFORM_TOKEN` في الـ workflow فلا قدرة
+   على السكّ)، والسرّ يُمرَّر عبر `env:` لا داخل نص `run:` وبلا تتبّع shell، ولا يُطبع
+   من الرمز شيء غير `exp`. التدوير نفسه يدوي: `bash scripts/mint-turso-token.sh` ثم
+   `vercel deploy --prod`. الجدولة تبدأ بعد دمج الملف في `main` (الفرع الافتراضي).

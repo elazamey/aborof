@@ -100,7 +100,7 @@ esac
 # 2) التحقق من الرمز: JWT بثلاثة مقاطع يبدأ بـ eyJ.
 case "$TOKEN_VALUE" in
   eyJ*.*.*) ;;
-  *) fail "الرمز ليس JWT: $(describe_token "$TOKEN_VALUE") — أنشئ توكنًا جديدًا (Create Token · Full access · Never expire)." ;;
+  *) fail "الرمز ليس JWT: $(describe_token "$TOKEN_VALUE") — أنشئ توكنًا جديدًا (Create Token · Full access · 90 يومًا)، أو دع scripts/mint-turso-token.sh يسكّه ويسلّمه بنفسه." ;;
 esac
 case "$TOKEN_VALUE" in *://*) fail "قيمة الرمز تحمل رابطًا لا رمزًا — $(describe_token "$TOKEN_VALUE")." ;; esac
 

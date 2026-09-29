@@ -1,0 +1,141 @@
+name: Turso token lifecycle audit
+
+# مدقّق دورة حياة رمز القاعدة — **مراقبة فقط (observability)**.
+#
+# لماذا: سياسة المستودع صارت سكّ الرموز بعمر `90d` لا `never` (انظر
+# `DEFAULT_EXPIRATION` في `scripts/lib/turso-api.mjs`). العمر المحدود يُلزم بالتدوير،
+# وأسرار Actions لا تُقرأ إلا وقت التشغيل داخل runner — فبلا هذا الفحص يصير التدوير
+# عطلًا في يوم التسعين بدل أن يكون إجراءً مُعلَنًا قبله بأسبوعين.
+#
+# الحدود (عقدًا، ومُثبَتة باختبارات في tests/deploy-tools.test.ts):
+#   - **لا تدوير تلقائي**: الـ workflow لا يُعطى `TURSO_PLATFORM_TOKEN` إطلاقًا، فلا
+#     يملك مادة السكّ حتى لو أُضيفت خطوة تحاول ذلك. التدوير يبقى
+#     `bash scripts/mint-turso-token.sh` بيد المشغّل.
+#   - **لا صلاحية على الأسرار**: `permissions` هنا `contents: read` + `issues: write`
+#     (Issue التدوير وحسب) — لا كتابة أسرار ولا تعديل كود. وGitHub أصلًا لا يمنح
+#     الـ workflows صلاحية كتابة أسرار Actions.
+#   - **لا قيمة في السجل**: السرّ يُمرَّر عبر `env:` (لا داخل نص `run:`)، والأداة
+#     تفكّ `exp` محليًا وتطبع النوع والطول والتاريخ والحكم فقط — وبلا تتبّع shell.
+#   - **بلا اعتماديات**: سلسلة الاستيراد (`audit-token-lifecycle.mjs` ←
+#     `lib/turso-api.mjs` ← `lib/db-url.mjs` + `lib/migration-checksums.mjs`) وحدات
+#     Node قياسية فقط، فلا تثبيت حزم ولا سطح سلسلة توريد في هذا الفحص.
+#
+# الضوضاء: لا Issue أسبوعيًا. Issue واحد عند الدخول إلى منطقة الخطر، يُحدَّث جسمه في
+# كل فحص لاحق (بلا تعليقات متراكمة)، ويُغلق تلقائيًا عند الخروج منها.
+#
+# نطاقا الأسرار: الأساسية تقرأ بيئة `production` لأنها **النطاق المضبوط فعلًا** في هذا
+# المستودع (حسمه مجسّ `turso-evidence.yml` وسجّله `handoff/turso-probe-report.md`)،
+# والثانية احتياط لنطاق المستودع تعمل فقط عند غياب السرّ في البيئة. وعكس مجسّ الأدلة:
+# لا `continue-on-error` على الأساسية، لأن تحذير التدوير يجب أن يُحمرّ التشغيل المجدول.
+# (ثمن مقبول: كل تشغيل يسجّل deployment على البيئة، ولو أُضيفت لها حماية بمراجعين
+# لاحقًا فستتوقف التشغيلات المجدولة في انتظار الموافقة.)
+#
+# ملاحظة تشغيلية: الجدولة لا تعمل إلا من نسخة هذا الملف على **الفرع الافتراضي**،
+# فتبدأ دورة الفحص الأسبوعي بعد دمج هذا الطلب في `main` (وليس قبله).
+on:
+  schedule:
+    # كل اثنين 04:17Z — دقيقة غير معتادة لتفادي زحام الجدولة على رأس الساعة.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      threshold_days:
+        description: 'بوابة التحذير بالأيام (افتراضي 14)'
+        required: false
+        default: '14'
+
+# فحص مجدول لا يُلغى بمثيل له: كل تشغيل دليل مستقل على حالة الرمز في وقته،
+# وإلغاء تشغيل أثناء كتابة Issue يترك الحالة نصف محدَّثة.
+concurrency:
+  group: token-lifecycle
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Issue واحد للتدوير (إنشاء/تحديث جسم/إغلاق) — لا علاقة له بالأسرار ولا بالنشر.
+  issues: write
+
+jobs:
+  env-scope:
+    name: Audit (environment-scope secret — production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    outputs:
+      configured: ${{ steps.detect.outputs.configured }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # بلا cache: الفحص لا يثبّت اعتماديات أصلًا.
+
+      # الكشف عن النطاق لا يطبع القيمة: اختبار فراغ فقط (نفس نمط turso-evidence.yml).
+      - name: Detect secret scope
+        id: detect
+        env:
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          if [ -n "${TURSO_AUTH_TOKEN:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "✅ TURSO_AUTH_TOKEN مرئي من بيئة production (لم تُطبع قيمته)."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TURSO_AUTH_TOKEN غير مضبوط على بيئة production — ستجرّب الوظيفة التالية نطاق المستودع."
+            {
+              echo "### 🗓️ تدقيق دورة حياة رمز Turso — لم يُنفَّذ بعد"
+              echo
+              echo "لا قيمة لـ \`TURSO_AUTH_TOKEN\` على بيئة \`production\` (وسيُجرَّب نطاق المستودع)."
+              echo "لا \`exp\` يُفكّ قبل ربط القاعدة: يبدأ هذا الفحص بالعمل فور تشغيل"
+              echo "\`bash scripts/mint-turso-token.sh\` الذي يسكّ رمزًا بعمر 90 يومًا ويسلّمه إلى GitHub وVercel."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Token lifecycle audit (observability only)
+        if: steps.detect.outputs.configured == 'true'
+        env:
+          # السرّ عبر env فقط — لا يُكتب داخل نص run: (يظهر في السجل عند أي تتبع).
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SCOPE: "أسرار بيئة production"
+          THRESHOLD_DAYS: ${{ inputs.threshold_days || '14' }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/token-lifecycle-ci.sh
+
+  repo-scope:
+    name: Audit (repository-scope secret — fallback)
+    needs: env-scope
+    if: needs.env-scope.outputs.configured != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # غياب السرّ في النطاقين حالة إعداد خارجي (لا قاعدة مربوطة بعد) لا تُحمرّ بها
+    # الفحوص إلى الأبد — والإنذار يبقى ظاهرًا في الملخّص وتبويب الفحوص.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Token lifecycle audit (observability only)
+        env:
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SCOPE: "أسرار نطاق المستودع"
+          THRESHOLD_DAYS: ${{ inputs.threshold_days || '14' }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "${TURSO_AUTH_TOKEN:-}" ]; then
+            echo "::warning::TURSO_AUTH_TOKEN غير مضبوط على بيئة production ولا على نطاق المستودع — لا شيء للتدوير بعد. سيبدأ هذا الفحص بالعمل فور تشغيل bash scripts/mint-turso-token.sh."
+            exit 0
+          fi
+          bash scripts/token-lifecycle-ci.sh
