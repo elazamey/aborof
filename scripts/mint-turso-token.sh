@@ -1,48 +1,80 @@
 #!/usr/bin/env bash
 #
-# تحويل توكن **منصّة** Turso إلى (رابط اتصال + توكن قاعدة) ثم تمريرهما إلى
-# `apply-turso-secrets.sh` — أي تحويل الحالة الحالية (المنصّة مضبوطة في حقل
-# توكن القاعدة) إلى الإعداد الصحيح بأمر واحد، بلا أي قيمة في المخرجات.
+# تحويل توكن **منصّة** Turso إلى إعداد قاعدة صحيح — بأمر واحد ومعاملة واحدة:
 #
-# السبب: توكن المنصّة صالح على api.turso.tech (200) لكنه **مرفوض** على حافة
-# القاعدة (`can't be decoded with any of the existing keys`) — حقلان مختلفان
-# وعلاجهما هذا الملف:
-#   1. GET  /v1/organizations                          ← التحقق من التوكن + المؤسسة
-#   2. GET  /v1/organizations/{org}/databases          ← الاسم + المضيف (الأسماء لا تُطبع)
-#   3. POST /v1/organizations/{org}/databases/{db}/auth/tokens
-#            ?authorization=full-access&expiration=…   ← توكن القاعدة (JWT)
-#   4. exec apply-turso-secrets.sh [كل خياراته سليمة]  ← حاجز الاتصال الحيّ ثم
-#            تطبيق GitHub production + Vercel Production (أو --dry-run للمعاينة).
+#   TURSO_PLATFORM_TOKEN  ←  Platform API  (هنا فقط، ولا يغادره أبدًا)
+#        ↓ mint
+#   توكن قاعدة (full-access · PROD)  +  توكن قاعدة (read-only · CI · مدة قصيرة)
+#        ↓ verify database auth          (SELECT 1 عبر verify-turso.mjs)
+#        ↓ verify database identity      (check-db-identity.mjs — فشل مغلق)
+#        ↓ explicit migration gate       (migrate-turso.mjs — لا هجرة وقت البناء
+#        ↓                                ولا على أول طلب مستخدم)
+#        ↓ verify schema                 (READY قبل أي كتابة سرّ)
+#        ↓ ONLY THEN apply               (apply-turso-secrets.sh — حاجز حيّ ثم
+#                                         GitHub production + Vercel Production)
+#        ↓                               (النشر اللاحق: vercel deploy --prod ←
+#                                         runtime probe — خارج هذا السكربت)
+#
+# الفصل الأسمية (نقطة4 في مراجعة المسار) — كل قيمة في حقلها:
+#   TURSO_PLATFORM_TOKEN   توكن المنصّة — **لا يُطبع ولا يُكتب في GitHub ولا
+#                          Vercel ولا ملف ولا سطر أوامر**؛ لا يغادر هذا
+#                          السكربت (يُلغى قبل التسليم لـ apply). لا shell
+#                          history: إما متغير بيئة أو مدخل مخفي read -rs.
+#   TURSO_AUTH_TOKEN_PROD  توكن قاعدة full-access → Vercel Production
+#                          (+ الجسر القديم TURSO_AUTH_TOKEN على Vercel فقط
+#                          حتى يندمج فصل PR #18).
+#   TURSO_AUTH_TOKEN_CI    توكن قاعدة read-only مدة يوم → GitHub production
+#                          (+ الجسر القديم هناك — سياق CI يقرأ CI دائمًا).
+#
+# الفحص قبل التطبيق transactional — أي بوابة حمراء = توقّف قبل أي لمس:
+#   GATE_AUTH · GATE_IDENTITY · GATE_MIGRATE · GATE_SCHEMA · GATE_CI_AUTH
 #
 # الاستخدام:
-#   TURSO_API_TOKEN='…' bash scripts/mint-turso-token.sh                 # تنفيذ كامل
-#   TURSO_API_TOKEN='…' bash scripts/mint-turso-token.sh --dry-run       # معاينة فقط
-#   TURSO_API_TOKEN='…' TURSO_ORG=x TURSO_DB=y bash scripts/mint-turso-token.sh
-#   TURSO_API_TOKEN='…' TURSO_TOKEN_EXPIRATION=1d bash scripts/mint-turso-token.sh
+#   TURSO_PLATFORM_TOKEN='…' bash scripts/mint-turso-token.sh                 # تنفيذ كامل
+#   TURSO_PLATFORM_TOKEN='…' bash scripts/mint-turso-token.sh --dry-run       # بلا أي كتابة (CI)
+#   TURSO_PLATFORM_TOKEN='…' bash scripts/mint-turso-token.sh --skip-migrate  # قاعدة مهيّأة مسبقًا
+#   TURSO_PLATFORM_TOKEN='…' TURSO_ORG=x TURSO_DB=y bash scripts/mint-turso-token.sh
+#   TURSO_TOKEN_EXPIRATION=never TURSO_CI_TOKEN_EXPIRATION=1d …
 #
-# متغيّرات اختيارية:
-#   TURSO_ORG                اسم المؤسسة (يُستنتج تلقائيًا عند اختلاف الأشكال)
-#   TURSO_DB                 اسم القاعدة (يُستنتج عند وجود قاعدة واحدة)
-#   TURSO_TOKEN_EXPIRATION   مدة توكن القاعدة — never (الافتراضي) أو 1d/2w/30m
-#   TURSO_API_BASE           للاختبار فقط — عنوان الـ API الافتراضي api.turso.tech
-#
-# مبادئ: القيم لا تُطبع ولا تمرّ كوسائط سطر (أحجام فقط)؛ لا تُكتب القيمة في
-# المخرجات ولا في اسم ملف مؤقت؛ كل ما يُطبع رموز حالة وأوصاف شكليّة.
+# المتطلبات: curl · jq · node · node_modules كاملة (npm ci — tsx للبوابة
+# الصريحة) — وأثناء التنفيذ الفعلي: gh وvercel لapply.
 set -uo pipefail
+
+MINT_USAGE_OFF=$(awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit } NR == 1 { next }' "$0" | head -n 40)
 
 fail() { echo "❌ $*" >&2; exit 1; }
 
+MIGRATE_FLAG="--migrate"     # بوابة الهجرات الصريحة: مفعّلة افتراضيًا في التنفيذ الكامل.
+forward_args=()
+for arg in "$@"; do
+  case "$arg" in
+    --skip-migrate) MIGRATE_FLAG="--skip-migrate" ;;
+    -h|--help) printf '%s\n' "$MINT_USAGE_OFF"; exit 0 ;;
+    *) forward_args+=("$arg") ;;
+  esac
+done
+
 command -v curl >/dev/null 2>&1 || fail "curl غير مثبّت."
 command -v jq >/dev/null 2>&1 || fail "jq غير مثبّت (مطلوب لقراءة استجابات المنصّة)."
+command -v node >/dev/null 2>&1 || fail "node غير مثبّت."
+[ -f scripts/verify-turso.mjs ] || fail "scripts/verify-turso.mjs مفقود — لا بوابة تحقّق بلا سكربت."
+[ -f scripts/check-db-identity.mjs ] || fail "scripts/check-db-identity.mjs مفقود."
+[ -f scripts/migrate-turso.mjs ] || fail "scripts/migrate-turso.mjs مفقود."
 
-PLATFORM_TOKEN="${TURSO_API_TOKEN:-}"
-[ -n "$PLATFORM_TOKEN" ] || fail "TURSO_API_TOKEN غير مضبوط — هو توكن المنصّة نفسه (المضبوط اليوم خطأً في TURSO_AUTH_TOKEN). خذه من لوحة Turso → Account → API tokens أو من مكان حفظك، وضعه في متغير بيئة: export TURSO_API_TOKEN='…' — لا تلصقه في المحادثة ولا في سطر الأوامر."
+# — التوكن المنصّي: بيئة أو مدخل مخفي — لا argv أبدًا (لا ps ولا history).
+PLATFORM_TOKEN="${TURSO_PLATFORM_TOKEN:-}"
+if [ -z "$PLATFORM_TOKEN" ]; then
+  printf 'أدخل TURSO_PLATFORM_TOKEN (لن يظهر على الشاشة ولا يُسجَّل): ' >&2
+  read -rs PLATFORM_TOKEN
+  printf '\n' >&2
+fi
+[ -n "$PLATFORM_TOKEN" ] || fail "TURSO_PLATFORM_TOKEN فارغ — توكن المنصّة مطلوب (Account → API tokens). لا تستخدم TURSO_AUTH_TOKEN لهذا الدور."
 
 API_BASE="${TURSO_API_BASE:-https://api.turso.tech}"
-EXPIRATION="${TURSO_TOKEN_EXPIRATION:-never}"
+PROD_EXPIRATION="${TURSO_TOKEN_EXPIRATION:-never}"
+CI_EXPIRATION="${TURSO_CI_TOKEN_EXPIRATION:-1d}"
 
-# نداء منصّة — يعيد رمز الحالة في API_STATUS والجسم في API_BODY (لا طباعة هنا).
-api() {
+api() { # $1=method · $2=url · $3=data? — يعيد الحالة في API_STATUS والجسم في API_BODY (لا طباعة).
   local method="$1" url="$2" data="${3:-}" out
   local args=(-sS -o - -w $'\n%{http_code}' --max-time 20 -X "$method"
     -H "Authorization: Bearer ${PLATFORM_TOKEN}" -H "Accept: application/json")
@@ -53,12 +85,9 @@ api() {
   [ -n "$API_STATUS" ] || API_STATUS=000
 }
 
-mask() { # نفس قناع المضيف elsewhere: أول3 + … + آخر9 للأطوال الكبيرة.
-  local h="$1"
-  if [ "${#h}" -gt 12 ]; then printf '%s…%s' "${h:0:3}" "${h: -9}"; else printf '%s…' "${h:0:3}"; fi
-}
+mask() { local h="$1"; if [ "${#h}" -gt 12 ]; then printf '%s…%s' "${h:0:3}" "${h: -9}"; else printf '%s…' "${h:0:3}"; fi; }
 
-# 1) التحقق من التوكن + اكتشاف المؤسسة (يُتجاوز بـ TURSO_ORG).
+# ───────────────────────── Platform API: المؤسسة والقاعدة والمضيف ─────────────
 ORG="${TURSO_ORG:-}"
 api GET "$API_BASE/v1/organizations"
 case "$API_STATUS" in
@@ -67,17 +96,16 @@ case "$API_STATUS" in
       ORG="$(printf '%s' "$API_BODY" | jq -r '[.organizations[]? | (.slug // .organization.slug // .name // .organization.name // empty)] | if length == 1 then .[0] else empty end' 2>/dev/null || true)"
     fi
     ;;
-  401|403) fail "توكن المنصّة مرفوض على المنصّة نفسها (HTTP ${API_STATUS}) — أنشئ توكنًا جديدًا من لوحة Turso → Account → API tokens." ;;
-  *) fail "استجابة غير متوقعة من المنصّة (HTTP ${API_STATUS}) — تحقّق من الشبكة أو من TURSO_API_BASE." ;;
+  401|403) fail "توكن المنصّة مرفوض على المنصّة نفسها (HTTP ${API_STATUS}) — أنشئ توكنًا جديدًا: Account → API tokens." ;;
+  *) fail "استجابة غير متوقعة من المنصّة (HTTP ${API_STATUS}) — تحقّق من الشبكة أو TURSO_API_BASE." ;;
 esac
-[ -n "$ORG" ] || fail "تعذّر استنتاج اسم المؤسسة من /v1/organizations (HTTP 200) — شغّل بـ TURSO_ORG=<اسم>."
-echo "✅ توكن المنصّة صالح (HTTP 200) · المؤسسة: $(mask "$ORG") (طول ${#ORG})"
+[ -n "$ORG" ] || fail "تعذّر استنتاج اسم المؤسسة (HTTP 200) — شغّل بـ TURSO_ORG=<اسم>."
+echo "✅ GATE_PLATFORM=PASS · المؤسسة: $(mask "$ORG") (طول ${#ORG})"
 
-# 2) جرد القاعدات — الاسم والمضيف لا يُطبعان؛ يُطبع العدد والأطوال فقط.
 api GET "$API_BASE/v1/organizations/$ORG/databases"
 [ "$API_STATUS" = 200 ] || fail "جرد القاعدات مرفوض (HTTP ${API_STATUS})."
 DB_COUNT="$(printf '%s' "$API_BODY" | jq '.databases | length' 2>/dev/null || echo 0)"
-[ "${DB_COUNT:-0}" -gt 0 ] || fail "لا توجد قاعدات في هذه المؤسسة — أنشئها من اللوحة أولًا."
+[ "${DB_COUNT:-0}" -gt 0 ] || fail "لا توجد قاعدات في هذه المؤسسة."
 
 DB="${TURSO_DB:-}"
 if [ -z "$DB" ]; then
@@ -87,31 +115,157 @@ if [ -z "$DB" ]; then
     fail "توجد ${DB_COUNT} قاعدة — حدّدها بـ TURSO_DB=<اسم> (لا يُطبع أي اسم هنا)."
   fi
 fi
-[ -n "$DB" ] || fail "تعذّر قراءة اسم القاعدة منجرد القاعدات — شغّل بـ TURSO_DB=<اسم>."
+[ -n "$DB" ] || fail "تعذّر قراءة اسم القاعدة — شغّل بـ TURSO_DB=<اسم>."
 
 HOSTNAME="$(printf '%s' "$API_BODY" | jq -r --arg db "$DB" '.databases[] | select((.Name // .name // .db_name) == $db) | (.Hostname // .hostname // empty)' 2>/dev/null | head -n1 || true)"
-if [ -z "$HOSTNAME" ]; then
-  HOSTNAME="${DB}-${ORG}.turso.io"
-fi
+[ -n "$HOSTNAME" ] || HOSTNAME="${DB}-${ORG}.turso.io"
 CONNECTION_URL="libsql://${HOSTNAME}"
-echo "✅ اُشتق رابط الاتصال من المنصّة (طول ${#CONNECTION_URL}) · المضيف المقنّع: $(mask "$HOSTNAME")"
+echo "✅ اُشتق رابط الاتصال من سجل المنصّة (طول ${#CONNECTION_URL}) · المضيف: $(mask "$HOSTNAME")"
 
-# 3) توكن القاعدة — يُستخرج من .jwt ولا يُطبع أبدًا.
-api POST "$API_BASE/v1/organizations/$ORG/databases/$DB/auth/tokens?authorization=full-access&expiration=${EXPIRATION}" '{}'
-[ "$API_STATUS" = 200 ] || fail "فشل إنشاء توكن القاعدة (HTTP ${API_STATUS}) — تحقق من صلاحية توكن المنصّة للإنشاء."
-DB_JWT="$(printf '%s' "$API_BODY" | jq -r '.jwt // empty' 2>/dev/null || true)"
-case "$DB_JWT" in
-  eyJ*.*.*) ;;
-  *) fail "استجابة الإنشاء لا تحمل JWT (طول الاستجابة ${#API_BODY}) — فشل غير متوقّع." ;;
-esac
-echo "✅ أُنشئ توكن القاعدة (JWT طول ${#DB_JWT} · انتهاء ${EXPIRATION}) — لا يُطبع ولا يُسجَّل."
+# ───────────────────────── سكّ توكن القاعدة (PROD · full-access) ───────────────
+mint_db_token() { # $1=authorization · $2=expiration → يطبع JWT فقط على stdout (لا شيء آخر)
+  local auth="$1" exp="$2"
+  api POST "$API_BASE/v1/organizations/$ORG/databases/$DB/auth/tokens?authorization=${auth}&expiration=${exp}" '{}'
+  [ "$API_STATUS" = 200 ] || return 1
+  printf '%s' "$API_BODY" | jq -r '.jwt // empty'
+}
 
-echo
-echo "→ تمرير الزوج إلى apply-turso-secrets.sh (حاجز الاتصال الحيّ ثم GitHub + Vercel):"
-echo
+DB_JWT="$(mint_db_token full-access "$PROD_EXPIRATION")" || fail "فشل إنشاء توكن القاعدة PROD (HTTP ${API_STATUS})."
+case "$DB_JWT" in eyJ*.*.*) ;; *) fail "استجابة الإنشاء لا تحمل JWT (طول ${#API_BODY})." ;; esac
+echo "✅ أُنشئ توكن القاعدة PROD (full-access · انتهاء ${PROD_EXPIRATION} · JWT طول ${#DB_JWT}) — لا يُطبع ولا يُسجَّل."
 
-# 4) التنفيذ: القيم عبر البيئة فقط (لا ps، لا سجل) — وكل خيارات المستخدم
-#    تمرّ كما هي (--dry-run / --github-only / --skip-verify / …).
+# زوج العمل لبقية البوابات والـ apply (PROD هو الرابط المرجعي).
 export TURSO_DATABASE_URL="$CONNECTION_URL"
 export TURSO_AUTH_TOKEN="$DB_JWT"
-exec bash scripts/apply-turso-secrets.sh "$@"
+
+# كل نداء verify يقرأ بيئته من الجملة نفسها — لا تلوّث متغيّرات الطرفية.
+verify_json() { # $1=الرمز الاختياري بديل (فارغ = PROD) → stdout JSON، رمز الخروج كما هو
+  local tok="${1:-$TURSO_AUTH_TOKEN}"
+  TURSO_AUTH_TOKEN="$tok" node scripts/verify-turso.mjs --json 2>/dev/null
+}
+row_ok() { printf '%s' "$1" | jq -r --arg id "$2" '.rows[]? | select(.id == $id) | .ok' 2>/dev/null; }
+row_detail() { printf '%s' "$1" | jq -r --arg id "$2" '.rows[]? | select(.id == $id) | .detail' 2>/dev/null; }
+print_rows() { # تفاصيل مُنقّاة أصلًا من verify — تُطبع للإنسان عند الفشل فقط.
+  printf '%s' "$1" | jq -r '.rows[]? | select(.ok == false) | "   • \(.id): \(.detail)"' 2>/dev/null
+}
+
+# أي بوابة تحتمل الإجراءات المتبقية؟ --skip-verify يتجاوز الشبكيّة مع تحذير صريح.
+SKIP_VERIFY=false
+DRY_RUN=false
+for a in "${forward_args[@]:-}"; do
+  [ "$a" = "--skip-verify" ] || [ "$a" = "--no-verify" ] && SKIP_VERIFY=true
+  [ "$a" = "--dry-run" ] && DRY_RUN=true
+done
+
+# ───────────────────────── GATE_AUTH — الاتصال بالتوكن الجديد ─────────────────
+VJSON=""
+if [ "$SKIP_VERIFY" = true ]; then
+  echo "⚠️  GATE_AUTH=SKIPPED · GATE_SCHEMA=SKIPPED · GATE_MIGRATE=SKIPPED · GATE_CI_AUTH=SKIPPED (--skip-verify)" >&2
+else
+  VJSON="$(verify_json "")" || true
+  if [ "$(row_ok "$VJSON" conn)" = "true" ]; then
+    echo "✅ GATE_AUTH=PASS — التوكن الجديد يفتح الاتصال فعليًا (SELECT 1)."
+  else
+    echo "❌ GATE_AUTH=FAIL — القاعدة رفضت الزوج الجديد:" >&2
+    print_rows "$VJSON" >&2
+    echo "GATE_AUTH=FAIL" >&2
+    exit 1
+  fi
+fi
+
+# ───────────────────────── GATE_IDENTITY — فشل مغلق عند المخالفة ──────────────
+# (محلي بلا شبكة — يعمل حتى مع --skip-verify؛ المدخلات عبر بيئة فقط.)
+if MINTED_DB_TOKEN="$DB_JWT" EXPECTED_DB="$DB" EXPECTED_ORG="$ORG" EXPECTED_HOST="$HOSTNAME" \
+  node scripts/check-db-identity.mjs; then
+  :
+else
+  fail "GATE_IDENTITY=FAIL — التوكن لا يخصّ هذه القاعدة؛ أُوقفت كل الكتابات."
+fi
+
+# ───────────────────────── GATE_MIGRATE — بوابة الهجرات الصريحة ───────────────
+# لا هجرة وقت البناء (NO MIGRATION DURING BUILD) ولا على أول طلب مستخدم:
+# خطوة صريحة هنا، بين «الاتصال ثابت» و«التطبيق».
+if [ "$SKIP_VERIFY" = true ]; then
+  : # مُسبَّق التحذير أعلاه
+elif [ "$MIGRATE_FLAG" = "--skip-migrate" ]; then
+  echo "⏭️  GATE_MIGRATE=SKIPPED (--skip-migrate) — تتطلّب GATE_SCHEMA=READY وإلا أُوقف."
+elif [ "$DRY_RUN" = true ]; then
+  echo "⏭️  GATE_MIGRATE=SKIPPED_DRY_RUN — المعاينة لا تكتب في القاعدة إطلاقًا."
+else
+  echo "🚪 GATE_MIGRATE — بوابة الهجرات الصريحة (كتابة صريحة على القاعدة)…"
+  mig_out="$(node --import tsx scripts/migrate-turso.mjs 2>&1)" && mig_rc=0 || mig_rc=$?
+  printf '%s\n' "$mig_out"
+  case "$mig_out" in
+    *MIGRATE_GATE=APPLIED*|*MIGRATE_GATE=ALREADY*) echo "✅ GATE_MIGRATE=PASS" ;;
+    *) echo "❌ GATE_MIGRATE=FAIL — أُوقف قبل أي تطبيق (كود ${mig_rc})." >&2; exit 1 ;;
+  esac
+fi
+
+# ───────────────────────── GATE_SCHEMA — الجاهزية قبل أي كتابة سرّ ────────────
+schema_gate() { # $1=VJSON · $2=mode (enforce|report) → 0 مقبول · 1 مرفوض
+  local v="$1" mode="$2" mig ok_par
+  [ "$(row_ok "$v" conn)" = "true" ] || { echo "   • الاتصال نفسه فقد (GATE_AUTH سابق)."; return 1; }
+  mig="$(row_ok "$v" mig-table)"
+  if [ "$mig" = "true" ]; then
+    for id in mig-parity row-7 row-8 row-9 tables; do
+      if [ "$(row_ok "$v" "$id")" != "true" ]; then
+        echo "❌ GATE_SCHEMA=DIVERGED — جدول موجود لكن فحصًا حمراء:" >&2
+        print_rows "$v" >&2
+        return 1
+      fi
+    done
+    echo "✅ GATE_SCHEMA=READY — schema_migrations متطابقة وكل صفوف المحتوى خضراء."
+    return 0
+  fi
+  if [ "$mode" = "report" ]; then
+    echo "⚠️  GATE_SCHEMA=EMPTY — قاعدة فارغة (متوقّع قبل أول تشغيل لبوابة الهجرات) — لا تُطبَّق أسرار في المعاينة إلا بجاهزية مُعلنة."
+    echo "   • $(row_detail "$v" mig-table)"
+    return 0
+  fi
+  echo "❌ GATE_SCHEMA=NOT_READY — بعد بوابة الهجرات: schema_migrations غير جاهزة — فشل مغلق." >&2
+  print_rows "$v" >&2
+  return 1
+}
+
+if [ "$SKIP_VERIFY" = true ]; then
+  :
+else
+  # بعد الهجرة الصريحة (أو في المعاينة): قراءة جديدة للحكم على الحالة الفعلية.
+  VJSON="$(verify_json "")" || true
+  if [ "$DRY_RUN" = true ]; then
+    schema_gate "$VJSON" report || exit 1
+  else
+    schema_gate "$VJSON" enforce || exit 1
+  fi
+fi
+
+# ───────────────────────── سكّ توكن القاعدة (CI · read-only · قصير) ────────────
+CI_JWT=""
+if [ "$SKIP_VERIFY" = true ]; then
+  echo "⏭️  GATE_CI_AUTH=SKIPPED (--skip-verify)" >&2
+else
+  CI_JWT="$(mint_db_token read-only "$CI_EXPIRATION")" || fail "فشل إنشاء توكن CI read-only (HTTP ${API_STATUS})."
+  case "$CI_JWT" in eyJ*.*.*) ;; *) fail "توكن CI غير صالح (طول ${#API_BODY})." ;; esac
+  echo "✅ أُنشئ توكن CI (read-only · انتهاء ${CI_EXPIRATION} · JWT طول ${#CI_JWT})."
+  if [ "$(row_ok "$(verify_json "$CI_JWT")" conn)" = "true" ]; then
+    echo "✅ GATE_CI_AUTH=PASS — توكن CI يفتح اتصالًا للقراءة فقط."
+  else
+    fail "GATE_CI_AUTH=FAIL — توكن CI مرفوض؛ لا تُطبَّق أي أسرار."
+  fi
+  export TURSO_AUTH_TOKEN_CI="$CI_JWT"
+fi
+
+# الدور الكامل: PROD كقيمة أساس (ول.'_PROD' عند وجودها) + CI منفصل تمامًا.
+export TURSO_AUTH_TOKEN_PROD="$DB_JWT"
+
+# ───────────────────────── تسليم معامل — المنصّي لا يغادر هنا ─────────────────
+# (لا يُطبع · لا في GitHub · لا في Vercel · لا في ملف · لا في argv.)
+unset TURSO_PLATFORM_TOKEN PLATFORM_TOKEN
+echo
+echo "→ ALL GATES PASSED — تسليم الزوج إلى apply-turso-secrets.sh (حاجز حيّ ثم GitHub production + Vercel Production):"
+echo
+if [ "${#forward_args[@]}" -eq 0 ]; then
+  exec bash scripts/apply-turso-secrets.sh
+else
+  exec bash scripts/apply-turso-secrets.sh "${forward_args[@]}"
+fi

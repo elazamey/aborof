@@ -80,9 +80,18 @@ describe_token() {
 
 URL_VALUE="$(read_secret TURSO_DATABASE_URL)"
 TOKEN_VALUE="$(read_secret TURSO_AUTH_TOKEN)"
+# أدوار إضافية اختيارية — تُكتب كلها عبر stdin بلا طباعة (انظر الترويسة).
+PROD_VALUE="${TURSO_AUTH_TOKEN_PROD:-}"
+CI_VALUE="${TURSO_AUTH_TOKEN_CI:-}"
 
 [ -n "$URL_VALUE" ] || fail "TURSO_DATABASE_URL فارغ."
 [ -n "$TOKEN_VALUE" ] || fail "TURSO_AUTH_TOKEN فارغ."
+# ‏كوّن دور CI إن وُجد يجب أن يكون توكن قاعدة فعلًا — لا لصق آخر.
+case "$CI_VALUE" in
+  "") ;;
+  eyJ*.*.*) ;;
+  *) fail "TURSO_AUTH_TOKEN_CI ليس JWT — القيمة الممرَّرة ليست توكن قاعدة." ;;
+esac
 
 # 1) التحقق من الرابط: libsql/turso/https على نطاق Turso، وليس صفحة اللوحة.
 case "$URL_VALUE" in
@@ -150,7 +159,7 @@ else
       echo
       ;;
     11)
-      echo "⚠️  VERIFY_SCHEMA_NOT_READY: الاتصال ناجح لكن فحوصًا تالية حمراء — متوقّع قبل أول نشر إن كانت الهجرات لم تُطبَّق بعد (تُطبَّق تلقائيًا عند أول طلب). أعد 'npm run verify:turso' بعد النشر." >&2
+      echo "⚠️  VERIFY_SCHEMA_NOT_READY: الاتصال ناجح لكن فحوصًا تالية حمراء — لا تعتمد على أول طلب مستخدم لتشغيل الهجرات؛ شغّل بوابة الهجرات الصريحة صراحةً: node --import tsx scripts/migrate-turso.mjs ثم أعد verify (mint-turso-token.sh ينفّذها ضمن معاملته)." >&2
       echo
       ;;
     10)
@@ -164,10 +173,18 @@ fi
 
 actions=()
 
+# ‏قيمة سياق GitHub = دور CI حين يُمرَّر (سياق CI لا يحمل أبدًا credential إنتاج كامل).
+GITHUB_TOKEN_VALUE="${CI_VALUE:-$TOKEN_VALUE}"
+
 if [ "$SKIP_GITHUB" = false ]; then
   if command -v gh >/dev/null 2>&1; then
     actions+=("gh secret set TURSO_DATABASE_URL --env $ENV_NAME   (القيمة عبر stdin)")
-    actions+=("gh secret set TURSO_AUTH_TOKEN   --env $ENV_NAME   (القيمة عبر stdin)")
+    if [ -n "$CI_VALUE" ]; then
+      actions+=("gh secret set TURSO_AUTH_TOKEN   --env $ENV_NAME   (القيمة عبر stdin = دور CI القصير المدى)")
+      actions+=("gh secret set TURSO_AUTH_TOKEN_CI --env $ENV_NAME  (القيمة عبر stdin)")
+    else
+      actions+=("gh secret set TURSO_AUTH_TOKEN   --env $ENV_NAME   (القيمة عبر stdin)")
+    fi
   else
     echo "⚠️  gh غير مثبّت — أضف السرّين يدويًا في Settings → Environments → $ENV_NAME → Secrets" >&2
   fi
@@ -179,6 +196,10 @@ if [ "$SKIP_VERCEL" = false ]; then
     actions+=("vercel env add TURSO_DATABASE_URL $ENV_NAME        (القيمة عبر stdin)")
     actions+=("vercel env rm TURSO_AUTH_TOKEN $ENV_NAME --yes")
     actions+=("vercel env add TURSO_AUTH_TOKEN $ENV_NAME")
+    if [ -n "$PROD_VALUE" ]; then
+      actions+=("vercel env rm TURSO_AUTH_TOKEN_PROD $ENV_NAME --yes")
+      actions+=("vercel env add TURSO_AUTH_TOKEN_PROD $ENV_NAME     (دور PROD الكامل)")
+    fi
     actions+=("vercel deploy --prod                               (نشر جديد لقراءة المتغيرات)")
   else
     echo "ℹ️  vercel CLI غير مثبّت — أعِد النشر من اللوحة: Project → Deployments → Redeploy" >&2
@@ -202,18 +223,30 @@ fi
 if [ "$SKIP_GITHUB" = false ] && command -v gh >/dev/null 2>&1; then
   GH_ARGS=(--env "$ENV_NAME")
   [ -n "$REPO" ] && GH_ARGS+=(--repo "$REPO")
-  printf '%s' "$URL_VALUE"   | gh secret set TURSO_DATABASE_URL "${GH_ARGS[@]}" || fail "فشل ضبط سرّ الرابط على GitHub (تحقّق من gh auth status والصلاحيات)."
-  printf '%s' "$TOKEN_VALUE" | gh secret set TURSO_AUTH_TOKEN   "${GH_ARGS[@]}" || fail "فشل ضبط سرّ الرمز على GitHub."
-  echo "✅ GitHub: حُدِّث السرّان على بيئة $ENV_NAME (بلا طباعة أي قيمة)."
+  printf '%s' "$URL_VALUE"          | gh secret set TURSO_DATABASE_URL "${GH_ARGS[@]}" || fail "فشل ضبط سرّ الرابط على GitHub (تحقّق من gh auth status والصلاحيات)."
+  printf '%s' "$GITHUB_TOKEN_VALUE" | gh secret set TURSO_AUTH_TOKEN   "${GH_ARGS[@]}" || fail "فشل ضبط سرّ الرمز على GitHub."
+  if [ -n "$CI_VALUE" ]; then
+    # ‏فصل الأسمية: دور CI باسمه الصريح — والجسر القديم = قيمته لا قيم PROD.
+    printf '%s' "$CI_VALUE" | gh secret set TURSO_AUTH_TOKEN_CI "${GH_ARGS[@]}" || fail "فشل ضبط TURSO_AUTH_TOKEN_CI على GitHub."
+    echo "✅ GitHub: حُدِّث السرّين + TURSO_AUTH_TOKEN_CI على بيئة $ENV_NAME (سياق CI = توكن read-only قصير المدى، بلا طباعة أي قيمة)."
+  else
+    echo "✅ GitHub: حُدِّث السرّان على بيئة $ENV_NAME (بلا طباعة أي قيمة)."
+  fi
 fi
 
-# 5) Vercel — نفس المنطق، والقيمة عبر stdin.
+# 5) Vercel — نفس المنطق، والقيمة عبر stdin. دور PROD الإنتاجي باسمه الصريح.
 if [ "$SKIP_VERCEL" = false ] && command -v vercel >/dev/null 2>&1; then
   vercel env rm TURSO_DATABASE_URL "$ENV_NAME" --yes >/dev/null 2>&1 || true
   printf '%s' "$URL_VALUE"   | vercel env add TURSO_DATABASE_URL "$ENV_NAME" >/dev/null || fail "فشل ضبط متغير الرابط على Vercel."
   vercel env rm TURSO_AUTH_TOKEN "$ENV_NAME" --yes >/dev/null 2>&1 || true
   printf '%s' "$TOKEN_VALUE" | vercel env add TURSO_AUTH_TOKEN "$ENV_NAME" >/dev/null || fail "فشل ضبط متغير الرمز على Vercel."
-  echo "✅ Vercel: حُدِّث المتغيّران على بيئة $ENV_NAME."
+  if [ -n "$PROD_VALUE" ]; then
+    vercel env rm TURSO_AUTH_TOKEN_PROD "$ENV_NAME" --yes >/dev/null 2>&1 || true
+    printf '%s' "$PROD_VALUE" | vercel env add TURSO_AUTH_TOKEN_PROD "$ENV_NAME" >/dev/null || fail "فشل ضبط TURSO_AUTH_TOKEN_PROD على Vercel."
+    echo "✅ Vercel: حُدِّث المتغيّران + TURSO_AUTH_TOKEN_PROD على بيئة $ENV_NAME (دور PROD الإنتاجي — لا يُشارَك مع CI)."
+  else
+    echo "✅ Vercel: حُدِّث المتغيّران على بيئة $ENV_NAME."
+  fi
   echo "➡️  الخطوة الأخيرة: vercel deploy --prod (المتغيرات تُقرأ في نشر جديد)."
 fi
 

@@ -286,7 +286,7 @@ function render() {
       : `\n❌ فشل ${failed.length} فحصًا — راجع DEPLOYMENT.md (الصفوف 7–9 وإصلاح P0) قبل إعلان الجاهزية.`
   );
   if (!local) {
-    console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. التطبيق نفسه يشغّل الهجرات عند أول طلب (`ensureSchema`).");
+    console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. الهجرات بوابة صريحة مستقلة: node --import tsx scripts/migrate-turso.mjs — لا وقت البناء ولا على أول طلب مستخدم (ensureSchema شبكة أمان idempotent لا بوابة سياسة).");
   }
   console.log(`FINAL: ${verdict}`);
 }

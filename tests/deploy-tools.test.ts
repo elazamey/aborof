@@ -383,23 +383,61 @@ describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان",
     assert.equal(res.status, 1);
     assert.match(res.stderr, /فارغ/);
   });
+
+  test("فصل الأسمية: الأدوار _PROD/_CI تظهر كخطوات صريحة ولا تُطبع قيمها", () => {
+    // vercel CLI غير مثبّت في بيئة الاختبار — وهمي على PATH كي تُبنى خطواته.
+    const binDir = fs.mkdtempSync(path.join(tmpdir(), "role-fake-bin-"));
+    const stub = path.join(binDir, "vercel");
+    fs.writeFileSync(stub, "#!/usr/bin/env bash\nexit 0\n");
+    fs.chmodSync(stub, 0o755);
+    try {
+      const res = run(
+        {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_DATABASE_URL: GOOD_URL,
+          TURSO_AUTH_TOKEN: GOOD_TOKEN,
+          TURSO_AUTH_TOKEN_CI: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10b2tlbiJ9.c2lnY2k",
+          TURSO_AUTH_TOKEN_PROD: GOOD_TOKEN,
+        },
+        ["--dry-run", "--skip-verify"]
+      );
+      assert.equal(res.status, 0, res.stdout + res.stderr);
+      assert.match(res.stdout, /gh secret set TURSO_AUTH_TOKEN_CI --env production/);
+      assert.match(res.stdout, /دور CI القصير المدى/);
+      assert.match(res.stdout, /vercel env add TURSO_AUTH_TOKEN_PROD production/);
+      assert.match(res.stdout, /دور PROD الكامل/);
+      // القيم لا تظهر أبدًا (فقط الأسماء والأدوار وأطوال الشكل).
+      assert.doesNotMatch(res.stdout + res.stderr, /c2lnY2k/);
+      assert.doesNotMatch(res.stdout + res.stderr, new RegExp(GOOD_TOKEN));
+      assert.doesNotMatch(res.stdout, /aborof-elazamey/, "لا يُطبع المضيف كاملًا");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إلى زوج قاعدة", () => {
   // نفس عقد api() في السكربت: الجسم في سطر (أو أكثر) ثم سطر رمز الحالة.
   const MINTED_JWT = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJtaW50ZWQifQ.c2lnbmF0dXJl";
+  // توكن بادّعاء db مخالف — يثبت فشل الهوية المغلق قبل أي كتابة.
+  const b64u = (s: string) => Buffer.from(s, "utf8").toString("base64url");
+  const MISMATCH_JWT = `eyJhbGciOiJFZERTQSJ9.${b64u('{"db":"otherdb"}')}.c2ln`;
+  const PASS_JWT = `eyJhbGciOiJFZERTQSJ9.${b64u('{"db":"rofyd","org":"elazamey"}')}.c2ln`;
+  const NOCLAIMS_JWT = `eyJhbGciOiJFZERTQSJ9.${b64u('{"exp":9999999999}')}.c2ln`;
 
   function makeFakes() {
     const binDir = fs.mkdtempSync(path.join(tmpdir(), "mint-fake-bin-"));
     const logFile = path.join(binDir, "calls.log");
-    // curl وهمي يرد بردود المنصّة المصنوعة حسب المسار (لا شبكة في الاختبار).
+    // curl وهمي يرد بردود المنصّة المصنوعة حسب المسار (لا شبكة في الاختبار)؛
+    // FAKE_JWT يسمح بإرجاع توكن بادّعاءات مختلفة لاختبار بوابة الهوية.
     const curl = [
       "#!/usr/bin/env bash",
       `echo "CURL $*" >> "${logFile}"`,
       'url=""',
       'for a in "$@"; do case "$a" in https://*) url="$a" ;; esac; done',
       'case "$url" in',
-      `  */auth/tokens*) printf '%s\\n%s' '{"jwt":"${MINTED_JWT}"}' 200 ;;`,
+      `  */auth/tokens*) printf '%s\\n%s' "{\\"jwt\\":\\"\${FAKE_JWT:-${MINTED_JWT}}\\"}" 200 ;;`,
       `  */databases) printf '%s\\n%s' '{"databases":[{"Name":"rofyd","Hostname":"rofyd-elazamey.turso.io"}]}' 200 ;;`,
       `  */v1/organizations) printf '%s\\n%s' '{"organizations":[{"slug":"elazamey"}]}' 200 ;;`,
       `  *) printf '%s\\n%s' '{}' 404 ;;`,
@@ -420,16 +458,16 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
     return { binDir, logFile };
   }
 
-  test("بدون TURSO_API_TOKEN يسقط فورًا برسالة تحدّد المتغير — بلا أي نداء شبكة", () => {
+  test("بدون TURSO_PLATFORM_TOKEN يسقط فورًا برسالة تحدّد المتغير — بلا أي نداء شبكة", () => {
     const { binDir, logFile } = makeFakes();
     try {
       const res = spawnSync("bash", ["scripts/mint-turso-token.sh"], {
         encoding: "utf8",
         input: "",
-        env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, TURSO_API_TOKEN: "" },
+        env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, TURSO_PLATFORM_TOKEN: "", TURSO_API_TOKEN: "" },
       });
       assert.equal(res.status, 1);
-      assert.match(res.stderr, /TURSO_API_TOKEN/);
+      assert.match(res.stderr, /TURSO_PLATFORM_TOKEN/);
       assert.equal(fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "", "", "لا نداء curl قبل التحقق من التوكن");
     } finally {
       fs.rmSync(binDir, { recursive: true, force: true });
@@ -445,14 +483,15 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
         env: {
           ...process.env,
           PATH: `${binDir}:${process.env.PATH}`,
-          TURSO_API_TOKEN: "platform-fake-token",
+          TURSO_PLATFORM_TOKEN: "platform-fake-token",
         },
       });
       const out = res.stdout + res.stderr;
       assert.equal(res.status, 0, out);
-      assert.match(res.stdout, /توكن المنصّة صالح \(HTTP 200\)/);
-      assert.match(res.stdout, /أُنشئ توكن القاعدة/);
+      assert.match(res.stdout, /GATE_PLATFORM=PASS/, "حكم المنصّة يُطبع بلا قيمة");
+      assert.match(res.stdout, /أُنشئ توكن القاعدة PROD/);
       assert.match(out, /--dry-run: لن يُطبَّق/);
+      assert.match(out, /GATE_IDENTITY=/, "بوابة الهوية تعمل حتى في التخطي (محلية بلا شبكة)");
       const log = fs.readFileSync(logFile, "utf8");
       assert.match(log, /auth\/tokens\?authorization=full-access&expiration=never/, "التوريد عبر Platform API");
       // لا تسريب: لا الرمز المسكوك ولا المضيف الكامل ولا اسم المؤسسة كاملًا.
@@ -468,7 +507,7 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
     }
   });
 
-  test("التنفيذ الفعلي يمرّر الزوج إلى gh وvercel عبر stdin — بلا تسريب في أي مخرج", () => {
+  test("التنفيذ الفعلي يمرّر الأدوار الثلاثة (PROD/CI/الجسر) إلى gh وvercel عبر stdin — بلا تسريب", () => {
     const { binDir, logFile } = makeFakes();
     try {
       const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--skip-verify"], {
@@ -477,7 +516,9 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
         env: {
           ...process.env,
           PATH: `${binDir}:${process.env.PATH}`,
-          TURSO_API_TOKEN: "platform-fake-token",
+          TURSO_PLATFORM_TOKEN: "platform-fake-token",
+          // قيمة CI تمرّر كمدخل لاختبار فصل الأسمية في apply (وضع التخطي لا يسكّ CI).
+          TURSO_AUTH_TOKEN_CI: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10b2tlbiJ9.c2lnY2k",
         },
       });
       const out = res.stdout + res.stderr;
@@ -485,16 +526,131 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
       const log = fs.readFileSync(logFile, "utf8");
       assert.match(log, /secret set TURSO_DATABASE_URL --env production/);
       assert.match(log, /secret set TURSO_AUTH_TOKEN --env production/);
+      assert.match(log, /secret set TURSO_AUTH_TOKEN_CI --env production/, "فصل الأسمية: دور CI على GitHub");
       assert.match(log, /env add TURSO_DATABASE_URL production/);
       assert.match(log, /env add TURSO_AUTH_TOKEN production/);
+      assert.match(log, /env add TURSO_AUTH_TOKEN_PROD production/, "فصل الأسمية: دور PROD على Vercel");
       assert.doesNotMatch(out, new RegExp(MINTED_JWT));
       assert.doesNotMatch(out, /rofyd-elazamey/);
-      assert.match(res.stdout, /حُدِّث السرّان/);
+      // لا توكن المنصّة ينتقل أبدًا: قيمته لا تظهر ولا يحملها أي نداء gh/vercel
+      // (سطور CURL تسجّل argv الوهمي بحكمها — الشهادة تُقتصر على خطوات التسليم).
+      assert.doesNotMatch(out, /platform-fake-token/);
+      const handoff = log.split("\n").filter((l) => /\/(gh|vercel) /.test(l)).join("\n");
+      assert.doesNotMatch(handoff, /platform-fake-token/);
+      assert.match(res.stdout, /حُدِّث السرّ/);
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  test("بوابة الهوية fail-closed: توكن مسكوك لقاعدة أخرى يسقط قبل أي استدعاء gh/vercel", () => {
+    const { binDir, logFile } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--skip-verify"], {
+        encoding: "utf8",
+        input: "",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_PLATFORM_TOKEN: "platform-fake-token",
+          FAKE_JWT: MISMATCH_JWT,
+        },
+      });
+      const out = res.stdout + res.stderr;
+      assert.equal(res.status, 1, out);
+      assert.match(out, /GATE_IDENTITY=(MISMATCH|FAIL)/);
+      const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+      assert.doesNotMatch(log, /^\S*gh /m, "لا GitHub بعد مخالفة الهوية");
+      assert.doesNotMatch(log, /^\S*vercel /m, "لا Vercel بعد مخالفة الهوية");
+      assert.doesNotMatch(out, /otherdb/, "اللادّعاء المخالف لا يُطبع كاملًا (قناع)");
     } finally {
       fs.rmSync(binDir, { recursive: true, force: true });
     }
   });
 });
+
+describe("scripts/check-db-identity.mjs — بوابة الهوية (وحدة)", () => {
+  const b64u = (s: string) => Buffer.from(s, "utf8").toString("base64url");
+  const jwt = (payload: object) => `eyJhbGciOiJFZERTQSJ9.${b64u(JSON.stringify(payload))}.c2ln`;
+  const runId = (env: Record<string, string>) =>
+    spawnSync("node", ["scripts/check-db-identity.mjs"], { encoding: "utf8", env: { ...process.env, ...env } });
+
+  test("ادّعاء مطابق يمرّ بحكم PASS مقنَّن", () => {
+    const res = runId({
+      MINTED_DB_TOKEN: jwt({ db: "rofyd", org: "elazamey" }),
+      EXPECTED_DB: "rofyd",
+      EXPECTED_ORG: "elazamey",
+      EXPECTED_HOST: "rofyd-elazamey.turso.io",
+    });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /GATE_IDENTITY=PASS/);
+    assert.doesNotMatch(res.stdout, /rofyd|"db"/, "لا قيمة خام في الحكم");
+  });
+
+  test("مخالفة اسم القاعدة = فشل مغلق (exit 1) بقناع للجانبين", () => {
+    const res = runId({ MINTED_DB_TOKEN: jwt({ db: "otherdb" }), EXPECTED_DB: "rofyd" });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /GATE_IDENTITY=MISMATCH/);
+    assert.doesNotMatch(res.stderr, /otherdb/, "القِناع يمنع طباعة الادّعاء كاملًا");
+  });
+
+  test("مخالفة المؤسسة أو المضيف المشتق = فشل مغلق", () => {
+    const r1 = runId({ MINTED_DB_TOKEN: jwt({ db: "rofyd", org: "evil-org" }), EXPECTED_DB: "rofyd", EXPECTED_ORG: "elazamey" });
+    assert.equal(r1.status, 1);
+    assert.match(r1.stderr, /GATE_IDENTITY=MISMATCH/);
+    const r2 = runId({
+      MINTED_DB_TOKEN: jwt({ db: "rofyd", org: "elazamey" }),
+      EXPECTED_DB: "rofyd",
+      EXPECTED_ORG: "elazamey",
+      EXPECTED_HOST: "attacker.turso.io",
+    });
+    assert.equal(r2.status, 1);
+    assert.match(r2.stderr, /GATE_IDENTITY=MISMATCH/);
+  });
+
+  test("توكن بلا ادّعاءي db/org يمرّ مع تعليل صريح (NO_CLAIMS) لا بصمت", () => {
+    const res = runId({ MINTED_DB_TOKEN: jwt({ exp: 9999999999 }), EXPECTED_DB: "rofyd" });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /GATE_IDENTITY=NO_CLAIMS/);
+  });
+
+  test("مدخلات ناقصة أو رمز غير قابل للفك = BAD_INPUT (exit 2)", () => {
+    assert.equal(runId({ EXPECTED_DB: "rofyd" }).status, 2);
+    assert.equal(runId({ MINTED_DB_TOKEN: "not-a-jwt", EXPECTED_DB: "rofyd" }).status, 2);
+  });
+});
+
+describe("scripts/migrate-turso.mjs — بوابة الهجرات الصريحة", () => {
+  test("زوج محلي: تُطبَّق الهجرتان ثم تُعلن idempotency في التشغيل الثاني", () => {
+    const dbFile = path.join(fs.mkdtempSync(path.join(tmpdir(), "mig-gate-")), "t.db");
+    try {
+      const r1 = spawnSync("node", ["--import", "tsx", "scripts/migrate-turso.mjs"], {
+        encoding: "utf8",
+        env: { ...process.env, TURSO_DATABASE_URL: `file:${dbFile}`, TURSO_AUTH_TOKEN: "" },
+      });
+      assert.equal(r1.status, 0, r1.stdout + r1.stderr);
+      assert.match(r1.stdout, /MIGRATE_GATE=APPLIED count=2 versions=0001\+0002/);
+      const r2 = spawnSync("node", ["--import", "tsx", "scripts/migrate-turso.mjs"], {
+        encoding: "utf8",
+        env: { ...process.env, TURSO_DATABASE_URL: `file:${dbFile}`, TURSO_AUTH_TOKEN: "" },
+      });
+      assert.equal(r2.status, 0, r2.stdout + r2.stderr);
+      assert.match(r2.stdout, /MIGRATE_GATE=ALREADY/);
+    } finally {
+      fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
+    }
+  });
+
+  test("بلا رابط مُمرَّر صراحةً = exit 2 (لا هجرة تلقائية من أي سياق)", () => {
+    const res = spawnSync("node", ["--import", "tsx", "scripts/migrate-turso.mjs"], {
+      encoding: "utf8",
+      env: { ...process.env, TURSO_DATABASE_URL: "", TURSO_AUTH_TOKEN: "" },
+    });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /MIGRATE_GATE=MISSING_ENV/);
+  });
+});
+
 
 describe("scripts/smoke-production — حاجز النطاقات (SSRF)", () => {
   test("يسمح بروابط https العامة فقط", () => {
