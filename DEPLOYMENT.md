@@ -50,6 +50,7 @@
 | `ENABLE_RBAC` | Variable اختياري | `true` لتفعيل لوحة الصلاحيات (M1): مستخدمون بأدوار قابلة للتعديل (+ سجل تدقيق)، وكل مسار إداري يفرض صلاحية محددة. **مغلق افتراضيًا**؛ غيابه أو أي قيمة أخرى تُبقي كلمة مرور الإدارة المشتركة والجلسة القديمة تعمل حرفيًا — التفاصيل والتراجع في `docs/security/04-rbac.md` |
 | `ENABLE_CELIA_TOKENS` | Variable اختياري | `true` لتفعيل توكنات وكلاء مُدارة (CeliaTokenManager): توكنات متعددة بنطاقات لكل توكن، مُخزَّنة كبصمة SHA-256، مع إلغاء/تدوير وكشف واحد للنص الصريح. **مغلق افتراضيًا**؛ غيابه يُبقي `CELIA_AGENT_TOKEN` وحده يعمل حرفيًا — التفاصيل في `docs/ai/celia-token-manager.md` |
 | `VERCEL_DEPLOY_ENABLED` | Repository variable (أو Environment variable على `production`) | `true` بعد التأكد من الأسرار |
+| `VERCEL_EXPECTED_PROJECT` | Variable اختياري | اسم مشروع Vercel الذي يجب أن يخدم الإنتاج؛ يطابقه الطيران التمهيدي في `deploy.yml` قبل أي `vercel pull/build/deploy`. غيابه ⇒ الافتراضي `aborof`. وجوده يمنع الحالة الصامتة «النشر نجح في Actions والإنتاج لم يتغير» حين يكون `VERCEL_PROJECT_ID` لمشروع آخر من المشاريع الثلاثة المرتبطة بالمستودع |
 
 > تفاصيل المرحلة الثانية (الأعلام، الحدود، مصفوفة صفر كسر، التراجع) في `docs/ai/phase-2-nim-mcp.md`.
 
@@ -58,6 +59,8 @@
 > خارج وحدتي الجلسات والأسرار.
 
 > ⚠️ **`VERCEL_TOKEN` لا يُملأ من `~/.vercel/auth.json`:** توكن `vercel login` هو OAuth قصير العمر (`expiresAt` خلال ساعات + `refreshToken`) وموضعه في CLI الحديث تحت `com.vercel.cli` داخل `XDG_DATA_HOME` — يصلح للنشر من جهازك، ولا يصلح سرًّا دائمًا. أنشئ رمزًا من **Vercel → Account Settings → Tokens** بصلاحية Full access على الفريق. فحص الرمز في `deploy.yml` يستدعي `api.vercel.com/v2/user`، و`404: User not found` تعني رمزًا مصادَقًا عليه لكنه ملغى/غير موجود (استبدله)، بينما `403` تعني صلاحية ناقصة على الفريق.
+
+> ⚠️ **`VERCEL_ORG_ID` ليس دائمًا `team_…`:** الرمز الشخصي (Hobby) يحتاج `orgId` = معرّف الحساب نفسه، وتمرير `team_…` معه يُنتج `404: Project not found` رغم سلامة الرمز والمشروع — لأن `teamId` ينقل الطلب إلى نطاق لا يملكه الرمز. لا تنسخ المعرّفين يدويًا: `node scripts/apply-vercel-link.mjs` يربط المشروع ويحقّق حيًّا أن الزوج يحلّ إلى `aborof` ثم يضبط الأسرار عبر `stdin`. التشخيص المُصنَّف ورموزه في [ربط مشروع Vercel وضبط أسرار النشر بأمر واحد](#ربط-مشروع-vercel-وضبط-أسرار-النشر-بأمر-واحد).
 
 يجب إضافة متغيرات التطبيق مثل `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` و`ADMIN_PASSWORD` و`ADMIN_SESSION_SECRET` أيضًا داخل **Vercel Project → Settings → Environment Variables** لبيئة Production؛ أسرار GitHub Actions لا تنتقل تلقائيًا إلى Runtime في Vercel. في Production لا تُستخدم بيانات البذرة كبديل صامت عند غياب Turso أو فشل الاتصال: قراءات المنتجات/الأسئلة الشائعة تُرجع `503 SERVICE_UNAVAILABLE`، ولا بد من ربط قاعدة حقيقية وإعادة النشر.
 
@@ -164,6 +167,8 @@ npm run front:check     # 22 فحصًا: الحدود الأربعة، ميتا�
 | `npm run verify:secrets -- --env production` | يطابق أسرار/متغيرات Actions مع جدول «النشر التلقائي»، ويفحص حماية البيئة وحماية `main` | يحتاج توكن **المالك** (`Secrets: read`)؛ بلا هذه الصلاحية يطبع الفحوص غير السرية ويخرج بكود 2 |
 | `bash scripts/mint-turso-token.sh` | **المعاملة الكاملة** من رمز المنصة: حلّ الهدف من Platform API ← سكّ رمز القاعدة ← بوابة الهجرات الصريحة (0001+0002) ← تطبيق الأسرار في GitHub وVercel | يحتاج `TURSO_PLATFORM_TOKEN` (صلاحية `db:mint-token`)؛ الرمز المسكوك **لا يُطبع أبدًا** ويُسلَّم عبر stdin أو ملف `0600`؛ `--dry-run` قراءة فقط ويعرض ما تراه CI الآن |
 | `bash scripts/apply-turso-secrets.sh` | يضبط `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` في المكانين معًا (GitHub بيئة `production` + Vercel Production): تحقق شكلي يرفض رابط لوحة التحكم ويرفض رابطًا في حقل الرمز، **ثم فحص اتصال حيّ بـ `verify-turso.mjs` قبل أي لمس** — إن رفضت القاعدة القيم يتوقف بلا تطبيق | القيم من متغيرات البيئة أو مدخل مخفي، **ولا تُطبع أبدًا** وتُمرَّر عبر `stdin` أو بيئة الطفل؛ `--dry-run` معاينة، `--skip-verify` تخطّي الفحص الحيّ، `--github-only`/`--vercel-only` لجهة واحدة |
+| `npm run link:vercel` | **المعاملة الكاملة لهوية النشر**: فحص الرمز ← حلّ `projectId`/`orgId` (من `vercel link` أو من البحث بالاسم في قائمة مشاريع الرمز) ← تحقق حيّ أن الزوج يحلّ إلى المشروع المتوقع ← ضبط الأسرار الثلاثة على GitHub عبر `stdin` | يحتاج توكن **المالك** (`Secrets: write`) ورمز Vercel؛ لا تُطبع أي قيمة، ولا يُكتب سرّ قبل حسم المعرّفين؛ `--dry-run` معاينة و`--dispatch` تشغيل `deploy.yml` ومتابعته |
+| `npm run vercel:preflight` | الطيران التمهيدي نفسه الذي تشغّله `deploy.yml`: هوية الرمز، وحلّ `projectId`+`orgId`، ومطابقة اسم المشروع المتوقع — ويُصنّف أي فشل إلى سبب وإجراء | للقراءة فقط؛ في CI يطبع النتائج كتعليقات `::notice::`/`::error::` (القناة المقروءة حين يُحجب تنزيل السجلات). محليًا يفيد للتشخيص قبل لمس أي سرّ |
 | `npm run audit:token` | تدقيق دورة حياة الرمز: يفكّ مطالبة `exp` من `TURSO_AUTH_TOKEN` ويحكم عليها مقابل بوابة 14 يومًا — **مراقبة فقط** (لا سكّ ولا تدوير ولا لمس للأسرار) | أكواد الخروج 0 أخضر · 10 داخل النافذة · 1 منتهي أو قيمة لا تُفكّ · 2 لا قيمة؛ `--json` و`--threshold-days` و`--token-env` و`--now` (تثبيت الزمن للاختبارات). يُشغَّل أسبوعيًا في `token-lifecycle.yml` |
 | `npm run migrations:plan` / `npm run migrations:apply` | بوابة الهجرات الصريحة: ما سيُطبَّق وما هو مطبَّق وبأي بصمة (خطة قراءة فقط)، ثم التطبيق الفعلي عبر `runMigrations` نفسه | `plan` بلا كتابة إطلاقًا (صفوف ⏳ لا ❌)؛ `apply` يحتاج `--import tsx` ويرفض هدفًا غير Turso (كود 3) وبلا رمز (كود 2) وانحراف بصمة (كود 1) |
 | `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run verify:turso` | اتصال حقيقي + تطابق بصمات الهجرات مع المستودع + الصفوف 7 و8 و9 | للقراءة فقط، ولا يطبّق أي هجرة؛ بلا `TURSO_AUTH_TOKEN` يقبل `file:` للتحقق المحلي |
@@ -326,6 +331,79 @@ bash scripts/apply-turso-secrets.sh                         # التنفيذ ا�
 | `--env <name>` | بيئة GitHub الهدف (افتراضي `production`) |
 
 **المتطلبات:** `gh` مصادَق بصلاحية كتابة أسرار البيئة، و`vercel login` + CLI إن أردت نصف Vercel (وإلا أعِد النشر من اللوحة: Project → Deployments → Redeploy)، و`npm ci` لتوفر `@libsql/client` ما لم تستخدم `--skip-verify`، وبيئة `production` موجودة في GitHub (**Settings → Environments** — أنشئها أولًا إن لم تكن). بعد النجاح: أي دفع إلى `main` يعيد تشغيل مجسّ `turso-evidence.yml` تلقائيًا، أو بعد الدمج `gh workflow run turso-evidence.yml --ref main`.
+
+### ربط مشروع Vercel وضبط أسرار النشر بأمر واحد
+
+العطل الذي أوقف النشر ثلاثة مرات متتالية على `main` لم يكن الرمز ولا البوابات، بل
+**المعرّفان**: `GET /v2/user` ينجح (الرمز صالح) بينما
+`GET /v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID` يردّ
+`404 Project not found`. التسلسل اليدوي المعتاد لا يصلح لهذه الحالة:
+
+```bash
+npx vercel link && cat .vercel/project.json
+gh secret set VERCEL_PROJECT_ID --body "prj_YOUR_PROJECT_ID"   # ⚠️ قيمة موضعية
+gh secret set VERCEL_ORG_ID     --body "team_YOUR_TEAM_ID"     # ⚠️ تفترض نطاق فريق
+gh secret set VERCEL_TOKEN      --body "YOUR_VERCEL_TOKEN"     # ⚠️ يكتب هراءً فوق رمز يعمل
+gh workflow run deploy.yml --ref main                          # ⚠️ يفشل كالسابق
+```
+
+ثلاث مخاطر: القيم الموضعية تُكتب «بنجاح» فوق أسرار سليمة؛ و`team_YOUR_TEAM_ID` تفترض
+نطاق فريق بينما الرمز الشخصي (Hobby) يحتاج `orgId` = معرّف الحساب **بلا** بادئة
+`team_`؛ والمستودع مرتبط بثلاثة مشاريع Vercel فنسخ معرّف المشروع الخطأ يجعل Actions
+أخضر والإنتاج لم يتغير. لذا:
+
+```bash
+node scripts/apply-vercel-link.mjs --dry-run     # كل الفحوص، بلا كتابة أي سرّ
+node scripts/apply-vercel-link.mjs               # يطلب الرمز مخفيًا ثم يربط ويضبط
+node scripts/apply-vercel-link.mjs --dispatch    # …ثم يشغّل deploy.yml على main ويتابعه
+```
+
+ثلاثة أسوار قبل أي كتابة، والأداة تتوقف عند أول فشل:
+
+1. **تحقق شكلي** — يرفض القيم الموضعية (`YOUR_VERCEL_TOKEN`، `<orgId>`، `team_…`)، ويرفض رمز منصة أخرى باسمها (رمز GitHub `ghp_…`/`github_pat_…`، رمز Turso `eyJ…`، مفاتيح OpenAI/Google/Slack)، ويرفض الرمز القصير أو ذا المسافة. الرفض يحدث **قبل أي نداء شبكة**.
+2. **حلّ المعرّفين ثم تحقق حيّ** — يُجرَّب أول مصدر ينجح: الأعلام `--project-id`/`--org-id` ← `.vercel/project.json` ← `vercel link --yes` (الرمز عبر بيئة الطفل لا argv) ← **البحث بالاسم في قائمة مشاريع الرمز** (`GET /v9/projects` في النطاق الافتراضي ثم في كل فريق من `GET /v2/teams`)؛ هذا الأخير يستنتج `id` و`accountId` معًا فيصلح بلا CLI وبلا نسخ يدوي. كل مرشّح يُتحقق منه بـ `GET /v9/projects/:id?teamId=:org` ولا يُقبل إلا إذا حلّ إلى الاسم المتوقع.
+3. **الضبط** — القيم عبر `stdin` فقط إلى `gh secret set` (نطاق المستودع افتراضيًا، أو `--env production`)، ثم فحص بوابة `VERCEL_DEPLOY_ENABLED` وتنبيه صريح إن كانت مغلقة، ثم `--dispatch` اختياريًا مع متابعة حالة الوظائف عبر API (لا تنزيل سجلات).
+
+**صلاحية الأسرار تُفحص قبل المحاولة لا بعدها:** `gh secret set` يحتاج مفتاح التشفير
+العام (`GET /repos/…/actions/secrets/public-key`)، وأي GitHub App — ومنه توكن الوكيل
+الآلي في البيئات المسوّرة — يُردّ بـ `403 Resource not accessible by integration`. الأداة
+تفحص هذا أولًا وتخرج بكود `2` برسالة صريحة، فلا تُستهلك محاولة ضبط فاشلة ولا يظن
+المالك أن العطل في القيم.
+
+#### رموز التشخيص (نفسها في CI عبر `scripts/vercel-preflight.mjs`)
+
+| الرمز | معناه | الإجراء |
+|---|---|---|
+| `PROJECT_OK` | الزوج يحلّ إلى المشروع المتوقع | لا شيء — النشر سيتابع |
+| `PROJECT_NOT_FOUND_WRONG_SCOPE` | `404` والمشروع مرئي في **النطاق الشخصي** بينما `ORG_ID` نطاق فريق (`team_…`) | أعد الربط؛ `orgId` الصحيح قد لا يبدأ بـ `team_` |
+| `PROJECT_NOT_FOUND_STALE_ID` | `404` والمشروع مرئي في النطاق نفسه ⇒ `prj_…` قديم (حُذف المشروع وأُعيد إنشاؤه) | أعد الربط ليُؤخذ المعرّف الحالي |
+| `PROJECT_NOT_VISIBLE_TO_TOKEN` | `404` والمشروع غير مرئي للرمز في أي نطاق ⇒ حساب/فريق Vercel مختلف | أنشئ الرمز من الحساب الذي يخدم `aborof.vercel.app` |
+| `TOKEN_SEES_NO_PROJECTS` | `404` والرمز لا يرى أي مشروع (أو `403` عند سرد مشاريع الفريق) | صلاحية الرمز ناقصة — Full access على الفريق |
+| `PROJECT_NAME_MISMATCH` | `200` لكن الاسم ≠ `VERCEL_EXPECTED_PROJECT` ⇒ نشر ناجح وإنتاج لم يتغير | صوّب `VERCEL_PROJECT_ID` أو حدّث `VERCEL_EXPECTED_PROJECT` إن كان المقصود فعلًا |
+| `SCOPE_FORBIDDEN` / `RATE_LIMITED` / `SERVER_ERROR` / `API_UNREACHABLE` | رمز مرفوض (401/403) · حد معدّل · عطل Vercel · شبكة محجوبة | استبدل الرمز · أعد لاحقًا · `status.vercel.com` · شبكة أخرى |
+
+في `deploy.yml` تُبثّ هذه الأحكام كتعليقات `::error::`/`::notice::` مع **أسماء** المشاريع
+التي يراها الرمز في النطاقين — لأن تنزيل سجلات الوظائف محجوب عن بعض الشبكات، ولأن
+السياسة القائمة «الأسماء فقط»: لا تُطبع قيمة معرّف أو رمز (المعرّف الصحيح ليس سرًّا
+مسجّلًا بعد في GitHub فلا يُحجب تلقائيًا كما يُحجب القديم).
+
+| الخيار | الأثر |
+|---|---|
+| `--project <name>` | اسم المشروع للربط (افتراضي `aborof`) |
+| `--expected <name>` | الاسم الذي يجب أن يحلّ إليه `PROJECT_ID` (افتراضي = `--project`) |
+| `--project-id` / `--org-id` | تجاوز `vercel link` بمعرّفين صريحين |
+| `--skip-link` | لا تشغّل `vercel link`؛ اعتمد الملف/البحث بالاسم |
+| `--skip-verify` | بلا تحقق حيّ (شبكة مقطوعة) — يُطبع تنبيه صريح |
+| `--env production` | الأسرار على نطاق البيئة بدل نطاق المستودع |
+| `--token-file <path>` | الرمز من ملف بدل البيئة/الإدخال المخفي |
+| `--dispatch` / `--no-watch` | تشغيل `deploy.yml` على `main` (بمدخل `target=production` الصريح) ومتابعته |
+| `--dry-run` / `--json` | معاينة بلا كتابة · تقرير آلي بلا قيم سرية |
+
+**المتطلبات:** `gh` مصادَق بحساب المالك (`Secrets: write`) — تحقّق بـ `gh auth status`،
+ورمز Vercel من **Account Settings → Tokens** (لا توكن `vercel login` القصير العمر)،
+و`node` ≥ 20 (fetch مدمج). لا يلزم `vercel` CLI ولا `npm ci`: مسار البحث بالاسم يعمل
+بـ API وحده. أكواد الخروج: `0` ضُبطت الأسرار · `1` فشل حاجب (لم يُكتب سرّ) · `2` تهيئة
+أو صلاحية ناقصة.
 
 ### قراءة نتائج الـ Smoke بلا لبس
 

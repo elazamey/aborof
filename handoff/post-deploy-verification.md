@@ -138,19 +138,37 @@ vercel deploy --prod                          # رابط النشر يظهر ف�
 
 ### ب) إصلاح مسار Actions (اختياري لكنه يوقف الاعتماد على جهازك)
 
+**المسار المختصر (الموصى به):** أمر واحد يربط المشروع، ويحقّق حيًّا أن المعرّفين يحلّان
+إلى `aborof`، ثم يضبط الأسرار الثلاثة عبر `stdin` — بلا نسخ يدوي لأي معرّف:
+
+```bash
+VERCEL_TOKEN='<رمز جديد من https://vercel.com/account/tokens>' \
+  node scripts/apply-vercel-link.mjs --dry-run                  # كل الفحوص، بلا كتابة
+VERCEL_TOKEN='…' node scripts/apply-vercel-link.mjs --dispatch   # الضبط + تشغيل النشر
+```
+
+**المسار اليدوي (إن أردت التحكم الكامل):**
+
 ```bash
 # 1) رمز جديد من https://vercel.com/account/tokens — لا من auth.json
 gh secret set VERCEL_TOKEN      --body "<الرمز الجديد>"
 # 2) معرّفات المشروع: تظهر في .vercel/project.json بعد vercel link
 cat .vercel/project.json        # orgId و projectId
-gh secret set VERCEL_ORG_ID     --body "<orgId>"
-gh secret set VERCEL_PROJECT_ID --body "<projectId>"
+gh secret set VERCEL_ORG_ID     --body "<orgId>"       # ⚠️ ليس دائمًا team_…: الرمز الشخصي يحتاج معرّف الحساب
+gh secret set VERCEL_PROJECT_ID --body "<projectId>"   # ⚠️ من مشروع aborof لا aborof-store-v2
 # 3) البوابة (Variable لا Secret)
 gh variable set VERCEL_DEPLOY_ENABLED --body true
 # 4) إن كانت حماية بيئة Production تمنع main: Settings → Environments → Production → Deployment branches → All branches
 # 5) ثم أعد تشغيل الفاشل
 gh run rerun 35320925636 --failed
 ```
+
+> ⚠️ لا تنسخ الأوامر بقيمها الموضعية (`<orgId>`، `YOUR_VERCEL_TOKEN`) إلى `gh secret set`
+> كما هي: الأمر «ينجح» ويكتب القيمة الموضعية فوق سرّ كان يعمل. استبدل كل قيمة أولًا، أو
+> استخدم الأداة أعلاه التي ترفض القيم الموضعية **قبل** أي كتابة.
+> وإن ظهر `403 Resource not accessible by integration` فالتوكن الحالي بلا صلاحية
+> `Secrets: write` (سلوك GitHub مع أي GitHub App) — نفّذ من جهازك بحساب المالك.
+> رموز تشخيص `404 Project not found` الأربعة في DEPLOYMENT.md §«ربط مشروع Vercel».
 
 ### ج) التحقق بعد النشر (بالترتيب)
 

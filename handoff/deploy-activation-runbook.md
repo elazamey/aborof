@@ -110,6 +110,7 @@ Variables → Production**، وأن `ADMIN_SESSION_SECRET` ≠ `DIAGNOSTICS_KEY`
 1. **من الواجهة:** Actions → «Deploy to Vercel» → Run workflow (الفرع `main`، الهدف `production`).
 2. **من جهازك:** `gh workflow run deploy.yml --ref main`.
 3. **تلقائيًا:** أي push/دمج إلى `main` (مثلًا دمج هذا الفرع).
+4. **مع ضبط الأسرار في نفس الأمر:** `node scripts/apply-vercel-link.mjs --dispatch` — يربط مشروع Vercel، ويحقّق حيًّا أن `VERCEL_PROJECT_ID`/`VERCEL_ORG_ID` يحلّان إلى `aborof`، ويضبط الأسرار عبر `stdin`، ثم يشغّل الـ workflow ويتابعه. هذا هو المسار المختصر حين يكون العطل في المعرّفين (الحالة المرصودة: `404 Project not found` مع رمز صالح).
 
 ### علامة النجاح المطلوبة
 
@@ -117,8 +118,17 @@ Variables → Production**، وأن `ADMIN_SESSION_SECRET` ≠ `DIAGNOSTICS_KEY`
 
 ```text
 Verify required deployment secrets      → All required deployment secrets are present.
+Vercel preflight                        → ::notice:: مشروع Vercel متاح — الاسم: aborof
+                                          + ::notice:: تطابق الاسم المتوقع
 Deploy prebuilt artifact (vercel deploy --prebuilt --prod) → نشر ناجح وطباعة رابط الـ deployment
 ```
+
+إن فشلت خطوة `Vercel preflight` فالتعليقات تحمل حكمًا مُصنَّفًا لا رسالة `404` جافة:
+`PROJECT_NOT_FOUND_WRONG_SCOPE` (نطاق فريق بينما المشروع شخصي) · `PROJECT_NOT_FOUND_STALE_ID`
+(معرّف قديم بعد إعادة إنشاء المشروع) · `PROJECT_NOT_VISIBLE_TO_TOKEN` (حساب Vercel مختلف) ·
+`TOKEN_SEES_NO_PROJECTS` (صلاحية ناقصة) · `PROJECT_NAME_MISMATCH` (نشر ناجح وإنتاج لم يتغير)،
+ومع الحكم تُطبع **أسماء** المشاريع التي يراها الرمز في النطاقين — وهي المعلومة التي تحسم
+السبب. الجدول الكامل والإجراءات في DEPLOYMENT.md §«ربط مشروع Vercel وضبط أسرار النشر بأمر واحد».
 
 إن بقيت `skipped` فالمتغير `VERCEL_DEPLOY_ENABLED` ليس `'true'` في النطاق الفعّال،
 وإن فشلت خطوة «Verify required deployment secrets» فاسم السر الناقص مطبوع في السجل.
