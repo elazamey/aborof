@@ -565,3 +565,64 @@ export function describeTursoConfig(resolution: TursoCredentialResolution): Turs
     hint: hintFor(resolution),
   };
 }
+
+// ───────────────────────── وصف الرمز والخطأ (للتشخيص فقط) ─────────────────────────
+
+/** ما يُقرأ من مطالبات JWT دون أي قيمة سرّية: الصلاحية والمدة المتبقية فقط. */
+export interface TursoTokenInfo {
+  /**
+   * `rw` = Full access، `ro` = قراءة فقط. التطبيق يكتب (هجرات وطلبات) فرمز `ro`
+   * يمرّ في `SELECT 1` ثم يفشل عند أول كتابة. `null` = ليس JWT أو بلا مطالبة `a`.
+   */
+  access: "rw" | "ro" | null;
+  /** أيام متبقية حتى الانتهاء (سالب = منتهٍ). `null` = بلا `exp` (رمز لا ينتهي). */
+  expires_in_days: number | null;
+}
+
+/** يقرأ مطالبات رمز Turso (JWT) بلا تحقق من التوقيع — وصف فقط، ولا يُكتب الرمز نفسه أبدًا. */
+export function describeTursoToken(token: string | undefined, now: number = Date.now()): TursoTokenInfo {
+  const none: TursoTokenInfo = { access: null, expires_in_days: null };
+  if (!token) return none;
+  try {
+    const payload = token.split(".")[1] ?? "";
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const claims = JSON.parse(atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4))) as {
+      a?: unknown;
+      exp?: unknown;
+    };
+    const access = claims.a === "rw" || claims.a === "ro" ? claims.a : null;
+    const exp = typeof claims.exp === "number" && Number.isFinite(claims.exp) ? claims.exp : null;
+    return {
+      access,
+      expires_in_days: exp === null ? null : Math.floor((exp * 1000 - now) / 86_400_000),
+    };
+  } catch {
+    return none;
+  }
+}
+
+/**
+ * وصف آمن لخطأ قاعدة البيانات: اسم الصنف والكود ورمز حالة HTTP ورمز سبب الشبكة فقط.
+ * رمز HTTP هو أهم معلومة تشخيصية (401 رمز، 404 قاعدة، 400 صيغة) وهو رقم لا يحمل سرًا،
+ * أما نص الرسالة الخام فقد يتضمن عنوان اتصال أو قيمة مصادقة فلا يُكتب.
+ */
+export function describeDatabaseError(error: unknown): string {
+  const candidate = error as {
+    name?: unknown;
+    code?: unknown;
+    message?: unknown;
+    cause?: { code?: unknown } | null;
+  } | null;
+  const name = typeof candidate?.name === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/.test(candidate.name)
+    ? candidate.name
+    : "UnknownError";
+  const code = typeof candidate?.code === "string" && /^[A-Za-z0-9_.-]{1,40}$/.test(candidate.code)
+    ? `, code=${candidate.code}`
+    : "";
+  const http = typeof candidate?.message === "string" ? /HTTP status (\d{3})\b/.exec(candidate.message)?.[1] : undefined;
+  const causeCode = candidate?.cause && typeof candidate.cause.code === "string" &&
+    /^[A-Z][A-Z0-9_]{2,39}$/.test(candidate.cause.code)
+    ? `, cause=${candidate.cause.code}`
+    : "";
+  return `${name}${code}${http ? `, http=${http}` : ""}${causeCode}`;
+}

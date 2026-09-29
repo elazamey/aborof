@@ -4,6 +4,7 @@ import { runMigrations } from "@/lib/db/migrate";
 import { DomainError, Errors, isProduction, redactSecrets } from "@/lib/errors";
 import { metrics } from "@/lib/observability/metrics";
 import {
+  describeDatabaseError,
   describeTursoConfig,
   resolveTursoCredentials,
   type TursoConfigDiagnosis,
@@ -18,31 +19,7 @@ let _lastConfigReportAt = 0;
 /** أقصى تكرار لسطر تشخيص الإعداد في السجل (لكل نسخة تشغيل) — يكفي للعثور عليه دون إغراق. */
 const CONFIG_REPORT_INTERVAL_MS = 60_000;
 
-/**
- * وصف آمن لخطأ قاعدة البيانات: اسم الصنف والكود ورمز حالة HTTP ورمز سبب الشبكة فقط.
- * رمز HTTP هو أهم معلومة تشخيصية (401 رمز، 404 قاعدة، 400 صيغة) وهو رقم لا يحمل سرًا،
- * أما نص الرسالة الخام فقد يتضمن عنوان اتصال أو قيمة مصادقة فلا يُكتب.
- */
-function databaseErrorLabel(error: unknown): string {
-  const candidate = error as {
-    name?: unknown;
-    code?: unknown;
-    message?: unknown;
-    cause?: { code?: unknown } | null;
-  } | null;
-  const name = typeof candidate?.name === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/.test(candidate.name)
-    ? candidate.name
-    : "UnknownError";
-  const code = typeof candidate?.code === "string" && /^[A-Za-z0-9_.-]{1,40}$/.test(candidate.code)
-    ? `, code=${candidate.code}`
-    : "";
-  const http = typeof candidate?.message === "string" ? /HTTP status (\d{3})\b/.exec(candidate.message)?.[1] : undefined;
-  const causeCode = candidate?.cause && typeof candidate.cause.code === "string" &&
-    /^[A-Z][A-Z0-9_]{2,39}$/.test(candidate.cause.code)
-    ? `, cause=${candidate.cause.code}`
-    : "";
-  return `${name}${code}${http ? `, http=${http}` : ""}${causeCode}`;
-}
+const databaseErrorLabel = describeDatabaseError;
 
 function failDatabaseRead<T>(operation: string, error: unknown, fallback: T): T {
   if (isProduction() && error instanceof DomainError && error.code === "SERVICE_UNAVAILABLE") {
