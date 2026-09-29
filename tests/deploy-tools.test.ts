@@ -440,7 +440,7 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
       `  */auth/tokens*) printf '%s\\n%s' "{\\"jwt\\":\\"\${FAKE_JWT:-${MINTED_JWT}}\\"}" 200 ;;`,
       // مؤسسة بلا قواعد (مسح تعدد المؤسسات) قبل القالب العام.
       `  */organizations/acme/databases) printf '%s\\n%s' '{"databases":[]}' 200 ;;`,
-      `  */databases) printf '%s\\n%s' '{"databases":[{"Name":"rofyd","Hostname":"rofyd-elazamey.turso.io"}]}' 200 ;;`,
+      `  */databases) dbs="$FAKE_DBS"; [ -z "$dbs" ] && dbs='{"databases":[{"Name":"rofyd","Hostname":"rofyd-elazamey.turso.io"}]}'; printf '%s\\n%s' "$dbs" 200 ;;`,
       // عقد المنصّة الحقيقي: مصفوفة سادة [{slug,…}] — FAKE_ORGS لسيناريو التعدد.
       `  */v1/organizations) orgs="$FAKE_ORGS"; [ -z "$orgs" ] && orgs='[{"slug":"elazamey"}]'; printf '%s\\n%s' "$orgs" 200 ;;`,
       `  *) printf '%s\\n%s' '{}' 404 ;;`,
@@ -568,6 +568,63 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
       assert.match(log, /organizations\/elazamey\/databases/);
       assert.doesNotMatch(out, /acme/, "لا اسم مؤسسة في المخرج");
       assert.doesNotMatch(out, /elazamey/, "لا اسم مؤسسة في المخرج");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  test("أكثر من سجل: الفروع (لها parent) تُصفّى وتُختار القاعدة الأساسية بلا طباعة اسم", () => {
+    const { binDir, logFile } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--dry-run", "--skip-verify"], {
+        encoding: "utf8",
+        input: "",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_PLATFORM_TOKEN: "platform-fake-token",
+          FAKE_DBS:
+            '{"databases":[{"Name":"base-db","Hostname":"base-db-elazamey.turso.io"},' +
+            '{"Name":"branch-a","Hostname":"branch-a-elazamey.turso.io","parent":{"id":"1"}},' +
+            '{"Name":"branch-b","Hostname":"branch-b-elazamey.turso.io","parent":{"id":"1"}}]}',
+        },
+      });
+      const out = res.stdout + res.stderr;
+      assert.equal(res.status, 0, out);
+      assert.match(res.stdout, /اختيرت القاعدة الأساسية الوحيدة \(من 3 سجلًا/);
+      assert.doesNotMatch(out, /base-db-elazamey/, "لا مضيف كامل في المخرج");
+      assert.doesNotMatch(out, /branch-a/, "لا اسم فرع في المخرج");
+      const log = fs.readFileSync(logFile, "utf8");
+      assert.match(log, /auth\/tokens\?authorization=full-access/, "تابع التوريد بعد الاختيار");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  test("قواعد أساسية متعددة: فشل مغلق يطلب TURSO_DB أو vars.TURSO_DB دون تسريب اسم", () => {
+    const { binDir, logFile } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--dry-run", "--skip-verify"], {
+        encoding: "utf8",
+        input: "",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_PLATFORM_TOKEN: "platform-fake-token",
+          FAKE_DBS:
+            '{"databases":[{"Name":"one-db","Hostname":"one-db-elazamey.turso.io"},' +
+            '{"Name":"two-db","Hostname":"two-db-elazamey.turso.io"}]}',
+        },
+      });
+      const out = res.stdout + res.stderr;
+      assert.equal(res.status, 1, out);
+      assert.match(out, /TURSO_DB/);
+      assert.match(out, /vars\.TURSO_DB/);
+      assert.match(out, /GATE_FAIL=PLATFORM/);
+      assert.doesNotMatch(out, /one-db/, "لا اسم قاعدة في الفشل");
+      assert.doesNotMatch(out, /two-db/, "لا اسم قاعدة في الفشل");
+      const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+      assert.doesNotMatch(log, /^\S*gh /m);
     } finally {
       fs.rmSync(binDir, { recursive: true, force: true });
     }

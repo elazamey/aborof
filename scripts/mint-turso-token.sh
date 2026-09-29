@@ -159,7 +159,16 @@ if [ -z "$DB" ]; then
   if [ "$DB_COUNT" = 1 ]; then
     DB="$(printf '%s' "$DB_JSON" | jq -r '.databases[0] | (.Name // .name // .db_name // empty)' 2>/dev/null || true)"
   else
-    fail "توجد ${DB_COUNT} قاعدة — حدّدها بـ TURSO_DB=<اسم> (لا يُطبع أي اسم هنا)."
+    # أكثر من سجل: كثيرًا ما تكون فروعًا (لها parent) — نُصفّيها أولًا، فإن بقيت
+    # أساسيات متعددة فمطلوب اسم صريح (لا يُطبع أي اسم قاعدة هنا — الاسم عندك في
+    # لوحة Turso أو في متغيّر المستودع vars.TURSO_DB لسياق CI).
+    BASE_COUNT="$(printf '%s' "$DB_JSON" | jq '[.databases[] | select((.parent // null) == null)] | length' 2>/dev/null || echo 0)"
+    if [ "${BASE_COUNT:-0}" = 1 ]; then
+      DB="$(printf '%s' "$DB_JSON" | jq -r '[.databases[] | select((.parent // null) == null)][0] | (.Name // .name // .db_name // empty)' 2>/dev/null || true)"
+      echo "✅ اختيرت القاعدة الأساسية الوحيدة (من ${DB_COUNT} سجلًا — الفروع مُصفّاة تلقائيًا)."
+    else
+      fail "توجد ${DB_COUNT} قاعدة — حدّدها بـ TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (في المستودع لسياق CI). لا يُطبع أي اسم قاعدة هنا."
+    fi
   fi
 fi
 [ -n "$DB" ] || fail "تعذّر قراءة اسم القاعدة — شغّل بـ TURSO_DB=<اسم>."
