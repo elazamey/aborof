@@ -6,6 +6,7 @@ import { verifyCeliaAuth } from "@/lib/celia/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { chatRequestContract, firstZodIssue } from "@/lib/validation/contracts";
 import { getSmartAgentEngine } from "@/lib/ai";
+import { celiaAllowedToolNames } from "@/lib/celia/tools";
 import { getDrizzle, chatLogs } from "@/lib/db/drizzle";
 import { ensureSchema, db } from "@/lib/db";
 
@@ -33,7 +34,7 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
 
   // 2. النطاق — chat:write إلزامي لتسجيل المحادثات (Day 1)
   // يرمي 403 إن لم يكن ضمن CELIA_ALLOWED_SCOPES، و404 إن كان العلم مغلقًا
-  requireCeliaScope(req, "chat:write");
+  const guard = requireCeliaScope(req, "chat:write");
 
   // 3. الهوية — admin session أو agent token
   const auth = await verifyCeliaAuth(req);
@@ -55,25 +56,24 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
 
   // 6. المحرك الاحتمالي — نفس SmartAgentEngine (Gemini → Groq → NIM → local)
   // لا نستخدم AI SDK جديد — نحافظ على السلسلة الحتمية والمقاييس الحالية.
-  // ملاحظة: celia لا تستخدم أدوات بعد (PR-A بلا tools) — PR-B سيحقنها عبر ScopeGuard.
+  // PR-B: حقن الأدوات عبر Scope Filter Gate — فقط الأدوات المسموح بها في guard.allowed
   const engine = getSmartAgentEngine();
-  // نبني AgentMessage[] مع system ضمني: المحرك يحمل systemPrompt داخليًا عبر buildContext
-  // لكن celia يمكن أن تمرر clean مباشرة — المحرك سيتعامل معها.
-  // نستخدم processRequestDetailed للحصول على provider وreply بشكل موحّد.
-  // إن كان المحرك ينتظر AgentMessage[] مع system، نمرر clean كما هي (role/user)
-  // وهو سيُضيف السياق داخليًا إن لزم.
+  const allowedTools = celiaAllowedToolNames(guard.allowed);
+  const enableTools = Object.keys(allowedTools).length > 0;
   let reply = "";
   let source = "local";
+  let toolCalls = 0;
+  let products: import("@/lib/db/schema").ProductCard[] = [];
   try {
-    // نحاول المسار التفصيلي أولًا (يعيد products/fleet إن وُجدت)، وإن فشل نسقط للبسيط
     const detailed = await engine.processRequestDetailed(
       clean.map((m) => ({ role: m.role, content: m.content })),
-      { enableTools: false }
+      { enableTools, allowedTools }
     );
     reply = detailed.reply;
     source = detailed.provider;
+    toolCalls = detailed.toolCalls ?? 0;
+    products = detailed.products ?? [];
   } catch {
-    // fallback إلى localAnswer داخل المحرك — لا نرمي أبدًا
     const simple = await engine.processRequest(
       clean.map((m) => ({ role: m.role, content: m.content }))
     );

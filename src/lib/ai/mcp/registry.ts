@@ -134,9 +134,32 @@ export class McpToolRegistry {
 
   /** الأسماء المرئية الآن: الطبقة مفعّلة + القائمة المسموح بها. */
   private visibleNames(): string[] {
-    if (!isMcpToolsEnabled()) return [];
+    // Celia تُفعّل نطاقها الخاص — حتى لو كانت MCP معطلة، فإن أدوات Celia
+    // تبقى مرئية للسجل لكنها لا تُمرَّر للموديل إلا عبر allowedTools الخاص بها.
+    // هذا يضمن أن Scope Filter هو البوابة، لا ENABLE_MCP_TOOLS وحده.
+    const celiaEnabled = (() => {
+      try {
+        const mod = require("@/lib/celia/config") as { isCeliaAgentEnabled?: () => boolean };
+        return mod.isCeliaAgentEnabled?.() === true;
+      } catch {
+        return false;
+      }
+    })();
+    if (!isMcpToolsEnabled() && !celiaEnabled) return [];
     const allowed = new Set(resolveAllowedToolNames(this.registeredNames()));
-    return this.registeredNames().filter((name) => allowed.has(name));
+    // إذا كانت MCP معطلة لكن Celia مفعّلة، نُظهر فقط أدوات Celia (التي تُصفّى لاحقًا)
+    // وإلا نُظهر كل المسموح حسب السياسة العامة.
+    const visible = this.registeredNames().filter((name) => allowed.has(name));
+    if (!isMcpToolsEnabled() && celiaEnabled) {
+      // في وضع Celia فقط، أظهر أدوات Celia حتى لو لم تكن في MCP_ALLOWED_TOOLS
+      // — فهي تُصفّى عبر allowedTools الخاص بـ Celia في runToolLoop.
+      const celiaTools = new Set(["search_products", "get_order_status"]);
+      const celiaVisible = this.registeredNames().filter((name) => celiaTools.has(name));
+      // دمج: ما هو مرئي عبر السياسة + أدوات Celia (إن لم تكن مكررة)
+      const merged = new Set([...visible, ...celiaVisible]);
+      return [...merged].sort();
+    }
+    return visible;
   }
 
   /** `tools/list` — لا يعرض شيئًا عندما تكون الطبقة معطلة. */

@@ -81,6 +81,23 @@ export async function runToolLoop(opts: {
 
     conversation.push(reply.assistantMessage);
     for (const call of reply.toolCalls) {
+      // طبقة الحماية المزدوجة (Execution Guard): حتى لو هلوس النموذج باسم أداة
+      // غير مسموحة في هذا الطلب، نرفضها قبل الوصول للسجل — لا كسر للتطبيق.
+      if (allowlist && !allowlist.has(call.name)) {
+        used += 1;
+        const deniedText = "Tool execution denied: Scope boundary violation";
+        structured.push({ tool: call.name, denied: true, reason: "Scope boundary violation" });
+        conversation.push({ role: "tool", tool_call_id: call.id, content: deniedText });
+        console.log(
+          JSON.stringify({
+            level: "warn",
+            event: "celia_tool_denied",
+            tool: call.name,
+            reason: "Scope boundary violation",
+          })
+        );
+        continue;
+      }
       const result = await registry.callTool(call.name, call.argumentsJson, { budget });
       used += 1;
       if (result.structuredContent) structured.push(result.structuredContent);
