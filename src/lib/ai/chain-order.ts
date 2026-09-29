@@ -2,7 +2,7 @@
  * ترتيب سلسلة التراجع في المحرك الذكي.
  *
  * الترتيب الافتراضي ثابت تاريخيًا:
- *   Gemini ← Groq ← NVIDIA NIM ← الرد المحلي.
+ *   Gemini ← Groq ← NVIDIA NIM ← AI Gateway ← الرد المحلي.
  *
  * يمكن ضبطه اختياريًا دون كسر أي سلوك عبر `AI_PROVIDER_ORDER` (قائمة أسماء
  * مفصولة بفواصل). القواعد صارمة وfail-closed:
@@ -10,14 +10,23 @@
  *  - `local` مضمون دائمًا في نهاية السلسلة مهما كانت القائمة، لأنه الحلقة
  *    الأخيرة التي تضمن ألا يصل خطأ 500 إلى المستخدم أبدًا.
  *  - إن كانت القائمة الناتجة فارغة يُستخدم الترتيب الافتراضي حرفيًا.
+ *
+ * ملاحظة توافقية: إضافة `ai-gateway` للترتيب الافتراضي لا تغيّر أي سلوك
+ * قائم — المزود غير متاح دون مفتاحه فيُتخطى صامتًا (نفس نمط NIM).
  */
 
-export const PROVIDER_NAMES = ["gemini", "groq", "nvidia-nim", "local"] as const;
+export const PROVIDER_NAMES = ["gemini", "groq", "nvidia-nim", "ai-gateway", "local"] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 
 const KNOWN = new Set<string>(PROVIDER_NAMES);
 
-export const DEFAULT_PROVIDER_ORDER: ProviderName[] = ["gemini", "groq", "nvidia-nim", "local"];
+export const DEFAULT_PROVIDER_ORDER: ProviderName[] = [
+  "gemini",
+  "groq",
+  "nvidia-nim",
+  "ai-gateway",
+  "local",
+];
 
 /** يقرأ `AI_PROVIDER_ORDER` ويعيد ترتيبًا صالحًا مضمون النهاية المحلية. */
 export function resolveProviderOrder(

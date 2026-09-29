@@ -55,6 +55,7 @@ export const SERVER_SECRET_NAMES = [
   "GROQ_API_KEY",
   "NVIDIA_NIM_API_KEY",
   "NVIDIA_API_KEY",
+  "AI_GATEWAY_API_KEY",
 ];
 
 const TEXT_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".css", ".html", ".json", ".map", ".txt"]);

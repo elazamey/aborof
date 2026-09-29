@@ -4,12 +4,20 @@
  * المرحلة الأولى: المحرك الصامت (Gemini ← Groq ← المحلي) خلف `ENABLE_AI_AGENT`.
  * المرحلة الثانية (إضافية بالكامل): مزود NVIDIA NIM اختياري يحمل وجوده مفتاحه،
  * وطبقة MCP محكومة للقراءة فقط خلف `ENABLE_MCP_TOOLS`.
+ * لاحقًا: مزود AI Gateway اختياري (Vercel) بنفس النمط — غياب مفتاحه يُخرجه
+ * من السلسلة صامتًا، فالترتيب الافتراضي Gemini ← Groq ← NIM ← Gateway ← محلي.
  *
  * غياب أي من العلمين يُبقي السلوك القديم المستقر كما هو حرفيًا.
  */
 import { SmartAgentEngine } from "./agent-engine";
 
 export { SmartAgentEngine } from "./agent-engine";
+export {
+  AiGatewayProvider,
+  DEFAULT_AI_GATEWAY_BASE_URL,
+  DEFAULT_AI_GATEWAY_MODEL,
+  resolveAiGatewayBaseUrl,
+} from "./providers/ai-gateway";
 export { GeminiRestProvider } from "./providers/gemini-rest";
 export { GroqProvider } from "./providers/groq";
 export { LocalFallbackProvider, buildLocalAnswer } from "./providers/local-fallback";

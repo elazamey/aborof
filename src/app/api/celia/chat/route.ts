@@ -59,7 +59,7 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
   const clean = parsed.data.messages.slice(-12);
   const last = clean[clean.length - 1]?.content ?? "";
 
-  // 6. المحرك الاحتمالي — نفس SmartAgentEngine (Gemini → Groq → NIM → local)
+  // 6. المحرك الاحتمالي — نفس SmartAgentEngine (Gemini → Groq → NIM → Gateway → local)
   // لا نستخدم AI SDK جديد — نحافظ على السلسلة الحتمية والمقاييس الحالية.
   // PR-B: حقن الأدوات عبر Scope Filter Gate — فقط الأدوات المسموح بها في guard.allowed
   const engine = getSmartAgentEngine();

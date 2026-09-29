@@ -3,6 +3,7 @@ import { metrics } from "@/lib/observability/metrics";
 import { extractProductCards, type ProductCard } from "./cards";
 import { resolveProviderOrder, type ProviderName } from "./chain-order";
 import { getMcpRegistry, isMcpToolsEnabled } from "./mcp";
+import { AiGatewayProvider } from "./providers/ai-gateway";
 import { GeminiRestProvider } from "./providers/gemini-rest";
 import { GroqProvider } from "./providers/groq";
 import { LocalFallbackProvider } from "./providers/local-fallback";
@@ -13,7 +14,7 @@ import type { AgentMessage, AgentOptions, AgentResult, AIAgentProvider } from ".
 
 /**
  * محرك الوكيل الذكي — سلسلة تراجع محكمة (المحرك الصامت):
- *   Gemini ← Groq ← NVIDIA NIM ← الرد المحلي.
+ *   Gemini ← Groq ← NVIDIA NIM ← AI Gateway ← الرد المحلي.
  *
  *  - كل فشل أو رد فارغ ينتقل صامتًا للمزود التالي (لا 500 للمستخدم).
  *  - كل فشل يُسجَّل في المقاييس مع رسالة محجوبة الأسرار.
@@ -35,6 +36,7 @@ function buildDefaultProviders(): AIAgentProvider[] {
     gemini: new GeminiRestProvider(),
     groq: new GroqProvider(),
     "nvidia-nim": new NvidiaNimProvider(),
+    "ai-gateway": new AiGatewayProvider(),
     local: new LocalFallbackProvider(),
   };
   return resolveProviderOrder().map((name) => pools[name]);

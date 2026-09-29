@@ -2,7 +2,7 @@ import { redactSecrets } from "@/lib/errors";
 import type { OpenAIChatMessage, OpenAIToolDefinition, RawToolCall, ToolModelReply } from "./types";
 
 /**
- * عميل موحّد لواجهة متوافقة مع OpenAI (Groq وNVIDIA NIM).
+ * عميل موحّد لواجهة متوافقة مع OpenAI (Groq وNVIDIA NIM وAI Gateway).
  *
  * الهدف: عقد واحد للرسائل والأدوات بدل تكرار المنطق في كل مزود، مع بقاء
  * سلوك الرسائل كما هو (نفس الترويسات ونفس نمط رسالة الخطأ `Label: …` بعد
