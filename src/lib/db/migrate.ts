@@ -59,10 +59,14 @@ async function ensureColumns(client: Client, sql: string) {
  * القائمة تُعالَج بعد الهجرة (idempotent).
  */
 export async function runMigrations(client?: Client): Promise<{ applied: string[] }> {
-  // استيراد كسول: يكسر دورة الاستيراد مع وحدة قاعدة البيانات ويسمح بحقن
-  // عميل في الاختبارات دون تهيئة مدخل البيئة.
-  const { db } = await import("./index");
-  const c = client ?? db();
+  // استيراد كسول: يكسر دورة الاستيراد مع وحدة وحدة قاعدة البيانات ويسمح بحقن
+  // عميل في الاختبارات دون تهيئة مدخل البيئة — **ولا يُستدعى أصلًا حين يُمرَّر
+  // عميل صريح**: على Node 20 يبني tsx الوحدة من data: URL فيفشل فكّ مسار نسبي
+  // (./index) هناك، والحال المرشَّح لا يحتاجه.
+  const c = client ?? (await (async () => {
+    const { db } = await import("./index");
+    return db();
+  })());
   if (!c) return { applied: [] };
 
   await c.execute(`CREATE TABLE IF NOT EXISTS schema_migrations (
