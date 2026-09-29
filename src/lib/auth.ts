@@ -39,11 +39,20 @@ export function verifyAdminSession(token: string | undefined) {
 
 export function isAdminRequest(request: Request) {
   const cookieHeader = request.headers.get("cookie") ?? "";
-  const token = cookieHeader
+  const raw = cookieHeader
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${ADMIN_COOKIE}=`))
     ?.slice(ADMIN_COOKIE.length + 1);
+  if (!raw) return false;
+  let token = raw;
+  try {
+    // NextResponse.cookies.set يُكوّد القيمة (":"→"%3A")، والمتصفح يعيدها مُكوّدة
+    // — نفك التكويد مع تحمّل الحالتين (مُكوّدة أو خام كما في الاختبارات)
+    token = decodeURIComponent(raw);
+  } catch {
+    token = raw;
+  }
   return verifyAdminSession(token);
 }
 

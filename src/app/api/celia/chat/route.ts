@@ -63,7 +63,7 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
   let reply = "";
   let source = "local";
   let toolCalls = 0;
-  let products: import("@/lib/db/schema").ProductCard[] = [];
+  let products: { id: string; name: string; price: number; old_price?: number | null; category?: string; image?: string; stock?: number }[] = [];
   try {
     const detailed = await engine.processRequestDetailed(
       clean.map((m) => ({ role: m.role, content: m.content })),
@@ -107,5 +107,7 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
     reply,
     source,
     auth: { id: auth.id, role: auth.role },
+    ...(toolCalls ? { toolCalls } : {}),
+    ...(products.length ? { products } : {}),
   });
 });

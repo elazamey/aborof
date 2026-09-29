@@ -353,6 +353,36 @@ th { background: var(--green-l); color: var(--green-d); }
   animation: state-spin .8s linear infinite;
 }
 @keyframes state-spin { to { transform: rotate(360deg); } }
+/* ---------- Celia Console (Admin) ---------- */
+.celia-console { border-top: 3px solid #7c3aed; }
+.celia-head { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: linear-gradient(135deg, #6d28d9, #8b5cf6); color: #fff; }
+.celia-avatar { width: 44px; height: 44px; border-radius: 14px; background: rgba(255,255,255,.18); display: grid; place-items: center; font-size: 1.35rem; flex: none; }
+.celia-title { font-weight: 900; font-size: 1.05rem; line-height: 1.2; }
+.celia-sub { font-size: .78rem; opacity: .92; margin-top: 2px; }
+.celia-badges { margin-inline-start: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.celia-badge { font-size: .72rem; font-weight: 800; padding: 5px 10px; border-radius: 999px; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.28); }
+.celia-badge.ok { background: #10b981; border-color: #10b981; color: #fff; }
+.celia-body { flex: 1; min-height: 380px; max-height: 520px; overflow-y: auto; padding: 16px; background: #faf9ff; display: flex; flex-direction: column; gap: 12px; }
+.celia-row { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
+.celia-row.user { align-items: flex-end; }
+.celia-row.assistant { align-items: flex-start; }
+.celia-tool-widget { display: inline-flex; align-items: center; gap: 8px; font-size: .78rem; font-weight: 700; color: #6d28d9; background: #f3eefe; border: 1px solid #e6def8; padding: 6px 10px; border-radius: 999px; }
+.celia-tool-dot { width: 8px; height: 8px; border-radius: 50%; background: #7c3aed; box-shadow: 0 0 0 4px rgba(124,58,237,.15); animation: celiaPulse 1.2s infinite; }
+@keyframes celiaPulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.celia-tool-meta { font-weight: 600; color: var(--muted); }
+.celia-source { font-size: .7rem; color: var(--muted); margin-top: 6px; }
+.celia-quick { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 14px; background: #fff; border-top: 1px solid var(--line); }
+.celia-chip { font-size: .78rem; font-weight: 700; padding: 7px 12px; border-radius: 999px; border: 1.5px solid #e6def8; background: #f7f3ff; color: #6d28d9; cursor: pointer; transition: .15s; }
+.celia-chip:hover { background: #ede6ff; border-color: #a855f7; }
+.celia-chip:disabled { opacity: .55; cursor: default; }
+.celia-chip.alt { background: #fff; border-style: dashed; color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; }
+.celia-input { display: flex; gap: 10px; padding: 12px; background: #fff; border-top: 1px solid var(--line); }
+.celia-input input { flex: 1; padding: 12px 16px; border: 1.5px solid var(--line); border-radius: 999px; background: #fbfdfc; }
+.celia-input input:focus { outline: none; border-color: #7c3aed; }
+.celia-input button { width: 46px; height: 46px; border-radius: 50%; border: none; background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; font-size: 1.2rem; cursor: pointer; flex: none; }
+.celia-input button:disabled { opacity: .5; cursor: default; }
+.celia-foot-note { font-size: .74rem; color: var(--muted); padding: 8px 14px; background: #fcfbff; border-top: 1px dashed #e6def8; text-align: center; }
+
 @media (prefers-reduced-motion: reduce) {
   .state-spinner { animation: none; }
 }
