@@ -42,7 +42,8 @@ set -uo pipefail
 
 MINT_USAGE_OFF=$(awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit } NR == 1 { next }' "$0" | head -n 40)
 
-fail() { echo "❌ $*" >&2; exit 1; }
+STAGE="INIT"
+fail() { echo "❌ $*" >&2; echo "GATE_FAIL=${STAGE} — أُوقف هنا (لا قيمة في هذا السطر)"; exit 1; }
 
 MIGRATE_FLAG="--migrate"     # بوابة الهجرات الصريحة: مفعّلة افتراضيًا في التنفيذ الكامل.
 forward_args=()
@@ -62,14 +63,23 @@ command -v node >/dev/null 2>&1 || fail "node غير مثبّت."
 [ -f scripts/migrate-turso.mjs ] || fail "scripts/migrate-turso.mjs مفقود."
 
 # — التوكن المنصّي: بيئة أو مدخل مخفي — لا argv أبدًا (لا ps ولا history).
+STAGE="TOKEN"
 PLATFORM_TOKEN="${TURSO_PLATFORM_TOKEN:-}"
-if [ -z "$PLATFORM_TOKEN" ]; then
+if [ -n "$PLATFORM_TOKEN" ]; then
+  TOKEN_SOURCE="env"
+else
   printf 'أدخل TURSO_PLATFORM_TOKEN (لن يظهر على الشاشة ولا يُسجَّل): ' >&2
   read -rs PLATFORM_TOKEN
   printf '\n' >&2
+  TOKEN_SOURCE="prompt"
 fi
-[ -n "$PLATFORM_TOKEN" ] || fail "TURSO_PLATFORM_TOKEN فارغ — توكن المنصّة مطلوب (Account → API tokens). لا تستخدم TURSO_AUTH_TOKEN لهذا الدور."
+if [ -n "$PLATFORM_TOKEN" ]; then
+  echo "GATE_TOKEN_SOURCE=${TOKEN_SOURCE} — التوكن المنصّي من البيئة أو مدخل مخفي (لا argv ولا تاريخ ولا طباعة)."
+else
+  fail "TURSO_PLATFORM_TOKEN فارغ — توكن المنصّة مطلوب (Account → API tokens). لا تستخدم TURSO_AUTH_TOKEN لهذا الدور."
+fi
 
+STAGE="PLATFORM"
 API_BASE="${TURSO_API_BASE:-https://api.turso.tech}"
 PROD_EXPIRATION="${TURSO_TOKEN_EXPIRATION:-never}"
 CI_EXPIRATION="${TURSO_CI_TOKEN_EXPIRATION:-1d}"
@@ -123,6 +133,7 @@ CONNECTION_URL="libsql://${HOSTNAME}"
 echo "✅ اُشتق رابط الاتصال من سجل المنصّة (طول ${#CONNECTION_URL}) · المضيف: $(mask "$HOSTNAME")"
 
 # ───────────────────────── سكّ توكن القاعدة (PROD · full-access) ───────────────
+STAGE="MINT_PROD"
 mint_db_token() { # $1=authorization · $2=expiration → يطبع JWT فقط على stdout (لا شيء آخر)
   local auth="$1" exp="$2"
   api POST "$API_BASE/v1/organizations/$ORG/databases/$DB/auth/tokens?authorization=${auth}&expiration=${exp}" '{}'
@@ -158,6 +169,7 @@ for a in "${forward_args[@]:-}"; do
 done
 
 # ───────────────────────── GATE_AUTH — الاتصال بالتوكن الجديد ─────────────────
+STAGE="GATE_AUTH"
 VJSON=""
 if [ "$SKIP_VERIFY" = true ]; then
   echo "⚠️  GATE_AUTH=SKIPPED · GATE_SCHEMA=SKIPPED · GATE_MIGRATE=SKIPPED · GATE_CI_AUTH=SKIPPED (--skip-verify)" >&2
@@ -174,6 +186,7 @@ else
 fi
 
 # ───────────────────────── GATE_IDENTITY — فشل مغلق عند المخالفة ──────────────
+STAGE="GATE_IDENTITY"
 # (محلي بلا شبكة — يعمل حتى مع --skip-verify؛ المدخلات عبر بيئة فقط.)
 if MINTED_DB_TOKEN="$DB_JWT" EXPECTED_DB="$DB" EXPECTED_ORG="$ORG" EXPECTED_HOST="$HOSTNAME" \
   node scripts/check-db-identity.mjs; then
@@ -183,6 +196,7 @@ else
 fi
 
 # ───────────────────────── GATE_MIGRATE — بوابة الهجرات الصريحة ───────────────
+STAGE="GATE_MIGRATE"
 # لا هجرة وقت البناء (NO MIGRATION DURING BUILD) ولا على أول طلب مستخدم:
 # خطوة صريحة هنا، بين «الاتصال ثابت» و«التطبيق».
 if [ "$SKIP_VERIFY" = true ]; then
@@ -202,6 +216,7 @@ else
 fi
 
 # ───────────────────────── GATE_SCHEMA — الجاهزية قبل أي كتابة سرّ ────────────
+STAGE="GATE_SCHEMA"
 schema_gate() { # $1=VJSON · $2=mode (enforce|report) → 0 مقبول · 1 مرفوض
   local v="$1" mode="$2" mig ok_par
   [ "$(row_ok "$v" conn)" = "true" ] || { echo "   • الاتصال نفسه فقد (GATE_AUTH سابق)."; return 1; }
@@ -240,6 +255,7 @@ else
 fi
 
 # ───────────────────────── سكّ توكن القاعدة (CI · read-only · قصير) ────────────
+STAGE="MINT_CI"
 CI_JWT=""
 if [ "$SKIP_VERIFY" = true ]; then
   echo "⏭️  GATE_CI_AUTH=SKIPPED (--skip-verify)" >&2
@@ -260,6 +276,7 @@ export TURSO_AUTH_TOKEN_PROD="$DB_JWT"
 
 # ───────────────────────── تسليم معامل — المنصّي لا يغادر هنا ─────────────────
 # (لا يُطبع · لا في GitHub · لا في Vercel · لا في ملف · لا في argv.)
+STAGE="APPLY"
 unset TURSO_PLATFORM_TOKEN PLATFORM_TOKEN
 echo
 echo "→ ALL GATES PASSED — تسليم الزوج إلى apply-turso-secrets.sh (حاجز حيّ ثم GitHub production + Vercel Production):"

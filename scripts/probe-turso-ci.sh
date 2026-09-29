@@ -38,11 +38,21 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then cat "$REPORT" >> "$GITHUB_STEP_SUMMAR
 } >> "$REPORT"
 node scripts/smoke-production.mjs >> "$REPORT" 2>&1 || true
 
-# تعليق على طلب الدمج إن وُجد رقمه؛ `--edit-last` يمنع تكديس تعليق لكل تشغيل.
+# تعليق على طلب الدمج إن وُجد رقمه؛ نعدّل **تعليقنا الموسوم فقط** (آخر واحد يحوي
+# علامة المجسّ) بدل --edit-last العام الذي كان يبتلع تعليق التدقيق حين يسبقنا
+# بثوانٍ — نفس المؤلف (github-actions) للطرفين، فالتوسيع بالعلامة هو الفارق.
 if [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_TOKEN:-}" ]; then
-  gh pr comment "$PR_NUMBER" --body-file "$REPORT" --edit-last --create-if-none \
-    || gh pr comment "$PR_NUMBER" --body-file "$REPORT" \
-    || echo "::warning::تعذّر نشر التعليق — الجدول متاح في ملخّص التشغيل."
+  GH_REPO="${GH_REPO:-elazamey/aborof}"
+  target_id="$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
+    --jq '[.[] | select(.body | contains("مجسّ Turso"))] | last | .id // empty' 2>/dev/null || true)"
+  if [ -n "${target_id:-}" ]; then
+    gh api -X PATCH "repos/${GH_REPO}/issues/comments/${target_id}" -F body=@"$REPORT" >/dev/null \
+      || gh pr comment "$PR_NUMBER" --body-file "$REPORT" \
+      || echo "::warning::تعذّر نشر التعليق — الجدول متاح في ملخّص التشغيل."
+  else
+    gh pr comment "$PR_NUMBER" --body-file "$REPORT" \
+      || echo "::warning::تعذّر نشر التعليق — الجدول متاح في ملخّص التشغيل."
+  fi
 fi
 
 exit "$code"
