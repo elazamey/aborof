@@ -75,6 +75,8 @@ const SERVER_ONLY_MODULES = [
   "@/lib/rate-limit",
   // M1: حزمة الصلاحيات تلمس قاعدة البيانات وكلمات المرور ⇒ خادم فقط.
   "@/lib/rbac",
+  // CeliaTokenManager: يقرأ البصمة ويكتب قاعدة البيانات ⇒ خادم فقط.
+  "@/lib/celia/tokens",
 ];
 
 for (const file of files) {
@@ -173,6 +175,26 @@ for (const file of files) {
   const isClientComponent = /^\s*["']use client["']/m.test(src);
   if ((isApiRoute || isClientComponent) && src.includes("password_hash")) {
     problems.push(`${rel}: عمود password_hash لا يُلمس خارج طبقة المخزن (src/lib/rbac/store.ts).`);
+  }
+  // نفس المبدأ للتوكنات: عمود البصمة يُلمس في وحدة واحدة فقط، فلا يظهر في
+  // مسار API ولا في مكوّن عميل (ولا يمكن تسريبه في حزمة المتصفح).
+  if ((isApiRoute || isClientComponent) && src.includes("token_hash")) {
+    problems.push(`${rel}: عمود token_hash لا يُلمس خارج طبقة التوكنات (src/lib/celia/tokens.ts).`);
+  }
+}
+
+/**
+ * 8.b) CeliaTokenManager: النص الصريح للتوكن لا يدخل أي سجل أو تدقيق.
+ *   يقينًا: أي استدعاء لـ`auditInsertStatement` في وحدة التوكنات يجب ألا يذكر
+ *   `plaintext` (القيمة الحقيقية في الاستجابة فقط، لا في الأثر الدائم).
+ */
+const celiaTokensModule = path.join(root, "src", "lib", "celia", "tokens.ts");
+if (fs.existsSync(celiaTokensModule)) {
+  const src = fs.readFileSync(celiaTokensModule, "utf8");
+  for (const match of src.matchAll(/auditInsertStatement\(([\s\S]{0,600}?)\}\)/g)) {
+    if (/plaintext/.test(match[1])) {
+      problems.push("src/lib/celia/tokens.ts: النص الصريح للتوكن يظهر في تفاصيل التدقيق — يُعرض مرة واحدة فقط.");
+    }
   }
 }
 

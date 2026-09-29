@@ -3,8 +3,11 @@
  *
  * - المسار 1: جلسة الإدارة (Admin Session) عبر HMAC-SHA256 في الكوكيز
  *   (`aborof_admin_session`) — نفس `isAdminRequest` المستخدم في `/admin`.
- * - المسار 2: توكن الوكيل (Agent Token) عبر ترويسة `Authorization: Bearer <token>`
- *   حيث `CELIA_AGENT_TOKEN` لا يقل عن 32 حرفًا (نفس سياسة طول سر الجلسة).
+ * - المسار 2: توكن وكيل **مُدار** (`CeliaTokenManager`) عبر نفس الترويسة،
+ *   يُتحقق منه بالبصمة في `celia_tokens` — ويحمل نطاقاته الخاصة.
+ *   فعّال فقط عند `ENABLE_CELIA_TOKENS=true`.
+ * - المسار 3: توكن الوكيل القديم في البيئة `CELIA_AGENT_TOKEN` (≥32 حرفًا) —
+ *   يبقى يعمل للتعايش حتى بعد تفعيل التوكنات المُدارة.
  *
  * كلاهما يُعيد هوية موحّدة `{ id, role }` أو يرمي `DomainError` (401/503).
  * لا يكشف أي فرع وجود التوكن من عدمه beyond 401 موحّد.
@@ -13,13 +16,22 @@
 import { Errors } from "@/lib/errors";
 import { actorCan, resolveActor } from "@/lib/rbac";
 import { timingSafeEqual } from "node:crypto";
+import { isCeliaTokensEnabled } from "./config";
+import { verifyManagedToken } from "./tokens";
 
 export type CeliaAuth = {
   id: string;
   role: "admin" | "agent";
-  method: "admin_session" | "agent_token";
+  method: "admin_session" | "agent_token" | "managed_token";
   /** اسم المستخدم في وضع RBAC (غائب في الوضع القديم). */
   username?: string;
+  /** اسم التوكن المُدار (للعرض في السجلات). */
+  label?: string;
+  /**
+   * نطاقات الفاعل — تُملأ للتوكنات المُدارة فقط.
+   * غيابها يعني «جلسة إدارة» فيبقى السقف هو سقف المتجر كما هو.
+   */
+  scopes?: Set<string>;
 };
 
 const TOKEN_ENV = "CELIA_AGENT_TOKEN" as const;
@@ -60,8 +72,22 @@ export async function verifyCeliaAuth(request: Request): Promise<CeliaAuth> {
     return { id: actor.id, username: actor.username, role: "admin", method: "admin_session" };
   }
 
-  // المسار 2: توكن الوكيل
+  // المسار 2: توكن وكيل مُدار (CeliaTokenManager) — عند تفعيل العلم فقط.
   const token = bearerToken(request);
+  if (token && isCeliaTokensEnabled()) {
+    const managed = await verifyManagedToken(token);
+    if (managed) {
+      return {
+        id: `token:${managed.id}`,
+        role: "agent",
+        method: "managed_token",
+        label: managed.label,
+        scopes: new Set(managed.scopes),
+      };
+    }
+  }
+
+  // المسار 3: توكن الوكيل في البيئة (تعايش)
   const expected = process.env[TOKEN_ENV];
 
   // لا توكن مرسل أصلًا → 401 موحّد
@@ -74,8 +100,11 @@ export async function verifyCeliaAuth(request: Request): Promise<CeliaAuth> {
     throw Errors.authInvalid("توكن غير صالح.");
   }
 
-  // الخادم غير مهيأ بتوكن صالح → 503 (تشخيص دقيق لا يكشف القيمة)
+  // الخادم غير مهيأ بتوكن صالح → 503 (تشخيص دقيق لا يكشف القيمة).
+  // استثناء: عند تفعيل التوكنات المُدارة، غياب توكن البيئة ليس عطلًا — التوجيه
+  // صار إلى القاعدة، فيبقى الرد 401 موحّدًا بلا كشف أي إعداد.
   if (!expected || expected.length < MIN_TOKEN_LENGTH) {
+    if (isCeliaTokensEnabled()) throw Errors.authInvalid("توكن غير صالح.");
     throw Errors.serviceUnavailable("توكن الوكيل غير مهيأ على الخادم (CELIA_AGENT_TOKEN).");
   }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { isCeliaAgentActive } from "@/lib/celia/config";
-import { requireCeliaScope } from "@/lib/celia/scope-guard";
+import { createCeliaScopeGuard, requireCeliaScope } from "@/lib/celia/scope-guard";
 import { verifyCeliaAuth } from "@/lib/celia/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { chatRequestContract, firstZodIssue } from "@/lib/validation/contracts";
@@ -36,8 +36,13 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
   // يرمي 403 إن لم يكن ضمن CELIA_ALLOWED_SCOPES، و404 إن كان العلم مغلقًا
   const guard = requireCeliaScope(req, "chat:write");
 
-  // 3. الهوية — admin session أو agent token
+  // 3. الهوية — admin session أو agent token (مُدار أو من البيئة)
   const auth = await verifyCeliaAuth(req);
+
+  // 3.b سقف الفاعل — توكن مُدار يحمل نطاقاته: المسموح = تقاطعها مع سقف المتجر.
+  // جلسة الإدارة تبقى على سقف المتجر (auth.scopes غائبة) فلا تغيير في سلوكها.
+  const actorGuard = auth.scopes ? createCeliaScopeGuard(auth.scopes) : guard;
+  actorGuard.assert("chat:write");
 
   // 4. الموارد — 10 طلبات / دقيقة لكل IP (موزّع عبر Turso إن وُجد)
   const limit = await rateLimit(req, "celia_chat", 10, 60 * 1000);
@@ -58,7 +63,7 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
   // لا نستخدم AI SDK جديد — نحافظ على السلسلة الحتمية والمقاييس الحالية.
   // PR-B: حقن الأدوات عبر Scope Filter Gate — فقط الأدوات المسموح بها في guard.allowed
   const engine = getSmartAgentEngine();
-  const allowedTools = celiaAllowedToolNames(guard.allowed);
+  const allowedTools = celiaAllowedToolNames(actorGuard.allowed);
   const enableTools = Object.keys(allowedTools).length > 0;
   let reply = "";
   let source = "local";
@@ -106,7 +111,7 @@ export const POST = apiHandler("celia_chat", async (req: Request) => {
   return NextResponse.json({
     reply,
     source,
-    auth: { id: auth.id, role: auth.role },
+    auth: { id: auth.id, role: auth.role, method: auth.method },
     ...(toolCalls ? { toolCalls } : {}),
     ...(products.length ? { products } : {}),
   });

@@ -25,6 +25,8 @@ export const RBAC_PERMISSIONS = [
   "rbac:write",
   "audit:read",
   "celia:use",
+  "celia:read",
+  "celia:manage",
 ] as const;
 
 export type RbacPermission = (typeof RBAC_PERMISSIONS)[number];
@@ -50,6 +52,8 @@ export const PERMISSION_LABELS: Record<RbacPermission, string> = {
   "rbac:write": "تعديل الأدوار والمستخدمين",
   "audit:read": "قراءة سجل التدقيق",
   "celia:use": "استخدام سيليا من جلسة الإدارة",
+  "celia:read": "عرض توكنات وكلاء سيليا",
+  "celia:manage": "إدارة توكنات وكلاء سيليا (إنشاء/إلغاء/تدوير)",
 };
 
 /**
@@ -67,6 +71,8 @@ export const PERMISSION_ENFORCEMENT: Record<RbacPermission, string> = {
   "rbac:write": "POST,PATCH,DELETE /api/admin/rbac/roles|users",
   "audit:read": "GET /api/admin/rbac/audit",
   "celia:use": "POST /api/celia/chat (جلسة إدارة)",
+  "celia:read": "GET /api/admin/celia/tokens",
+  "celia:manage": "POST /api/admin/celia/tokens + POST /api/admin/celia/tokens/[id]",
 };
 
 export interface PermissionGroup {
@@ -82,7 +88,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     id: "platform",
     label: "المنصة والتشغيل",
-    permissions: ["admin:read", "mcp:read", "diagnostics:read", "celia:use"],
+    permissions: ["admin:read", "mcp:read", "diagnostics:read", "celia:use", "celia:read", "celia:manage"],
   },
   {
     id: "governance",

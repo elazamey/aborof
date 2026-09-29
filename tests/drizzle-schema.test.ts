@@ -18,15 +18,17 @@ function fileClient(): Client {
 }
 
 describe("drizzle schema — طبقة شفافة لا تكسر بوابة الهجرات", () => {
-  test("expectedMigrations = 0001+0002+0003 ببصمات ثابتة (sha256)", () => {
+  test("expectedMigrations = 0001+0002+0003+0004 ببصمات ثابتة (sha256)", () => {
     const expected = expectedMigrations(process.cwd());
-    assert.equal(expected.length, 3, "الهجرات: initial + search_fts5 + rbac (M1)");
+    assert.equal(expected.length, 4, "الهجرات: initial + search_fts5 + rbac (M1) + celia_tokens");
     assert.equal(expected[0].version, "0001");
     assert.equal(expected[0].name, "initial");
     assert.equal(expected[1].version, "0002");
     assert.equal(expected[1].name, "search_fts5");
     // 0003 هي هجرة RBAC الحقيقية (M1) — وترقيم handoff لا يُحتسب هجرة أبدًا.
     assert.equal(expected[2].version, "0003");
+    // 0004 هي هجرة توكنات سيليا المُدارة (CeliaTokenManager).
+    assert.equal(expected[3].version, "0004");
     assert.equal(expected[2].name, "rbac");
     // كل بصمة 64 حرف hex
     for (const m of expected) {
@@ -37,15 +39,19 @@ describe("drizzle schema — طبقة شفافة لا تكسر بوابة اله
     assert.equal(MIGRATIONS[0].version, expected[0].version);
     assert.equal(MIGRATIONS[1].version, expected[1].version);
     assert.equal(MIGRATIONS[2].version, expected[2].version);
-    // لا هجرة رابعة: أي 0004 في المستقبل تحتاج تحديث هذا الاختبار صراحةً.
+    assert.equal(MIGRATIONS[3].version, expected[3].version);
+    // حدّ موثَّق: 0004 (celia_tokens) هي آخر هجرة معروفة — أي هجرة 0005 في
+    // المستقبل تحتاج تحديث هذا الاختبار صراحةً (حاجز واعٍ لا انزلاق تلقائي).
     const versions = expected.map((m) => m.version);
-    assert.ok(!versions.includes("0004"), "لا وجود لـ 0004");
+    assert.deepEqual(versions, ["0001", "0002", "0003", "0004"]);
+    assert.ok(!versions.includes("0005"), "لا وجود لـ 0005 — حدّث هذا الاختبار عند إضافة هجرة جديدة");
   });
 
-  test("schema يصدّر 10 جداول (بدون FTS5 الافتراضي)", () => {
+  test("schema يصدّر 11 جدولًا (بدون FTS5 الافتراضي)", () => {
     const keys = Object.keys(schema.schema);
     assert.deepEqual(keys.sort(), [
       "adminAuditLog",
+      "celiaTokens",
       "chatLogs",
       "faq",
       "orderItems",
@@ -120,12 +126,13 @@ describe("drizzle schema — طبقة شفافة لا تكسر بوابة اله
     resetDrizzleForTest();
   });
 
-  test("runMigrations تطبّق 0001+0002+0003 وتنشئ الفهارس (idempotent)", async () => {
+  test("runMigrations تطبّق 0001+0002+0003+0004 وتنشئ الفهارس (idempotent)", async () => {
     const client = fileClient();
     const first = await runMigrations(client);
     assert.ok(first.applied.includes("0001"));
     assert.ok(first.applied.includes("0002"));
     assert.ok(first.applied.includes("0003"));
+    assert.ok(first.applied.includes("0004"));
     // الفهارس موجودة
     const idx = await client.execute(
       "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_order_items_order','idx_orders_created','idx_rate_limit_reset')"
