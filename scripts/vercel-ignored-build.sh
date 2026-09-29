@@ -36,10 +36,11 @@ changed="$(git diff --name-only "$base" HEAD -- 2>/dev/null)" || {
   exit 1
 }
 
-# لا تغييرات إطلاقًا منذ آخر نشر ⇒ لا حاجة لبناء جديد.
+# لا تغييرات في الكود منذ آخر نشر (base == HEAD) ⇒ إعادة نشر يدوية (Redeploy)
+# من لوحة Vercel (مثلًا بعد تعديل متغيرات البيئة) ⇒ يجب البناء دائمًا (exit 1).
 if [ -z "$changed" ]; then
-  echo "vercel-ignored-build: لا تغييرات منذ $base ⇒ تجاهل البناء" >&2
-  exit 0
+  echo "vercel-ignored-build: إعادة نشر لنفس الالتزام $base (Redeploy) ⇒ بناء" >&2
+  exit 1
 fi
 
 # ملف "مؤثر" واحد يكفي ليبدأ البناء.

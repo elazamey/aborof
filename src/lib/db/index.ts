@@ -46,13 +46,47 @@ function isTursoDashboardUrl(value: string): boolean {
   }
 }
 
+function stripEnvWrapper(raw: string | undefined, keyName: string): string {
+  if (!raw) return "";
+  let v = raw.trim();
+  const prefix = `${keyName}=`;
+  if (v.startsWith(prefix)) v = v.slice(prefix.length).trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    v = v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+function looksLikeJwtToken(v: string): boolean {
+  return /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v);
+}
+
+function normalizeTursoCredentials(): { url: string; authToken: string | undefined } {
+  let url = stripEnvWrapper(process.env.TURSO_DATABASE_URL, "TURSO_DATABASE_URL");
+  let token = stripEnvWrapper(process.env.TURSO_AUTH_TOKEN, "TURSO_AUTH_TOKEN");
+
+  // معالجة تبديل الحقلين بالخطأ (وضع JWT في خانة الرابط ورابط libsql في خانة التوكن)
+  if (looksLikeJwtToken(url) && /^(libsql|wss?|https?):\/\//i.test(token) && !isTursoDashboardUrl(token)) {
+    const tmp = url;
+    url = token;
+    token = tmp;
+  }
+
+  // معالجة كتابة اسم المضيف `.turso.io` بدون البادئة `libsql://`
+  if (/^[a-z0-9][a-z0-9.-]*\.turso\.io(\/.*)?$/i.test(url)) {
+    url = `libsql://${url}`;
+  }
+
+  return { url, authToken: token || undefined };
+}
+
 export function hasDB() {
   return Boolean(_clientOverride) || Boolean(process.env.TURSO_DATABASE_URL?.trim());
 }
 
 export function db(): Client | null {
   if (_clientOverride) return _clientOverride;
-  const databaseUrl = process.env.TURSO_DATABASE_URL?.trim();
+  const { url: databaseUrl, authToken } = normalizeTursoCredentials();
   if (!databaseUrl) return null;
 
   // رابط لوحة Turso ليس endpoint لقاعدة البيانات، وقد يجعل تهيئة العميل نفسها
@@ -65,7 +99,7 @@ export function db(): Client | null {
     try {
       _client = createClient({
         url: databaseUrl,
-        authToken: process.env.TURSO_AUTH_TOKEN?.trim(),
+        authToken,
       });
     } catch {
       throw Errors.serviceUnavailable("إعداد الاتصال بقاعدة البيانات غير صالح.");

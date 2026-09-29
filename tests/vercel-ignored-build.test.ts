@@ -120,8 +120,8 @@ describe("vercel-ignored-build (Ignored Build Step)", () => {
     assert.equal(ignoredBuildExit(repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", h.G), 1);
   });
 
-  test("no changes since base ⇒ exit 0 (skip) — لا داعي لبناء جديد", () => {
-    assert.equal(ignoredBuildExit(repo, h.G, h.G), 0);
+  test("no changes since base (manual Redeploy for env vars) ⇒ exit 1 (build)", () => {
+    assert.equal(ignoredBuildExit(repo, h.G, h.G), 1);
   });
 
   test("العقد حرفيًا: المخرجان الوحيدان المسموحان 0 و1", () => {
