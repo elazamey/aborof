@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { getProducts, db } from "@/lib/db";
 import { createOrder, listOrders, updateOrderStatus } from "@/lib/orders";
-import { isAdminRequest } from "@/lib/auth";
+import { requirePermission } from "@/lib/rbac";
 import { rateLimit } from "@/lib/rate-limit";
 import { GOVERNORATES } from "@/lib/shipping";
 import { createOrderContract, orderStatusContract, firstZodIssue } from "@/lib/validation/contracts";
@@ -35,20 +35,20 @@ export const POST = apiHandler("/api/orders", async (request) => {
 });
 
 export const GET = apiHandler("/api/orders/admin-list", async (request) => {
-  if (!isAdminRequest(request)) throw Errors.authRequired();
+  await requirePermission(request, "orders:read");
   if (!db()) return NextResponse.json({ orders: [] });
   const orders = await listOrders(200);
   return NextResponse.json({ orders });
 });
 
 export const PATCH = apiHandler("/api/orders/admin-patch", async (request) => {
-  if (!isAdminRequest(request)) throw Errors.authRequired();
+  const actor = await requirePermission(request, "orders:write");
   await enforceRateLimit(request, "admin-order-update", 30, 10 * 60 * 1000);
 
   const raw = await readJson(request, 8_000);
   const parsed = orderStatusContract.safeParse(raw);
   if (!parsed.success) throw Errors.validationFailed(firstZodIssue(parsed.error));
 
-  await updateOrderStatus(parsed.data);
+  await updateOrderStatus(parsed.data, actor.username);
   return NextResponse.json({ ok: true });
 });

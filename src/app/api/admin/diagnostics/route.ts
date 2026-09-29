@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { apiHandler, Errors } from "@/lib/errors/handler";
 import { hasDB } from "@/lib/db";
 import { auditSecretConfiguration, diagnosticsKeyMatches, isDiagnosticsEnabled } from "@/lib/secrets";
-import { isAdminRequest } from "@/lib/auth";
+import { actorCan, resolveActor } from "@/lib/rbac";
 import { snapshot } from "@/lib/observability/metrics";
 
 export const runtime = "nodejs";
@@ -16,12 +16,15 @@ export const dynamic = "force-dynamic";
 export const GET = apiHandler("/api/admin/diagnostics", async (request) => {
   if (!isDiagnosticsEnabled()) throw Errors.diagnosticsDisabled();
 
-  // نقبل جلسة إدارة أو مفتاح التشخيص المستقل.
+  // نقبل مفتاح التشخيص المستقل، أو جلسة إدارة تحمل صلاحية التشخيص.
   const authHeader = request.headers.get("x-diagnostics-key");
   const url = new URL(request.url);
   const queryKey = url.searchParams.get("key");
-  if (!isAdminRequest(request) && !diagnosticsKeyMatches(authHeader ?? queryKey)) {
-    throw Errors.authRequired();
+  if (!diagnosticsKeyMatches(authHeader ?? queryKey)) {
+    const actor = await resolveActor(request);
+    // في وضع RBAC تُفرض `diagnostics:read`؛ ومع غياب العلم تبقى أي جلسة إدارة
+    // صالحة كافية (سلوك اليوم حرفيًا) — الفرق كله في `actorCan`.
+    if (!actor || !actorCan(actor, "diagnostics:read")) throw Errors.authRequired();
   }
 
   const warnings = auditSecretConfiguration();

@@ -18,13 +18,16 @@ function fileClient(): Client {
 }
 
 describe("drizzle schema — طبقة شفافة لا تكسر بوابة الهجرات", () => {
-  test("expectedMigrations تبقى 0001+0002 ببصمات ثابتة (sha256)", () => {
+  test("expectedMigrations = 0001+0002+0003 ببصمات ثابتة (sha256)", () => {
     const expected = expectedMigrations(process.cwd());
-    assert.equal(expected.length, 2, "يجب أن تبقى هجرتان فقط");
+    assert.equal(expected.length, 3, "الهجرات: initial + search_fts5 + rbac (M1)");
     assert.equal(expected[0].version, "0001");
     assert.equal(expected[0].name, "initial");
     assert.equal(expected[1].version, "0002");
     assert.equal(expected[1].name, "search_fts5");
+    // 0003 هي هجرة RBAC الحقيقية (M1) — وترقيم handoff لا يُحتسب هجرة أبدًا.
+    assert.equal(expected[2].version, "0003");
+    assert.equal(expected[2].name, "rbac");
     // كل بصمة 64 حرف hex
     for (const m of expected) {
       assert.match(m.checksum, /^[a-f0-9]{64}$/, `checksum ${m.version} يجب أن يكون 64 hex`);
@@ -33,12 +36,13 @@ describe("drizzle schema — طبقة شفافة لا تكسر بوابة اله
     assert.equal(MIGRATIONS.length, expected.length);
     assert.equal(MIGRATIONS[0].version, expected[0].version);
     assert.equal(MIGRATIONS[1].version, expected[1].version);
-    // لا يوجد 0003 — ترقيم handoff ليس هجرة
+    assert.equal(MIGRATIONS[2].version, expected[2].version);
+    // لا هجرة رابعة: أي 0004 في المستقبل تحتاج تحديث هذا الاختبار صراحةً.
     const versions = expected.map((m) => m.version);
-    assert.ok(!versions.includes("0003"), "لا وجود لـ 0003 — هجرة وهمية");
+    assert.ok(!versions.includes("0004"), "لا وجود لـ 0004");
   });
 
-  test("schema يصدّر 8 جداول (بدون FTS5 الافتراضي)", () => {
+  test("schema يصدّر 10 جداول (بدون FTS5 الافتراضي)", () => {
     const keys = Object.keys(schema.schema);
     assert.deepEqual(keys.sort(), [
       "adminAuditLog",
@@ -48,6 +52,8 @@ describe("drizzle schema — طبقة شفافة لا تكسر بوابة اله
       "orders",
       "products",
       "rateLimitCounters",
+      "rbacRoles",
+      "rbacUsers",
       "schemaMigrations",
     ].sort());
     // كل جدول يملك تعريف أعمدة
@@ -58,6 +64,9 @@ describe("drizzle schema — طبقة شفافة لا تكسر بوابة اله
     assert.ok(schema.chatLogs, "chatLogs موجود");
     assert.ok(schema.adminAuditLog, "adminAuditLog موجود");
     assert.ok(schema.rateLimitCounters, "rateLimitCounters موجود");
+    // لوحة الصلاحيات (هجرة 0003): الأدوار محصّنة والدور مفتاح خارجي على المستخدم.
+    assert.ok(schema.rbacRoles, "rbacRoles موجود");
+    assert.ok(schema.rbacUsers, "rbacUsers موجود");
     assert.ok(schema.schemaMigrations, "schemaMigrations موجود");
   });
 
@@ -111,11 +120,12 @@ describe("drizzle schema — طبقة شفافة لا تكسر بوابة اله
     resetDrizzleForTest();
   });
 
-  test("runMigrations لا تزال تطبّق 0001+0002 وتنشئ الفهارس (idempotent)", async () => {
+  test("runMigrations تطبّق 0001+0002+0003 وتنشئ الفهارس (idempotent)", async () => {
     const client = fileClient();
     const first = await runMigrations(client);
     assert.ok(first.applied.includes("0001"));
     assert.ok(first.applied.includes("0002"));
+    assert.ok(first.applied.includes("0003"));
     // الفهارس موجودة
     const idx = await client.execute(
       "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_order_items_order','idx_orders_created','idx_rate_limit_reset')"

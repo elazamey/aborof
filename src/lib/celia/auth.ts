@@ -10,14 +10,16 @@
  * لا يكشف أي فرع وجود التوكن من عدمه beyond 401 موحّد.
  */
 
-import { isAdminRequest } from "@/lib/auth";
 import { Errors } from "@/lib/errors";
+import { actorCan, resolveActor } from "@/lib/rbac";
 import { timingSafeEqual } from "node:crypto";
 
 export type CeliaAuth = {
   id: string;
   role: "admin" | "agent";
   method: "admin_session" | "agent_token";
+  /** اسم المستخدم في وضع RBAC (غائب في الوضع القديم). */
+  username?: string;
 };
 
 const TOKEN_ENV = "CELIA_AGENT_TOKEN" as const;
@@ -47,9 +49,15 @@ function bearerToken(request: Request): string | null {
  * - وإلا يرمي 401 (بدون تفريق بين "لا توكن" و"توكن خاطئ" beyond الرسالة)
  */
 export async function verifyCeliaAuth(request: Request): Promise<CeliaAuth> {
-  // المسار 1: إدارة (HMAC)
-  if (isAdminRequest(request)) {
-    return { id: "admin", role: "admin", method: "admin_session" };
+  // المسار 1: جلسة الإدارة — عبر طبقة الصلاحيات (تعمل في الوضعين).
+  // مع العلم مغلقًا: أي جلسة صالحة = مشغّل مفرد (سلوك اليوم حرفيًا).
+  // ومع `ENABLE_RBAC=true`: جلسة v2 لمستخدم فعّال **تحمل صلاحية `celia:use`**.
+  const actor = await resolveActor(request);
+  if (actor) {
+    if (!actorCan(actor, "celia:use")) {
+      throw Errors.forbidden("صلاحية «استخدام سيليا من جلسة الإدارة» غير متاحة لحسابك.");
+    }
+    return { id: actor.id, username: actor.username, role: "admin", method: "admin_session" };
   }
 
   // المسار 2: توكن الوكيل

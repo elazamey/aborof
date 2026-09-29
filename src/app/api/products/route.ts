@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiHandler, Errors, readJson } from "@/lib/errors/handler";
 import { getProducts, db, ensureSchema } from "@/lib/db";
-import { isAdminRequest } from "@/lib/auth";
+import { requirePermission } from "@/lib/rbac";
 import { productUpsertContract, firstZodIssue } from "@/lib/validation/contracts";
 import { upsertProductSearch, removeProductSearch } from "@/lib/search";
 import type { Product } from "@/lib/seed";
@@ -14,7 +14,9 @@ export const GET = apiHandler("/api/products", async () => {
 });
 
 export const POST = apiHandler("/api/products/admin-post", async (request) => {
-  if (!isAdminRequest(request)) throw Errors.authRequired();
+  // الصلاحية تُفرض مركزيًا: في وضع RBAC الحالي صلاحية `products:write`،
+  // وفي الوضع القديم (العلم مغلق) جلسة الإدارة الصالحة كما كانت.
+  const actor = await requirePermission(request, "products:write");
 
   const raw = await readJson(request, 24_000);
   const parsed = productUpsertContract.safeParse(raw);
@@ -46,12 +48,13 @@ export const POST = apiHandler("/api/products/admin-post", async (request) => {
     ],
   });
   await c.execute({
-    sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
+    sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details,actor) VALUES (?,?,?,?,?)",
     args: [
       p.id ? "product_update" : "product_create",
       "product",
       id,
       JSON.stringify({ name: p.name.trim(), price: p.price, stock: p.stock }),
+      actor.username,
     ],
   });
   // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الكتابة الأساسية (سقوط آمن).
@@ -75,7 +78,7 @@ export const POST = apiHandler("/api/products/admin-post", async (request) => {
 });
 
 export const DELETE = apiHandler("/api/products/admin-delete", async (request) => {
-  if (!isAdminRequest(request)) throw Errors.authRequired();
+  const actor = await requirePermission(request, "products:write");
 
   const id = new URL(request.url).searchParams.get("id");
   if (!id || id.length > 80) throw Errors.validationFailed("معرف غير صالح");
@@ -85,8 +88,8 @@ export const DELETE = apiHandler("/api/products/admin-delete", async (request) =
   await ensureSchema();
   await c.execute({ sql: "DELETE FROM products WHERE id=?", args: [id] });
   await c.execute({
-    sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
-    args: ["product_delete", "product", id, "{}"],
+    sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details,actor) VALUES (?,?,?,?,?)",
+    args: ["product_delete", "product", id, "{}", actor.username],
   });
   // مزامنة فهرس FTS5 — الفشل هنا لا يُفشل الحذف الأساسي (سقوط آمن).
   try {

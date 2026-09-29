@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler, Errors } from "@/lib/errors/handler";
-import { isAdminRequest } from "@/lib/auth";
+import { requirePermission } from "@/lib/rbac";
 import { fleetCatalogManifest, fleetSnapshot, isAgentFleetEnabled } from "@/lib/ai";
 
 export const runtime = "nodejs";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export const GET = apiHandler("/api/admin/agents", async (request) => {
   if (!isAgentFleetEnabled()) throw Errors.notFound("هذه النقطة غير متاحة");
-  if (!isAdminRequest(request)) throw Errors.authRequired();
+  await requirePermission(request, "admin:read");
 
   return NextResponse.json({
     ok: true,

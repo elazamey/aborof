@@ -10,7 +10,8 @@ export type MetricKind =
   | "ai_provider_failure"
   | "db_timing"
   | "validation_failed"
-  | "mcp_tool_call";
+  | "mcp_tool_call"
+  | "authz_denied";
 
 interface RequestSample {
   route: string;
@@ -63,6 +64,13 @@ export const metrics = {
   /** استدعاء أداة MCP: الاسم والحالة والزمن فقط — لا وسائط ولا مخرجات. */
   recordMcpToolCall(tool: string, status: string, ms: number) {
     push(mcpCalls, { tool, status, ms: Math.round(ms), at: Date.now() });
+  },
+  /**
+   * رفض صلاحية (RBAC) — يُعدّ لكل صلاحية على حدة، فلا يظهر في العدّاد
+   * أي اسم مستخدم أو مسار (الصلاحية نفسها معلومة عامة داخل النظام).
+   */
+  recordAuthzDenied(permission: string) {
+    counters.set(`authz_denied:${permission}`, (counters.get(`authz_denied:${permission}`) ?? 0) + 1);
   },
 };
 

@@ -284,6 +284,97 @@ export const rateLimitCounters = sqliteTable(
 );
 
 // ---------------------------------------------------------------------------
+// rbac_roles / rbac_users — لوحة الصلاحيات (هجرة 0003)
+//
+// الهجرة المرجعية هي المصدر الوحيد للحقيقة (القيود والفهارس تُنشأ هناك)،
+// وهذا التمثيل لأمان الأنواع والاستعلامات فقط. أبرز ما يجب أن يبقى مطابقًا:
+//  - `username` فريد، و`role_id` مفتاح خارجي بـ ON DELETE RESTRICT.
+//  - `permissions` نص JSON (مصفوفة) وليس جدولًا مُطبّعًا: الكتالوج في الكود.
+//  - `builtin` يميّز الأدوار المحصّنة (owner) عن الأدوار المخصصة.
+// ---------------------------------------------------------------------------
+export const rbacRoles = sqliteTable(
+  "rbac_roles",
+  {
+    id: text("id").primaryKey(),
+    label: text("label").notNull(),
+    description: text("description").notNull().default(""),
+    permissions: text("permissions").notNull().default("[]"),
+    builtin: integer("builtin").notNull().default(0),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    idCheck: check("rbac_roles_id_check", sql`length(${table.id}) BETWEEN 2 AND 60`),
+    labelCheck: check(
+      "rbac_roles_label_check",
+      sql`length(trim(${table.label})) >= 2 AND length(${table.label}) <= 60`
+    ),
+    descriptionCheck: check(
+      "rbac_roles_description_check",
+      sql`length(${table.description}) <= 300`
+    ),
+    permissionsCheck: check("rbac_roles_permissions_check", sql`json_valid(${table.permissions})`),
+    builtinCheck: check("rbac_roles_builtin_check", sql`${table.builtin} IN (0, 1)`),
+  })
+);
+
+export const rbacUsers = sqliteTable(
+  "rbac_users",
+  {
+    id: text("id").primaryKey(),
+    username: text("username").notNull().unique(),
+    displayName: text("display_name").notNull().default(""),
+    roleId: text("role_id")
+      .notNull()
+      .references(() => rbacRoles.id, { onDelete: "restrict" }),
+    passwordHash: text("password_hash").notNull(),
+    passwordSource: text("password_source").notNull().default("panel"),
+    status: text("status").notNull().default("active"),
+    tokenVersion: integer("token_version").notNull().default(1),
+    failedAttempts: integer("failed_attempts").notNull().default(0),
+    lockedUntil: integer("locked_until").notNull().default(0),
+    lastLoginAt: text("last_login_at"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    usernameCheck: check(
+      "rbac_users_username_check",
+      sql`length(trim(${table.username})) >= 3 AND length(${table.username}) <= 60`
+    ),
+    displayNameCheck: check(
+      "rbac_users_display_name_check",
+      sql`length(${table.displayName}) <= 60`
+    ),
+    passwordHashCheck: check(
+      "rbac_users_password_hash_check",
+      sql`length(${table.passwordHash}) BETWEEN 40 AND 400`
+    ),
+    passwordSourceCheck: check(
+      "rbac_users_password_source_check",
+      sql`${table.passwordSource} IN ('bootstrap', 'panel')`
+    ),
+    statusCheck: check("rbac_users_status_check", sql`${table.status} IN ('active', 'disabled')`),
+    tokenVersionCheck: check("rbac_users_token_version_check", sql`${table.tokenVersion} >= 1`),
+    failedAttemptsCheck: check(
+      "rbac_users_failed_attempts_check",
+      sql`${table.failedAttempts} >= 0`
+    ),
+    lockedUntilCheck: check("rbac_users_locked_until_check", sql`${table.lockedUntil} >= 0`),
+    roleIdx: index("idx_rbac_users_role").on(table.roleId),
+    statusIdx: index("idx_rbac_users_status").on(table.status),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // schema_migrations — سجل الهجرات الحتمي
 // ---------------------------------------------------------------------------
 export const schemaMigrations = sqliteTable("schema_migrations", {
@@ -306,6 +397,8 @@ export const schema = {
   chatLogs,
   adminAuditLog,
   rateLimitCounters,
+  rbacRoles,
+  rbacUsers,
   schemaMigrations,
 } as const;
 
@@ -320,6 +413,10 @@ export type ChatLogRow = typeof chatLogs.$inferSelect;
 export type AdminAuditLogRow = typeof adminAuditLog.$inferSelect;
 export type RateLimitCounterRow = typeof rateLimitCounters.$inferSelect;
 export type SchemaMigrationRow = typeof schemaMigrations.$inferSelect;
+export type RbacRoleRow = typeof rbacRoles.$inferSelect;
+export type NewRbacRoleRow = typeof rbacRoles.$inferInsert;
+export type RbacUserRow = typeof rbacUsers.$inferSelect;
+export type NewRbacUserRow = typeof rbacUsers.$inferInsert;
 
 // FTS5 — يُدار عبر الهجرة 0002 فقط (VIRTUAL TABLE). لا يُمثَّل في Drizzle
 // كجدول عادي؛ الاستعلام عليه يكون عبر SQL الخام في `src/lib/search.ts`:
