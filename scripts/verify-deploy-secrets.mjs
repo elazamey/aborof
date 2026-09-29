@@ -42,6 +42,7 @@ const SECRETS = [
 
 const VARIABLES = [
   { name: "VERCEL_DEPLOY_ENABLED", level: "required", mustEqual: "true", why: "بوابة وظيفة النشر — يجب أن تكون Variable (لا Secret) وبالقيمة الحرفية true" },
+  { name: "VERCEL_EXPECTED_PROJECT", level: "optional", why: "اسم مشروع Vercel الذي يجب أن يخدم الإنتاج — يطابقه الطيران التمهيدي في deploy.yml (الافتراضي aborof) فيمنع «نشر ناجح وإنتاج لم يتغير»" },
   { name: "ENABLE_AI_AGENT", level: "optional", why: "توجيه /api/chat إلى محرك الوكيل" },
   { name: "AI_PROVIDER_ORDER", level: "optional", why: "ترتيب سلسلة المزودين" },
   { name: "NVIDIA_NIM_BASE_URL", level: "optional", why: "يجب أن يبدأ بـ https:// وإلا خرج المزود من السلسلة" },
@@ -66,6 +67,8 @@ const ONE_OF = [
 /** المتغيرات التي تُطبع قيمها لأنها أعلام غير حساسة بطبيعتها (موثّقة في DEPLOYMENT.md). */
 const PRINTABLE_VARIABLE_VALUES = new Set([
   "VERCEL_DEPLOY_ENABLED",
+  // اسم مشروع لا سرّ: مطابقته هي ما يجعل تشخيص النشر ممكنًا.
+  "VERCEL_EXPECTED_PROJECT",
   "ENABLE_ORDER_TRACKING",
   "ENABLE_AI_AGENT",
   "ENABLE_MCP_TOOLS",

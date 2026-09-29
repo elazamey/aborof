@@ -63,7 +63,15 @@
    مع تفعيل *Require a pull request before merging* و*Do not allow bypassing*.
 2. **أسرار Vercel/التطبيق** (Settings → Secrets and variables → Actions،
    وفي Vercel Project → Environment Variables للإنتاج):
-   - `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (للنشر التلقائي)
+   - `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (للنشر التلقائي) —
+     المسار الموصى به `node scripts/apply-vercel-link.mjs`: يرفض القيم الموضعية
+     ورموز المنصات الأخرى قبل أي كتابة، ويحقّق حيًّا أن الزوج يحلّ إلى مشروع
+     `aborof` (لا `aborof-store-v2`)، ويضبط الأسرار عبر `stdin`. `VERCEL_ORG_ID`
+     ليس دائمًا `team_…`: الرمز الشخصي يحتاج معرّف الحساب، والخطأ يظهر كـ
+     `404 Project not found` لا كخطأ نطاق.
+   - متغير اختياري `VERCEL_EXPECTED_PROJECT` (افتراضي `aborof`): يطابقه الطيران
+     التمهيدي في `deploy.yml` قبل أي `vercel pull/build/deploy` فيحاجب الحالة
+     الصامتة «النشر نجح في Actions والإنتاج لم يتغير».
    - `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
    - `ADMIN_PASSWORD` (12 حرفًا على الأقل) و`ADMIN_SESSION_SECRET` (32+ عشوائي)
    - **لا تضف** `DIAGNOSTICS_KEY`/`DIAGNOSTICS_ENABLED` في الإنتاج إلا عند الحاجة

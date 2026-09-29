@@ -122,6 +122,11 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # ‏Variable (لا Secret): اسم المشروع الذي يجب أن يخدم الإنتاج. المستودع
+      # مرتبط بثلاثة مشاريع Vercel (aborof، aborof-store-v2، aborof-updated-17d3397)
+      # وتكامل Git ينشرها كلها، فبدون هذا الاسم قد ينجح النشر في Actions بينما
+      # الخدمة الإنتاجية لم تتغير. غيابه ⇒ الافتراضي aborof (scripts/lib/vercel-link.mjs).
+      VERCEL_EXPECTED_PROJECT: ${{ vars.VERCEL_EXPECTED_PROJECT }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -150,31 +155,17 @@ jobs:
       # ويطبع الأسماء فقط (لا قيم سرية — والمعرّفات نفسها محجوبة تلقائيًا كأسرار).
       # السبب: تنزيل سجلات الوظائف محجوب عن بعض الشبكات، فالتعليقات (annotations)
       # هي القناة الوحيدة المقروءة آليًا لتشخيص فشل vercel pull/build/deploy.
+      #
+      # لماذا Node بدل bash+jq: `404: Project not found` وحدها أوقفت ثلاثة نشرات
+      # متتالية بلا حسم، ولها أربعة أسباب مختلفة (نطاق فريق مقابل شخصي، معرّف قديم
+      # بعد إعادة إنشاء المشروع، مشروع في حساب آخر، أو مشروع غير الذي يخدم الإنتاج).
+      # scripts/vercel-preflight.mjs بلا اعتماديات (fetch مدمج — يعمل قبل npm ci)
+      # ويصنّف الرد إلى حكم بأسباب وإجراءات، ويطبع أسماء المشاريع التي يراها الرمز
+      # في النطاقين، ويحاجب «نشر ناجح وإنتاج لم يتغير» بمطابقة VERCEL_EXPECTED_PROJECT.
+      # المنطق نفسه مُختبَر في tests/vercel-deploy-link.test.ts ضد خادم وهمي.
       - name: Vercel preflight (token & project identity — names only)
         shell: bash
-        run: |
-          set -euo pipefail
-          user_body=/tmp/vercel-user.json
-          user_code=$(curl -sS -m 20 -o "$user_body" -w '%{http_code}' \
-            -H "Authorization: Bearer ${VERCEL_TOKEN}" https://api.vercel.com/v2/user || echo 000)
-          if [ "$user_code" = 200 ]; then
-            echo "::notice::Vercel token صالح — الحساب: $(jq -r '.user.username // .user.uid // "?"' "$user_body")"
-          else
-            echo "::error::فحص رمز Vercel فشل — HTTP $user_code: $(jq -r '.error.message // .error.code // "لا يوجد جسم استجابة"' "$user_body" 2>/dev/null | head -c 300)"
-            echo "::error::الإجراء: أنشئ رمزًا جديدًا في Vercel → Account Settings → Tokens وصلاحياته Full access على الفريق، ثم حدّث سر VERCEL_TOKEN."
-            exit 1
-          fi
-          proj_body=/tmp/vercel-project.json
-          proj_code=$(curl -sS -m 20 -o "$proj_body" -w '%{http_code}' \
-            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
-            "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_ORG_ID}" || echo 000)
-          if [ "$proj_code" = 200 ]; then
-            echo "::notice::مشروع Vercel متاح — الاسم: $(jq -r '.name // "?"' "$proj_body") (إطار: $(jq -r '.framework // "?"' "$proj_body")) — تأكد أنه المشروع الذي يخدم aborof.vercel.app"
-          else
-            echo "::error::فحص مشروع Vercel فشل — HTTP $proj_code: $(jq -r '.error.message // .error.code // "لا يوجد جسم استجابة"' "$proj_body" 2>/dev/null | head -c 300)"
-            echo "::error::الإجراء: تحقق أن VERCEL_PROJECT_ID وVERCEL_ORG_ID من نفس الفريق (Vercel → Project → Settings → General، و Account Settings → Team). 404 = معرف خاطئ أو خارج نطاق الرمز."
-            exit 1
-          fi
+        run: node scripts/vercel-preflight.mjs
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund

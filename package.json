@@ -11,6 +11,8 @@
     "routes:inventory": "node scripts/route-inventory.mjs --check",
     "front:check": "node scripts/check-front-mandatory.mjs",
     "verify:secrets": "node scripts/verify-deploy-secrets.mjs",
+    "vercel:preflight": "node scripts/vercel-preflight.mjs",
+    "link:vercel": "node scripts/apply-vercel-link.mjs",
     "verify:turso": "node scripts/verify-turso.mjs",
     "migrations:plan": "node scripts/apply-migrations.mjs",
     "migrations:apply": "node --import tsx scripts/apply-migrations.mjs --apply",
