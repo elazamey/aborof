@@ -34,9 +34,30 @@ export interface CeliaScopeGuard {
   assertAll(scopes: CeliaScope[]): void;
 }
 
-export function createCeliaScopeGuard(): CeliaScopeGuard {
+/**
+ * تقاطع نطاقات الفاعل مع سقف المتجر.
+ * النطاق يُقبل فقط إن كان مسموحًا في السقف المتجري (يدعم `*` و`prefix:*`).
+ */
+export function intersectScopes(ceiling: Iterable<string>, storeCeiling: Set<string>): Set<string> {
+  const out = new Set<string>();
+  for (const scope of ceiling) {
+    if (typeof scope === "string" && scope.trim() && isScopeAllowed(scope.trim(), storeCeiling)) {
+      out.add(scope.trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * @param ceiling نطاقات الفاعل (توكن مُدار مثلًا). عند تمريرها يصبح المسموح
+ *   **تقاطعها** مع سقف المتجر `CELIA_ALLOWED_SCOPES` — فلا يرفع توكنٌ سقفَ
+ *   المتجر، ولا يمنح المتجرُ توكنًا ما لم يحمله. غيابها = سلوك اليوم حرفيًا.
+ */
+export function createCeliaScopeGuard(ceiling?: Iterable<string>): CeliaScopeGuard {
   const enabled = isCeliaAgentEnabled();
-  const allowed = celiaAllowedScopes();
+  const storeCeiling = celiaAllowedScopes();
+  const scoped = ceiling !== undefined;
+  const allowed = scoped ? intersectScopes(ceiling as Iterable<string>, storeCeiling) : storeCeiling;
 
   return {
     enabled,
@@ -51,7 +72,12 @@ export function createCeliaScopeGuard(): CeliaScopeGuard {
         throw Errors.forbidden("Celia غير مفعّل (ENABLE_CELIA_AGENT).");
       }
       if (allowed.size === 0) {
-        throw Errors.forbidden("لا نطاقات مسموحة لـ Celia (CELIA_ALLOWED_SCOPES).");
+        // رسالة دقيقة: سقف متجري فارغ ≠ توكن لا يحمل نطاقًا فعّالًا.
+        throw Errors.forbidden(
+          scoped
+            ? "نطاقات هذا التوكن لا تتقاطع مع سقف المتجر — لا صلاحية فعلية."
+            : "لا نطاقات مسموحة لـ Celia (CELIA_ALLOWED_SCOPES)."
+        );
       }
       if (!isScopeAllowed(scope, allowed)) {
         // لا نكشف قائمة النطاقات في رسالة العميل — تُسجَّل فقط داخليًا إن لزم.
@@ -77,9 +103,10 @@ export function createCeliaScopeGuard(): CeliaScopeGuard {
  */
 export function requireCeliaScope(
   _request: Request,
-  scope: CeliaScope
+  scope: CeliaScope,
+  ceiling?: Iterable<string>
 ): CeliaScopeGuard {
-  const guard = createCeliaScopeGuard();
+  const guard = createCeliaScopeGuard(ceiling);
   if (!guard.enabled) {
     // 404 موحّد لا يكشف وجود النقطة — نفس نمط `/api/admin/agents`.
     throw Errors.notFound("غير موجود");

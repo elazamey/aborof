@@ -38,6 +38,14 @@ export function isCeliaAgentActive(): boolean {
  */
 export const CELIA_ALLOWED_SCOPES_ENV = "CELIA_ALLOWED_SCOPES" as const;
 
+/**
+ * كتالوج النطاقات المعروفة.
+ *
+ * تنبيه مُصلَّح: `chat:write` كان يُفرض فعليًا على `/api/celia/chat` بينما هو
+ * غائب عن هذه القائمة — ثغرة كتالوج اكتُشفت أثناء تصميم CeliaTokenManager،
+ * وصارت مُدرجة هنا ليكون الكتالوج مطابقًا للفرض (تسمح به مصفوفة النطاقات
+ * وتتحقق منه بوابة الكتالوج ثنائية الاتجاه).
+ */
 export const CELIA_KNOWN_SCOPES = [
   "products:read",
   "products:write",
@@ -46,10 +54,22 @@ export const CELIA_KNOWN_SCOPES = [
   "faq:read",
   "faq:write",
   "chat:read",
+  "chat:write",
   "admin:read",
   "mcp:read",
   "mcp:write",
 ] as const;
+
+/**
+ * علم توكنات الوكيل المُدارة (CeliaTokenManager).
+ * مغلق افتراضيًا: غيابه يُبقي `CELIA_AGENT_TOKEN` (توكن البيئة) يعمل حرفيًا.
+ * القيمة الوحيدة المقبولة لتفعيله هي النص "true" حرفيًا.
+ */
+export const CELIA_TOKENS_FLAG = "ENABLE_CELIA_TOKENS" as const;
+
+export function isCeliaTokensEnabled(): boolean {
+  return process.env[CELIA_TOKENS_FLAG] === "true";
+}
 
 export type CeliaScope = (typeof CELIA_KNOWN_SCOPES)[number] | (string & {});
 

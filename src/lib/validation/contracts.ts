@@ -241,6 +241,40 @@ export const adminLoginRbacContract = z
   })
   .strict();
 
+/**
+ * عقود توكنات سيليا المُدارة (CeliaTokenManager).
+ *
+ * النطاقات تُقيَّد هنا بالشكل فقط (نص قصير لاتيني)، والتحقق من **العضوية** في
+ * كتالوج `CELIA_KNOWN_SCOPES` يقع في طبقة المخزن (`src/lib/celia/tokens.ts`)
+ * عمدًا: العقود لا تستورد إعداد Celia (وحدة تُقرأ في الخادم) كي تبقى قابلة
+ * للاستخدام في أي سياق بلا سحب بيئة إلى الطبقة العليا.
+ */
+export const celiaTokenCreateContract = z
+  .object({
+    token: z
+      .object({
+        label: trimmed(2, 60),
+        scopes: z
+          .array(z.string().trim().regex(/^[a-z]+:[a-z]+$/, "صيغة النطاق غير صحيحة").max(40))
+          .min(1, "اختر نطاقًا واحدًا على الأقل")
+          .max(20, "عدد النطاقات يتجاوز الحد"),
+        /** 0 = بلا انتهاء (الافتراضي). */
+        expiresInDays: z.coerce.number().int().min(0).max(365).optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const celiaTokenActionContract = z
+  .object({
+    id: z.string().trim().regex(/^ct_[0-9a-f]{6,32}$/, "معرّف توكن غير صالح"),
+    action: z.enum(["revoke", "rotate"]),
+  })
+  .strict();
+
+export type CeliaTokenCreateInput = z.infer<typeof celiaTokenCreateContract>;
+export type CeliaTokenActionInput = z.infer<typeof celiaTokenActionContract>;
+
 export type RbacRoleCreateInput = z.infer<typeof rbacRoleCreateContract>;
 export type RbacRoleUpdateInput = z.infer<typeof rbacRoleUpdateContract>;
 export type RbacUserCreateInput = z.infer<typeof rbacUserCreateContract>;

@@ -28,6 +28,8 @@
 | `rbac:write` | تعديل الأدوار والمستخدمين | `POST/PATCH/DELETE /api/admin/rbac/{roles,users}` |
 | `audit:read` | سجل التدقيق | `GET /api/admin/rbac/audit` |
 | `celia:use` | سيليا من جلسة الإدارة | `POST /api/celia/chat` |
+| `celia:read` | عرض توكنات وكلاء سيليا | `GET /api/admin/celia/tokens` |
+| `celia:manage` | إنشاء/إلغاء/تدوير توكنات سيليا | `POST/PATCH /api/admin/celia/tokens` |
 
 الرمز `*` (كل الصلاحيات) **محصور في الدور المدمج `owner`**: العقد يرفضه في أي
 دور مخصص، و`normalizeCustomPermissions` يرفضه مرة ثانية في المخزن، والأدوار

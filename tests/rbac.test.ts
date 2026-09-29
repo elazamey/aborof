@@ -84,7 +84,7 @@ async function body(res: Response) {
 
 describe("كتالوج الصلاحيات ونموذج الأدوار", () => {
   test("كل صلاحية لها تسمية عربية ونقطة فرض حقيقية ومجموعة عرض واحدة", () => {
-    assert.equal(RBAC_PERMISSIONS.length, 10);
+    assert.equal(RBAC_PERMISSIONS.length, 12, "الكتالوج: 10 من M1 + celia:read/celia:manage لتوكنات سيليا");
     assert.equal(new Set(RBAC_PERMISSIONS).size, RBAC_PERMISSIONS.length, "لا تكرار في الكتالوج");
     for (const permission of RBAC_PERMISSIONS) {
       assert.ok(PERMISSION_LABELS[permission], `تسمية مفقودة: ${permission}`);

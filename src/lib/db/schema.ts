@@ -375,6 +375,66 @@ export const rbacUsers = sqliteTable(
 );
 
 // ---------------------------------------------------------------------------
+// celia_tokens — توكنات وكيل مُدارة (هجرة 0004)
+//
+// الهجرة المرجعية هي المصدر الوحيد للحقيقة (القيود والفهارس تُنشأ هناك)، وهذا
+// التمثيل لأمان الأنواع والاستعلامات فقط. أبرز ما يجب أن يبقى مطابقًا:
+//  - `token_hash` فريد وبطول 64 ونص hex صغير: النص الصريح لا يُخزَّن إطلاقًا.
+//  - `token_prefix` للعرض فقط، و`scopes` مصفوفة JSON (الكتالوج في الكود).
+//  - الإلغاء تغيير حالة (`status`) مع `revoked_at`/`revoked_by` — لا حذف.
+// ---------------------------------------------------------------------------
+export const celiaTokens = sqliteTable(
+  "celia_tokens",
+  {
+    id: text("id").primaryKey(),
+    label: text("label").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    scopes: text("scopes").notNull().default("[]"),
+    status: text("status").notNull().default("active"),
+    createdBy: text("created_by").notNull(),
+    useCount: integer("use_count").notNull().default(0),
+    expiresAt: integer("expires_at").notNull().default(0),
+    lastUsedAt: text("last_used_at"),
+    revokedAt: text("revoked_at"),
+    revokedBy: text("revoked_by"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    labelCheck: check(
+      "celia_tokens_label_check",
+      sql`length(trim(${table.label})) >= 2 AND length(${table.label}) <= 60`
+    ),
+    idCheck: check(
+      "celia_tokens_id_check",
+      sql`${table.id} GLOB 'ct_[0-9a-f]*' AND length(${table.id}) BETWEEN 6 AND 40`
+    ),
+    prefixCheck: check(
+      "celia_tokens_prefix_check",
+      sql`${table.tokenPrefix} GLOB 'cel_*' AND length(${table.tokenPrefix}) BETWEEN 12 AND 20`
+    ),
+    hashCheck: check(
+      "celia_tokens_hash_check",
+      sql`length(${table.tokenHash}) = 64 AND ${table.tokenHash} GLOB '[0-9a-f]*'`
+    ),
+    scopesCheck: check(
+      "celia_tokens_scopes_check",
+      sql`length(${table.scopes}) <= 2000 AND json_valid(${table.scopes}) AND json_type(${table.scopes}) = 'array'`
+    ),
+    statusCheck: check("celia_tokens_status_check", sql`${table.status} IN ('active', 'revoked')`),
+    useCountCheck: check("celia_tokens_use_count_check", sql`${table.useCount} >= 0`),
+    expiresAtCheck: check("celia_tokens_expires_at_check", sql`${table.expiresAt} >= 0`),
+    statusIdx: index("idx_celia_tokens_status").on(table.status),
+    createdByIdx: index("idx_celia_tokens_created_by").on(table.createdBy),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // schema_migrations — سجل الهجرات الحتمي
 // ---------------------------------------------------------------------------
 export const schemaMigrations = sqliteTable("schema_migrations", {
@@ -399,6 +459,7 @@ export const schema = {
   rateLimitCounters,
   rbacRoles,
   rbacUsers,
+  celiaTokens,
   schemaMigrations,
 } as const;
 
@@ -416,6 +477,8 @@ export type SchemaMigrationRow = typeof schemaMigrations.$inferSelect;
 export type RbacRoleRow = typeof rbacRoles.$inferSelect;
 export type NewRbacRoleRow = typeof rbacRoles.$inferInsert;
 export type RbacUserRow = typeof rbacUsers.$inferSelect;
+export type CeliaTokenRow = typeof celiaTokens.$inferSelect;
+export type NewCeliaTokenRow = typeof celiaTokens.$inferInsert;
 export type NewRbacUserRow = typeof rbacUsers.$inferInsert;
 
 // FTS5 — يُدار عبر الهجرة 0002 فقط (VIRTUAL TABLE). لا يُمثَّل في Drizzle

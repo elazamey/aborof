@@ -358,13 +358,24 @@ export function sanitizeAuditDetails(details: Record<string, unknown>): Record<s
   return out;
 }
 
-function auditStatement(entry: {
+/**
+ * منشئ سطر التدقيق — مُصدَّر ليُعاد استخدامه من الطبقات التي تكتب تدقيقها داخل
+ * معاملاتها (مثل توكنات سيليا). التصدير مقصود بدل نسخة موازية: التنقية
+ * (`sanitizeAuditDetails`) والقصّ والحدود تبقى في مكان واحد.
+ */
+export function auditInsertStatement(entry: AuditEntry): { sql: string; args: (string | number)[] } {
+  return auditStatement(entry);
+}
+
+export interface AuditEntry {
   action: string;
   entity: string;
   entityId: string;
   details: Record<string, unknown>;
   actor: string;
-}) {
+}
+
+function auditStatement(entry: AuditEntry) {
   const details = JSON.stringify(sanitizeAuditDetails(entry.details)).slice(0, 4000);
   return {
     sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details,actor) VALUES (?,?,?,?,?)",
