@@ -438,8 +438,11 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
       'for a in "$@"; do case "$a" in https://*) url="$a" ;; esac; done',
       'case "$url" in',
       `  */auth/tokens*) printf '%s\\n%s' "{\\"jwt\\":\\"\${FAKE_JWT:-${MINTED_JWT}}\\"}" 200 ;;`,
+      // مؤسسة بلا قواعد (مسح تعدد المؤسسات) قبل القالب العام.
+      `  */organizations/acme/databases) printf '%s\\n%s' '{"databases":[]}' 200 ;;`,
       `  */databases) printf '%s\\n%s' '{"databases":[{"Name":"rofyd","Hostname":"rofyd-elazamey.turso.io"}]}' 200 ;;`,
-      `  */v1/organizations) printf '%s\\n%s' '{"organizations":[{"slug":"elazamey"}]}' 200 ;;`,
+      // عقد المنصّة الحقيقي: مصفوفة سادة [{slug,…}] — FAKE_ORGS لسيناريو التعدد.
+      `  */v1/organizations) orgs="$FAKE_ORGS"; [ -z "$orgs" ] && orgs='[{"slug":"elazamey"}]'; printf '%s\\n%s' "$orgs" 200 ;;`,
       `  *) printf '%s\\n%s' '{}' 404 ;;`,
       "esac",
       "",
@@ -538,6 +541,33 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
       const handoff = log.split("\n").filter((l) => /\/(gh|vercel) /.test(l)).join("\n");
       assert.doesNotMatch(handoff, /platform-fake-token/);
       assert.match(res.stdout, /حُدِّث السرّ/);
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  test("تعدد المؤسسات (personal+فريق): يمسح القراءة ويختر التي تحوي القاعدة بلا طباعة اسم", () => {
+    const { binDir, logFile } = makeFakes();
+    try {
+      const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--dry-run", "--skip-verify"], {
+        encoding: "utf8",
+        input: "",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TURSO_PLATFORM_TOKEN: "platform-fake-token",
+          FAKE_ORGS: '[{"slug":"acme","type":"personal"},{"slug":"elazamey","type":"team"}]',
+        },
+      });
+      const out = res.stdout + res.stderr;
+      assert.equal(res.status, 0, out);
+      assert.match(res.stdout, /اختيرت مؤسسة واحدة تحوي قاعدة \(من 2 مؤسسة\)/);
+      // المسح قراءة فقط: مؤسسة بلا قواعد تُستبعد ثم يُعاد استخدام جسم المؤسسة ذات القاعدة.
+      const log = fs.readFileSync(logFile, "utf8");
+      assert.match(log, /organizations\/acme\/databases/);
+      assert.match(log, /organizations\/elazamey\/databases/);
+      assert.doesNotMatch(out, /acme/, "لا اسم مؤسسة في المخرج");
+      assert.doesNotMatch(out, /elazamey/, "لا اسم مؤسسة في المخرج");
     } finally {
       fs.rmSync(binDir, { recursive: true, force: true });
     }

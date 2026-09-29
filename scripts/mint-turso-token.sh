@@ -98,36 +98,73 @@ api() { # $1=method · $2=url · $3=data? — يعيد الحالة في API_STA
 mask() { local h="$1"; if [ "${#h}" -gt 12 ]; then printf '%s…%s' "${h:0:3}" "${h: -9}"; else printf '%s…' "${h:0:3}"; fi; }
 
 # ───────────────────────── Platform API: المؤسسة والقاعدة والمضيف ─────────────
+# عقد المنصّة الحقيقي (docs.turso.tech/api-reference/organizations/list): الاستجابة
+# **مصفوفة سادة** [{name,slug,type,…}] لا كائن — ولكل حساب مؤسسة personal إضافة إلى
+# فرقه؛ فمع أكثر من مؤسسة نمسح القراءة (GET فقط) ونختار التي تحوي قواعد، والتعادل
+# أو الفراغ = طلب صريح بـ TURSO_ORG (ولا يُطبع أي اسم مؤسسة).
 ORG="${TURSO_ORG:-}"
+DB_JSON=""
 api GET "$API_BASE/v1/organizations"
 case "$API_STATUS" in
-  200)
-    if [ -z "$ORG" ]; then
-      ORG="$(printf '%s' "$API_BODY" | jq -r '[.organizations[]? | (.slug // .organization.slug // .name // .organization.name // empty)] | if length == 1 then .[0] else empty end' 2>/dev/null || true)"
-    fi
-    ;;
+  200) ;;
   401|403) fail "توكن المنصّة مرفوض على المنصّة نفسها (HTTP ${API_STATUS}) — أنشئ توكنًا جديدًا: Account → API tokens." ;;
   *) fail "استجابة غير متوقعة من المنصّة (HTTP ${API_STATUS}) — تحقّق من الشبكة أو TURSO_API_BASE." ;;
 esac
-[ -n "$ORG" ] || fail "تعذّر استنتاج اسم المؤسسة (HTTP 200) — شغّل بـ TURSO_ORG=<اسم>."
+ORG_LIST="$(printf '%s' "$API_BODY" | jq -r 'if type=="array" then .[] else (.organizations // [])[] end | select(type=="object") | (.slug // .name // empty)' 2>/dev/null || true)"
+ORG_COUNT=0
+if [ -n "$ORG_LIST" ]; then
+  ORG_COUNT="$(printf '%s\n' "$ORG_LIST" | grep -c . || true)"
+fi
+if [ -z "$ORG" ] && [ "$ORG_COUNT" = 1 ]; then
+  ORG="$(printf '%s\n' "$ORG_LIST" | head -n1)"
+fi
+if [ -z "$ORG" ] && [ "$ORG_COUNT" -gt 1 ]; then
+  FOUND=""
+  FOUND_N=0
+  while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
+    api GET "$API_BASE/v1/organizations/$cand/databases"
+    [ "$API_STATUS" = 200 ] || continue
+    n="$(printf '%s' "$API_BODY" | jq '.databases | length' 2>/dev/null || echo 0)"
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    if [ "$n" -gt 0 ]; then
+      FOUND_N=$((FOUND_N + 1))
+      FOUND="$cand"
+      DB_JSON="$API_BODY"
+    fi
+  done <<< "$ORG_LIST"
+  if [ "$FOUND_N" = 1 ]; then
+    ORG="$FOUND"
+    echo "✅ اختيرت مؤسسة واحدة تحوي قاعدة (من ${ORG_COUNT} مؤسسة) — قراءة فقط بلا طباعة أي اسم."
+  elif [ "$FOUND_N" = 0 ]; then
+    fail "لا قاعدة في أي من ${ORG_COUNT} مؤسسة — حدّد TURSO_ORG=<اسم>."
+  else
+    fail "توجد ${FOUND_N} مؤسسات تحوي قواعد — حدّد TURSO_ORG=<اسم> (لا يُطبع أي اسم هنا)."
+  fi
+fi
+[ -n "$ORG" ] || fail "تعذّر استنتاج اسم المؤسسة (HTTP 200 · عددها ${ORG_COUNT}) — شغّل بـ TURSO_ORG=<اسم>."
 echo "✅ GATE_PLATFORM=PASS · المؤسسة: $(mask "$ORG") (طول ${#ORG})"
 
-api GET "$API_BASE/v1/organizations/$ORG/databases"
-[ "$API_STATUS" = 200 ] || fail "جرد القاعدات مرفوض (HTTP ${API_STATUS})."
-DB_COUNT="$(printf '%s' "$API_BODY" | jq '.databases | length' 2>/dev/null || echo 0)"
+# جرد القاعدات — جسم المسح أعلاه يُعاد استخدامه إن وُجد (لا نداء مكرر).
+if [ -z "$DB_JSON" ]; then
+  api GET "$API_BASE/v1/organizations/$ORG/databases"
+  [ "$API_STATUS" = 200 ] || fail "جرد القاعدات مرفوض (HTTP ${API_STATUS}) — تحقّق من TURSO_ORG أو ألغِه إن كانت مؤسستك واحدة."
+  DB_JSON="$API_BODY"
+fi
+DB_COUNT="$(printf '%s' "$DB_JSON" | jq '.databases | length' 2>/dev/null || echo 0)"
 [ "${DB_COUNT:-0}" -gt 0 ] || fail "لا توجد قاعدات في هذه المؤسسة."
 
 DB="${TURSO_DB:-}"
 if [ -z "$DB" ]; then
   if [ "$DB_COUNT" = 1 ]; then
-    DB="$(printf '%s' "$API_BODY" | jq -r '.databases[0] | (.Name // .name // .db_name // empty)' 2>/dev/null || true)"
+    DB="$(printf '%s' "$DB_JSON" | jq -r '.databases[0] | (.Name // .name // .db_name // empty)' 2>/dev/null || true)"
   else
     fail "توجد ${DB_COUNT} قاعدة — حدّدها بـ TURSO_DB=<اسم> (لا يُطبع أي اسم هنا)."
   fi
 fi
 [ -n "$DB" ] || fail "تعذّر قراءة اسم القاعدة — شغّل بـ TURSO_DB=<اسم>."
 
-HOSTNAME="$(printf '%s' "$API_BODY" | jq -r --arg db "$DB" '.databases[] | select((.Name // .name // .db_name) == $db) | (.Hostname // .hostname // empty)' 2>/dev/null | head -n1 || true)"
+HOSTNAME="$(printf '%s' "$DB_JSON" | jq -r --arg db "$DB" '.databases[] | select((.Name // .name // .db_name) == $db) | (.Hostname // .hostname // empty)' 2>/dev/null | head -n1 || true)"
 [ -n "$HOSTNAME" ] || HOSTNAME="${DB}-${ORG}.turso.io"
 CONNECTION_URL="libsql://${HOSTNAME}"
 echo "✅ اُشتق رابط الاتصال من سجل المنصّة (طول ${#CONNECTION_URL}) · المضيف: $(mask "$HOSTNAME")"
