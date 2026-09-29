@@ -20,9 +20,13 @@
 import { createClient } from "@libsql/client";
 import { expectedMigrations, redact } from "./lib/migration-checksums.mjs";
 import {
+  connectionUrlFromClaims,
   dashboardUrlToConnectionCandidates,
+  decodeTokenClaims,
   describeDatabaseUrl,
+  formatTimespan,
   interpretProbeStatus,
+  maskHost,
   originForHttpProbe,
   parseAuthValue,
 } from "./lib/db-url.mjs";
@@ -55,8 +59,8 @@ if (!local && !authToken) {
 }
 
 const rows = [];
-function record(id, label, ok, detail) {
-  rows.push({ id, label, ok, detail });
+function record(id, label, ok, detail, code = null) {
+  rows.push({ id, label, ok, detail, code });
 }
 
 /** تصنيف خطأ محاولة اتصال — تصنيف فقط، بلا طباعة قيمة الرابط ولا الرمز. */
@@ -138,6 +142,14 @@ async function attemptDerivedConnection() {
     pairs.push({ key, candidateUrl, token, label });
   };
   if (authParts.url && authParts.token) add(authParts.url, authParts.token, "زوج مستخرج من قيمة حقل الرمز");
+  // المصدر الثاني المستقل: ادعاءات الرمز نفسه (db/org) — يعمل حين يكون حقل
+  // الرابط معطوبًا لكن الرمز سليمًا، وهو الزوج المرجعي إن اختلف مع مسار اللوحة.
+  const claims = decodeTokenClaims(authParts.token ?? "");
+  if (claims.ok) {
+    for (const candidateUrl of connectionUrlFromClaims(claims)) {
+      add(candidateUrl, authParts.token, "رابط مشتق من ادعاءات الرمز (db/org)");
+    }
+  }
   for (const candidateUrl of dashboardUrlToConnectionCandidates(url)) {
     if (authParts.token) add(candidateUrl, authParts.token, "رابط مشتق من مسار اللوحة + رمز مستخرج من حقل الرمز");
     add(candidateUrl, authToken, "رابط مشتق من مسار اللوحة + الرمز المضبوط");
@@ -173,18 +185,85 @@ async function attemptDerivedConnection() {
   };
 }
 
+/**
+ * صف ادعاءات الرمز — يُسجَّل دائمًا للقواعد غير المحلية (بديل صف صيغة الرمز
+ * هنا: الصيغة مقبولة والسؤال هو «هل هذه القيمة تصلح الآن ولمن؟»).
+ * العقد: لا يُطبع أي جزء من القيمة — المخرجات صيغة alg، وصلاحية exp بوصف
+ * زمني، وادّعاءان db/org مُقنَّعان بالقناع نفسه (أول 3 أحرف + …)، وحكم مطابقة
+ * المضيف. فكّ الترميز على مقطع الادّعاءات نص مكشوف أصلًا في JWT — والتوقيع
+ * لا يُمسّ.
+ */
+function recordTokenClaims() {
+  if (local) return;
+  const authParts = parseAuthValue(authToken);
+  const token = authParts.token;
+  if (!token) return; // ليست بصيغة JWT أصلًا — صف conn-token-shape هو صاحب الحكم.
+  const claims = decodeTokenClaims(token);
+  if (!claims.ok) {
+    record(
+      "conn-token-claims",
+      "ادّعاءات الرمز (exp/db/org)",
+      false,
+      "بصيغة JWT لكن تعذّر فك محتواها — الرمز تالف أو ليس JWT · أنشئ توكنًا جديدًا Full access",
+      "TURSO_TOKEN_UNREADABLE"
+    );
+    return;
+  }
+  const masked = (value) => (value ? maskHost(value) : "—");
+  if (claims.expired === true) {
+    record(
+      "conn-token-claims",
+      "ادّعاءات الرمز (exp/db/org)",
+      false,
+      `منتهي الصلاحية منذ ${formatTimespan(claims.secondsLeft)} · alg ${claims.alg ?? "—"} · db ${masked(claims.db)} · org ${masked(claims.org)} — جدّد التوكن (turso db tokens create) ثم طبّقه بـ apply-turso-secrets.sh`,
+      "TURSO_TOKEN_EXPIRED"
+    );
+    return;
+  }
+  // مطابقة المضيف: اشتقاق <db>-<org>.turso.io من الادّعاءات ومقارنته بالمضيف
+  // المضبوط — فقط حكمَي «مطابق»/«لا يطابق» بلا طباعة أي منهما كاملًا.
+  let matchNote = "بلا ادّعاءي db/org في الرمز — لا اشتقاق ممكن";
+  const derived = connectionUrlFromClaims(claims);
+  if (derived.length) {
+    let host = "";
+    try {
+      host = new URL(String(url).replace(/^(libsql|turso|wss?):\/\//i, "https://")).hostname.toLowerCase();
+    } catch {
+      host = "";
+    }
+    const derivedHosts = derived.map((c) =>
+      c.replace(/^libsql:\/\//i, "https://").replace(/\/.*$/, "").toLowerCase()
+    );
+    matchNote = derivedHosts.includes(host)
+      ? "المضيف المضبوط مطابق لادّعاءات الرمز"
+      : `⚠ المضيف المضبوط لا يطابق ادعاءات الرمز — الزوج المشتق يُجرَّب في صف conn-derived`;
+  }
+  record(
+    "conn-token-claims",
+    "ادّعاءات الرمز (exp/db/org)",
+    true,
+    `${claims.expired === null ? "بلا ادّعاء exp (صلاحية غير محددة)" : `صالح — ينتهي خلال ${formatTimespan(claims.secondsLeft)}`} · alg ${claims.alg ?? "—"} · db ${masked(claims.db)} · org ${masked(claims.org)} · ${matchNote}`
+  );
+}
+
 /** يطبع الجدول (أو JSON) مرة واحدة — يستدعيه المسار العادي ومسار فشل الاتصال. */
 function render() {
   const failed = rows.filter((r) => !r.ok);
+  // الحكم الختامي الصريح للبوابة — يقرأه البشر والآلات على حد سواء
+  // (نظيره في smoke-production: SMOKE: PASS|FAIL).
+  const verdict = failed.length === 0 ? "PASS" : "BLOCKED";
   if (asJson) {
-    console.log(JSON.stringify({ ok: failed.length === 0, local, rows }, null, 2));
+    console.log(JSON.stringify({ ok: failed.length === 0, verdict, local, rows }, null, 2));
     return;
   }
   console.log(`# فحص Turso — ${local ? "قاعدة ملف محلي" : "قاعدة الإنتاج"}\n`);
   console.log("| # | الفحص | النتيجة | التفصيل |");
   console.log("|---|---|---|---|");
   for (const row of rows) {
-    console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${row.detail.replace(/\|/g, "\\|")} |`);
+    // الكود الثابت (مثل [TURSO_TOKEN_EXPIRED]) قابل للبحث الآلي ويظهر على
+    // الصفوف الحمراء فقط — والتفصيل العربي يبقى الحكم المقروء للبشر.
+    const detail = row.ok || !row.code ? row.detail : `${row.detail} [${row.code}]`;
+    console.log(`| ${row.id} | ${row.label} | ${row.ok ? "✅" : "❌"} | ${detail.replace(/\|/g, "\\|")} |`);
   }
   console.log(
     failed.length === 0
@@ -194,6 +273,7 @@ function render() {
   if (!local) {
     console.log("\nملاحظة: الفحص للقراءة فقط ولم يُطبَّق أي شيء. التطبيق نفسه يشغّل الهجرات عند أول طلب (`ensureSchema`).");
   }
+  console.log(`FINAL: ${verdict}`);
 }
 
 let db = createClient({ url, authToken });
@@ -245,6 +325,25 @@ try {
     if (!connected) {
       record("conn", "الاتصال بقاعدة البيانات (SELECT 1)", false, [redact(String(error?.message ?? error), secrets), ...details].join(" · "));
     }
+  }
+
+  // 1.5) ادعاءات الرمز (غير محلي دائمًا): الـ 401 لا يُترجم إلى علاج واحد —
+  // «منتهٍ» و«بصمة قاعدة أخرى» و«الرمز لم يصل» ثلاثة علاجات مختلفة، ومقطع
+  // الادّعاءات يحسم اثنتين منها **قبل** أي اعتماد على نص الخادم.
+  recordTokenClaims();
+
+  // 1.6) السبب الخام الموثّق: نفس الطلب لكن **مع الرمز المضبوط** — فحص الأصل
+  // في diagnoseEndpoint يأتي بلا ترويسة فيعطي 401 دومًا (empty JWT) ولا يثبت
+  // شيئًا عن الرمز نفسه؛ هذا الصف يُظهر سبب ردّ المصادقة الفعلي (منتهٍ/بصمة/…).
+  if (!connected && !local) {
+    const cause = await probeHttpEndpoint(url, authToken, secrets);
+    record(
+      "conn-cause",
+      "السبب الخام من الخادم (طلب موثّق بالرمز المضبوط)",
+      cause.ok,
+      cause.ok ? `${cause.verdict} — لكن عميل libsql فشل على الزوج نفسه؛ راجع نص خطأ صف conn` : cause.verdict,
+      cause.ok ? null : (cause.code ?? null)
+    );
   }
 
   if (!connected) {

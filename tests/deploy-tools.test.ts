@@ -9,8 +9,11 @@ import path from "node:path";
 import { runMigrations, MIGRATIONS } from "../src/lib/db/migrate";
 import { expectedMigrations, migrationChecksum, redact } from "../scripts/lib/migration-checksums.mjs";
 import {
+  connectionUrlFromClaims,
   dashboardUrlToConnectionCandidates,
+  decodeTokenClaims,
   describeDatabaseUrl,
+  formatTimespan,
   interpretProbeStatus,
   originForHttpProbe,
   parseAuthValue,
@@ -134,6 +137,81 @@ describe("scripts/lib/db-url — تشخيص رابط القاعدة بلا كش�
     assert.match(interpretProbeStatus(500).verdict, /استجابة غير متوقعة/);
   });
 
+  test("سبب 401 الخام يُترجم إلى أربعة علاجات مختلفة — وأمتنعها مكتوبًا كأكواد ثابتة", () => {
+    // سبب الخادم هو الفارق بين: جدد الرمز · رمز قاعدة أخرى · القيمة لم تصل.
+    const expired = interpretProbeStatus(401, '{"error":"JWT error: token is expired by 100 seconds"}');
+    assert.equal(expired.code, "TURSO_TOKEN_EXPIRED");
+    assert.match(expired.verdict, /الرمز مرفوض/);
+    assert.match(expired.verdict, /منتهي الصلاحية/);
+    assert.match(expired.verdict, /apply-turso-secrets/);
+
+    const empty = interpretProbeStatus(401, "unauthorized access attempt on database: empty JWT token");
+    assert.equal(empty.code, "TURSO_AUTH_401_EMPTY_JWT");
+    assert.match(empty.verdict, /لم يصل للخادم/);
+
+    const signature = interpretProbeStatus(401, '{"error":"JWT error: signature verification failed"}');
+    assert.equal(signature.code, "TURSO_TOKEN_SIGNATURE");
+    assert.match(signature.verdict, /بصمة/);
+
+    const generic = interpretProbeStatus(401, '{"error":"custom reason"}');
+    assert.equal(generic.code, "TURSO_AUTH_401");
+    assert.match(generic.verdict, /سبب الخادم: \{"error":"custom reason"\}/);
+
+    // بلا جسم: النسخة العامة كما قبل — اختبارات الترجمة أعلاه تبقى صامدة.
+    assert.equal(interpretProbeStatus(401).code, "TURSO_AUTH_401");
+    assert.equal(interpretProbeStatus(403).code, "TURSO_FORBIDDEN");
+    assert.equal(interpretProbeStatus(404).code, "TURSO_DB_NOT_FOUND");
+  });
+
+  test("فكّ ادعاءات الرمز: الصلاحية والادّعاءات فقط — بلا أي جزء من القيمة", () => {
+    const sign = "MEUCIQDx-fake-signature-for-tests-abcdefgh";
+    const jwt = (payload: object, header = { alg: "ES256", typ: "JWT" }) =>
+      `${Buffer.from(JSON.stringify(header)).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.${sign}`;
+
+    const future = decodeTokenClaims(jwt({ exp: 1893456000, iat: 1790000000, db: "unit-test", org: "example" }));
+    assert.equal(future.ok, true);
+    assert.equal(future.alg, "ES256");
+    assert.equal(future.db, "unit-test");
+    assert.equal(future.org, "example");
+    assert.equal(future.expired, false);
+    assert.ok(typeof future.secondsLeft === "number" && future.secondsLeft > 0);
+    // لا شيء من مقطع التوقيع (ولا من أي مقطع) يعود في المخرجات:
+    assert.ok(!JSON.stringify(future).includes(sign));
+
+    const past = decodeTokenClaims(jwt({ exp: 1700000000, db: "rofyd", org: "elazamey" }));
+    assert.equal(past.ok, true);
+    assert.equal(past.expired, true);
+    assert.ok((past.secondsLeft ?? 0) < 0);
+
+    const timeless = decodeTokenClaims(jwt({ db: "rofyd", org: "elazamey" }));
+    assert.equal(timeless.expired, null, "غياب exp = صلاحية غير محددة لا انتهاء");
+
+    assert.equal(decodeTokenClaims("eyJhbGciOiJIUzI1NiJ9.a.b").ok, false, "مقطع ادّعاءات تالف يُرفض");
+    assert.equal(decodeTokenClaims("").ok, false);
+    assert.equal(decodeTokenClaims("libsql://x.turso.io").ok, false);
+  });
+
+  test("اشتقاق الرابط من الادّعاءات بنفس قواعد اشتقاق اللوحة — وترطيب سليم", () => {
+    assert.deepEqual(connectionUrlFromClaims({ db: "unit-test", org: "example" }), [
+      "libsql://unit-test-example.turso.io",
+      "libsql://example-unit-test.turso.io",
+    ]);
+    assert.deepEqual(connectionUrlFromClaims({ db: "Store", org: "store" }), ["libsql://store-store.turso.io"]);
+    assert.deepEqual(connectionUrlFromClaims({ db: null, org: "example" }), []);
+    assert.deepEqual(connectionUrlFromClaims(null), []);
+    // تنقية slug: ما لا يُصلح للمضيف لا يدخل المرشّحات أصلًا.
+    assert.deepEqual(connectionUrlFromClaims({ db: "../etc", org: "example" }), [
+      "libsql://etc-example.turso.io",
+      "libsql://example-etc.turso.io",
+    ]);
+  });
+
+  test("وصف المدة الزمنية عربي بلا قيم خام", () => {
+    assert.equal(formatTimespan(30), "30 ثانية");
+    assert.equal(formatTimespan(-4000), "1 ساعة");
+    assert.equal(formatTimespan(86400 * 3), "3 يوم");
+  });
+
   test("التشخيص يذكر طول المضيف وشكل المقاطع بالأطوال فقط — لا أسماء ولا قيم", () => {
     const shape = describeDatabaseUrl("https://app.turso.tech/elazamey/databases/aborof");
     assert.equal(shape.hostLength, 14);
@@ -163,8 +241,38 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
     assert.match(res.stdout, /\| conn \|/);
     assert.match(res.stdout, /conn-token-shape/);
     assert.match(res.stdout, /رابط في حقل الرمز/);
+    // صفّا التشخيص الجديدان: ادعاءات الرمز (فكّ المقطع الثاني) والسبب الخام
+    // الموثّق بالرمز — كلاهما يظهران بلا أي جزء من القيمة، ويُختم الحكم صراحةً.
+    assert.match(res.stdout, /conn-token-claims/);
+    assert.match(res.stdout, /conn-cause/);
+    assert.match(res.stdout, /FINAL: BLOCKED/);
     assert.doesNotMatch(res.stdout + res.stderr, /is not defined/);
     assert.doesNotMatch(res.stdout, /example-db-example/, "لا يُطبع الرابط ولا الرمز");
+  });
+
+  test("رمز سليم الشكل على قاعدة بعيدة: الادّعاءات تُقرأ والحكم يُختَم BLOCKED — بلا تسريب", () => {
+    // نفس بنية الإنتاج الحالية (JWT صالح الشكل في حقل الرمز) — الاتصال يفشل
+    // بلا شبكة/بلا قاعدة، لكن صف conn-token-claims يجب أن يقرأ الادّعاءات
+    // ويفصل «صالح زمنيًا» عن «انتهى»، ويُصدر FINAL: BLOCKED آليًا.
+    const header = Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url");
+    const payload = Buffer.from(
+      JSON.stringify({ exp: 1893456000, iat: 1790000000, db: "unit-test", org: "example" })
+    ).toString("base64url");
+    const sign = "MEUCIQDx-fake-signature-for-tests-abcdefgh";
+    const token = `${header}.${payload}.${sign}`;
+    const env = {
+      ...process.env,
+      TURSO_DATABASE_URL: "libsql://unit-test-example.turso.io",
+      TURSO_AUTH_TOKEN: token,
+    };
+    const res = spawnSync("node", ["scripts/verify-turso.mjs", "--allow-secret-repair"], { encoding: "utf8", env });
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /conn-token-claims/);
+    assert.match(res.stdout, /صالح — ينتهي خلال/, "الادّعاءات تُقرأ كصلاحية زمنية");
+    assert.match(res.stdout, /FINAL: BLOCKED/);
+    assert.doesNotMatch(res.stdout + res.stderr, new RegExp(sign), "لا يُطبع التوقيع");
+    assert.doesNotMatch(res.stdout, new RegExp(payload), "لا يُطبع مقطع الادّعاءات");
+    assert.doesNotMatch(res.stdout, /unit-test-example/, "لا يُطبع المضيف كاملًا");
   });
 });
 
