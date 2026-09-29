@@ -194,9 +194,13 @@ if [ -z "$DB" ]; then
         conn="$(row_ok "$cv" conn)"
         mig="$(row_ok "$cv" mig-table)"
         r7="$(row_ok "$cv" row-7)"
+        r8="$(row_ok "$cv" row-8)"
+        r9="$(row_ok "$cv" row-9)"
         if [ -z "$cv" ]; then conn="empty"; fi
-        echo "EVIDENCE i=${EVIDENCE_I} mint=200 conn=${conn:-none} mig=${mig:-none} row7=${r7:-none}"
-        if [ "$mig" = "true" ] || [ "$r7" = "true" ]; then
+        echo "EVIDENCE i=${EVIDENCE_I} mint=200 conn=${conn:-none} mig=${mig:-none} row7=${r7:-none} row8=${r8:-none} row9=${r9:-none}"
+        # «مستخدمة» بأي أثر محتوى: جدول هجرات أو إصلاح P0 أو FTS أو تزامنه — لأن
+        # الإنتاجية القديمة قد تسبق schema_migrations (يُثبتها FTS أو الجداول لا الهجرة).
+        if [ "$mig" = "true" ] || [ "$r7" = "true" ] || [ "$r8" = "true" ] || [ "$r9" = "true" ]; then
           TOUCHED_N=$((TOUCHED_N + 1))
           DB="$cname"
         fi
