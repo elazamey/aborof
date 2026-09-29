@@ -332,6 +332,43 @@ bash scripts/apply-turso-secrets.sh                         # التنفيذ ا�
 
 **المتطلبات:** `gh` مصادَق بصلاحية كتابة أسرار البيئة، و`vercel login` + CLI إن أردت نصف Vercel (وإلا أعِد النشر من اللوحة: Project → Deployments → Redeploy)، و`npm ci` لتوفر `@libsql/client` ما لم تستخدم `--skip-verify`، وبيئة `production` موجودة في GitHub (**Settings → Environments** — أنشئها أولًا إن لم تكن). بعد النجاح: أي دفع إلى `main` يعيد تشغيل مجسّ `turso-evidence.yml` تلقائيًا، أو بعد الدمج `gh workflow run turso-evidence.yml --ref main`.
 
+### قيم Turso في Vercel: الشكل الصحيح، وما يُصلحه الكود آليًا، وأين يُقرأ السبب
+
+الشكل الموثّق — كل متغيّر بقيمة واحدة، بلا تنصيص ولا `KEY=` ولا سطر ثانٍ:
+
+| المتغيّر (Vercel → Project → Settings → Environment Variables → **Production**) | القيمة | الشكل |
+|---|---|---|
+| `TURSO_DATABASE_URL` | رابط الاتصال: Turso ← القاعدة ← **Connect** | `libsql://<db>-<org>.turso.io` |
+| `TURSO_AUTH_TOKEN` | رمز قاعدة بصلاحية Full access | `eyJ…` (JWT بثلاثة مقاطع) |
+
+اللصق في لوحة Vercel يُدخل أخطاءً لا ترفضها اللوحة لكنها تُسقط المتجر كله بـ`503 «إعداد الاتصال بقاعدة البيانات غير صالح»`
+(لأن `createClient` يرميها). `src/lib/db/turso-config.ts` يستخرج الرابط والرمز من هذه الحالات ويشغّل المتجر بدل إسقاطه
+(اختبارات: `tests/turso-config.test.ts` و`tests/db-config.test.ts`):
+
+| ما وُجد في المتغيّرين | المعالجة |
+|---|---|
+| أحرف اتجاه/عرض صفري خفية (`RLM`/`LRM`/`ZWSP`/`BOM`) من نسخ نص عربي؛ شرطات مطبعية `–` بدل `-` | تُزال/تُحوَّل |
+| تنصيص `" ' ` “ ” « »` أو أقواس `< > ( )` أو `**` أو `KEY=` أو `export` أو نقطة ختام جملة | تُجرَّد |
+| كتلة `.env` كاملة (سطران) في خانة واحدة، أو رمز مكسور على أسطر | يُستخرج الرابط والرمز معًا |
+| الرمز في خانة الرابط والرابط في خانة الرمز | يُعاد كلٌّ لمكانه |
+| مضيف بلا `libsql://` (`<db>-<org>.turso.io`) أو `turso://` | يُضاف/يُعاد كتابة المخطط |
+| رابط لوحة التحكم `https://app.turso.tech/<org>/databases/<db>` | يُشتقّ منه `libsql://<db>-<org>.turso.io` |
+| مسار أو معاملات غير مدعومة بعد الرابط، أو `?authToken=` داخله | تُسقط المعاملات ويُستخرج الرمز |
+
+**ما لا يمكن إصلاحه** (يبقى `503` مغلقًا ويُكتب سببه بدقة): رمز `eyJ…` وحده في خانة الرابط بلا رابط في أي متغيّر، أو اسم القاعدة
+مجردًا، أو قيمة نموذجية (`<db>`، `your-db-name…`)، أو رابط Turso بلا رمز. الحل دائمًا تصحيح المتغيّرين (الأمر الآمن:
+`bash scripts/apply-turso-secrets.sh`) ثم **Redeploy**.
+
+**كيف تقرأ السبب** (أنواع وأطوال فقط — لا قيمة تُكتب في أي سجل أو استجابة):
+
+1. Vercel → Project → **Logs** → ابحث عن `db_config_invalid` (فشل) أو `db_config_repaired` (يعمل بعد إصلاح آلي، وصحّح القيمة في اللوحة).
+   الحقول: `problem` (`URL_NOT_FOUND`، `URL_PLACEHOLDER`، `URL_DASHBOARD_INCOMPLETE`، `URL_UNPARSEABLE`، `TOKEN_MISSING`)،
+   `url_field.kinds` و`token_field.kinds` (مثل `["jwt"]` = رمز في خانة الرابط)، `repairs`، `token_expired`، و`hint` بالعربية.
+2. طلب `/api/products` الفاشل يحمل `request_id` — ابحث به في السجلات ليظهر السطر نفسه مع `details.turso_config`.
+3. فشل الاستعلام (بعد أن صار الإعداد سليمًا) يُسجَّل بحالة HTTP: `db: products query failed (LibsqlError, code=SERVER_ERROR, http=401)` —
+   `401` رمز مرفوض/منتهٍ، `404` لا قاعدة بهذا الاسم، `400` صيغة الرابط/الرمز؛ و`cause=ENOTFOUND` اسم مضيف لا يُحلّ.
+4. `GET /api/admin/diagnostics` (مع `DIAGNOSTICS_ENABLED=true` ومفتاحه) يعيد الحقل `db_config` بالوصف نفسه.
+
 ### ربط مشروع Vercel وضبط أسرار النشر بأمر واحد
 
 العطل الذي أوقف النشر ثلاثة مرات متتالية على `main` لم يكن الرمز ولا البوابات، بل

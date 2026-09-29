@@ -66,8 +66,9 @@ export const Errors = {
   notFound: (message = "العنصر غير موجود") => new DomainError("NOT_FOUND", 404, message),
   conflict: (message = "تعارض في حالة البيانات") => new DomainError("CONFLICT", 409, message),
   payloadTooLarge: (message = "حجم الطلب كبير جدًا") => new DomainError("PAYLOAD_TOO_LARGE", 413, message),
-  serviceUnavailable: (message = "الخدمة غير متاحة مؤقتًا") =>
-    new DomainError("SERVICE_UNAVAILABLE", 503, message),
+  /** `details` للسجلات فقط (`internalDetails`) — لا تصل للعميل أبدًا. */
+  serviceUnavailable: (message = "الخدمة غير متاحة مؤقتًا", details?: Record<string, unknown>) =>
+    new DomainError("SERVICE_UNAVAILABLE", 503, message, { internalDetails: details }),
   diagnosticsDisabled: (message = "التشخيص معطل في بيئة الإنتاج") =>
     new DomainError("DIAGNOSTICS_DISABLED", 404, message),
   internal: (message = "حدث خطأ داخلي، حاول مرة أخرى") =>
