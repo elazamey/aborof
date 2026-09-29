@@ -103,7 +103,12 @@ export async function listOrders(limit = 200) {
   return r.rows.map((x) => ({ ...x }));
 }
 
-export async function updateOrderStatus(input: OrderStatusInput): Promise<void> {
+/**
+ * تحديث حالة الطلب. `actor` = هوية الفاعل من طبقة الصلاحيات (اسم المستخدم في
+ * وضع RBAC، أو "admin" في الوضع القديم) — يُكتب في سجل التدقيق مع التغيير
+ * في نفس المعاملة، فلا يوجد تغيير بلا أثر.
+ */
+export async function updateOrderStatus(input: OrderStatusInput, actor = "admin"): Promise<void> {
   const c = db();
   if (!c) throw Errors.serviceUnavailable("قاعدة البيانات غير مربوطة");
   await ensureSchema();
@@ -116,8 +121,8 @@ export async function updateOrderStatus(input: OrderStatusInput): Promise<void> 
       throw Errors.notFound("الطلب غير موجود");
     }
     await tx.execute({
-      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details) VALUES (?,?,?,?)",
-      args: ["status_change", "order", id, JSON.stringify({ status: input.status })],
+      sql: "INSERT INTO admin_audit_log (action,entity,entity_id,details,actor) VALUES (?,?,?,?,?)",
+      args: ["status_change", "order", id, JSON.stringify({ status: input.status }), actor],
     });
     await tx.commit();
   } catch (error) {

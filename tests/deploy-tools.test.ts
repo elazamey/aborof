@@ -890,7 +890,8 @@ describe("scripts/apply-migrations — بوابة الهجرات الصريحة"
     const file = freshDb();
     const res = run(["--url", `file:${file}`, "--apply"]);
     assert.equal(res.status, 0, res.stdout + res.stderr);
-    assert.match(res.stdout, /طُبِّقت الآن: 0001، 0002/);
+    // الهجرات الثلاث المرجعية (0001 initial + 0002 FTS5 + 0003 rbac) تُطبَّق كلها.
+    assert.match(res.stdout, /طُبِّقت الآن: 0001، 0002، 0003/);
     const expected = expectedMigrations(process.cwd());
     const client = createClient({ url: `file:${file}` });
     const rows = await client.execute("SELECT version, checksum FROM schema_migrations ORDER BY version");
@@ -910,7 +911,7 @@ describe("scripts/apply-migrations — بوابة الهجرات الصريحة"
   test("التطبيق الثاني idempotent: لا هجرة تُنفَّذ مرتين", () => {
     const file = freshDb();
     assert.equal(run(["--url", `file:${file}`, "--apply"]).status, 0);
-    const second = run(["--url", `file:${file}`, "--apply", "--expect", "0001,0002"]);
+    const second = run(["--url", `file:${file}`, "--apply", "--expect", "0001,0002,0003"]);
     assert.equal(second.status, 0, second.stdout + second.stderr);
     assert.match(second.stdout, /لا شيء للتطبيق/);
   });
@@ -1043,7 +1044,7 @@ describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ �
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test("المعاملة الحقيقية: POST واحدة للسكّ، ثم 0001+0002 على الهدف، ثم الأسرار عبر stdin", async () => {
+  test("المعاملة الحقيقية: POST واحدة للسكّ، ثم 0001+0002+0003 على الهدف، ثم الأسرار عبر stdin", async () => {
     const dir = workDir();
     const logFile = path.join(dir, "calls.log");
     writeFakeTools(dir, logFile);
@@ -1064,7 +1065,7 @@ describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ �
     assert.ok(!calls.includes(mintedJwt), "قيمة الرمز لا تمرّ في argv الأدوات");
     const client = createClient({ url: `file:${dbFile}` });
     const rows = await client.execute("SELECT version FROM schema_migrations ORDER BY version");
-    assert.deepEqual(rows.rows.map((row) => String(row.version)), ["0001", "0002"], "بوابة الهجرات طبّقت فعلًا");
+    assert.deepEqual(rows.rows.map((row) => String(row.version)), ["0001", "0002", "0003"], "بوابة الهجرات طبّقت فعلًا");
     client.close();
     assert.match(res.stdout, /MIGRATIONS_APPLIED/);
     assert.match(res.stdout, /تدوير الرمز: ينتهي \d{4}-\d{2}-\d{2}/, "موعد التدوير يُعلن في الخلاصة");
@@ -1092,7 +1093,7 @@ describe("scripts/mint-turso-token — المعاملة الكاملة (سكّ �
     assert.ok(!calls.includes("app.turso.tech"), "رابط اللوحة لا يُسلَّم كسرّ اتصال");
     const client = createClient({ url: `file:${dbFile}` });
     const count = await client.execute("SELECT COUNT(*) AS n FROM schema_migrations");
-    assert.equal(Number(count.rows[0]?.n), 2);
+    assert.equal(Number(count.rows[0]?.n), 3);
     client.close();
     fs.rmSync(dir, { recursive: true, force: true });
   });

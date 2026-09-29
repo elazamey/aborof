@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PASSWORD_POLICY } from "@/lib/secrets";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 
 /**
  * سجل عقود التحقق الموحد — المصدر الوحيد لقواعد صحة المدخلات لكل مسار كتابي.
@@ -133,6 +134,117 @@ export const chatRequestContract = z
     messages: z.array(chatMessageContract).max(30, "عدد الرسائل كبير جدًا").default([]),
   })
   .strict();
+
+// ---------------------------------------------------------------------------
+// M1 — لوحة الصلاحيات (RBAC)
+// ---------------------------------------------------------------------------
+/**
+ * عقود لوحة الصلاحيات — كلها `.strict()` لرفض أي حقل غير معروف، وتتحقق من
+ * الصلاحيات مقابل كتالوج الكود نفسه (`RBAC_PERMISSIONS`) لا نص حر، فلا يمكن
+ * إدخال صلاحية غير منفَّذة. رفض `*` للأدوار المخصصة يقع في الطبقتين:
+ * العقد هنا، و`normalizeCustomPermissions` في المخزن (دفاع مزدوج).
+ */
+
+/** اسم مستخدم: حروف لاتينية صغيرة/أرقام/نقطة/شرطة — مستقر في التدقيق والروابط. */
+const rbacUsername = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9._-]{2,59}$/, "اسم المستخدم: 3–60 حرفًا لاتينيًا صغيرًا/أرقامًا/نقطة/شرطة");
+
+/** معرّف دور مخصص — لا يقبل مسافات ولا حروفًا عربية (الدور له `label` عربي للعرض). */
+const rbacRoleId = z
+  .string()
+  .trim()
+  .regex(/^[a-z0-9_][a-z0-9_-]{1,59}$/, "معرّف الدور: حروف لاتينية صغيرة وأرقام وشرطة سفلية");
+
+const rbacPermission = z.enum(
+  [...RBAC_PERMISSIONS] as [string, ...string[]],
+  { errorMap: () => ({ message: "صلاحية غير معروفة في الكتالوج" }) }
+);
+
+const rbacDisplayName = z.string().trim().max(60, "الاسم الظاهر: 60 حرفًا كحد أقصى").optional();
+const rbacDescription = z.string().trim().max(300, "الوصف: 300 حرف كحد أقصى").optional();
+
+export const rbacRoleCreateContract = z
+  .object({
+    role: z
+      .object({
+        id: rbacRoleId,
+        label: trimmed(2, 60),
+        description: rbacDescription,
+        permissions: z.array(rbacPermission).max(RBAC_PERMISSIONS.length, "عدد الصلاحيات يتجاوز الكتالوج"),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const rbacRoleUpdateContract = z
+  .object({
+    role: z
+      .object({
+        id: rbacRoleId,
+        label: trimmed(2, 60).optional(),
+        description: rbacDescription,
+        permissions: z.array(rbacPermission).max(RBAC_PERMISSIONS.length, "عدد الصلاحيات يتجاوز الكتالوج").optional(),
+      })
+      .strict()
+      .refine((r) => r.label !== undefined || r.description !== undefined || r.permissions !== undefined, {
+        message: "لا يوجد أي تغيير في الطلب",
+      }),
+  })
+  .strict();
+
+export const rbacUserCreateContract = z
+  .object({
+    user: z
+      .object({
+        username: rbacUsername,
+        displayName: rbacDisplayName,
+        roleId: rbacRoleId,
+        password: passwordPolicy,
+      })
+      .strict(),
+  })
+  .strict();
+
+export const rbacUserUpdateContract = z
+  .object({
+    user: z
+      .object({
+        id: trimmed(1, 60),
+        displayName: rbacDisplayName,
+        roleId: rbacRoleId.optional(),
+        status: z.enum(["active", "disabled"]).optional(),
+        /** تُستخدم من حائز `rbac:write`، أو من صاحب الحساب مع `currentPassword`. */
+        password: passwordPolicy.optional(),
+        /** إلزامية لتغيير كلمة مرور النفس بلا صلاحية `rbac:write`. */
+        currentPassword: z.string().min(1).max(PASSWORD_POLICY.maxLength).optional(),
+      })
+      .strict()
+      .refine(
+        (u) =>
+          u.password !== undefined ||
+          u.displayName !== undefined ||
+          u.roleId !== undefined ||
+          u.status !== undefined,
+        { message: "لا يوجد أي تغيير في الطلب" }
+      ),
+  })
+  .strict();
+
+/** عقد دخول وضع RBAC: اسم مستخدم + كلمة مرور (لا كلمة مرور مشتركة). */
+export const adminLoginRbacContract = z
+  .object({
+    username: rbacUsername,
+    password: z.string().min(1).max(PASSWORD_POLICY.maxLength),
+  })
+  .strict();
+
+export type RbacRoleCreateInput = z.infer<typeof rbacRoleCreateContract>;
+export type RbacRoleUpdateInput = z.infer<typeof rbacRoleUpdateContract>;
+export type RbacUserCreateInput = z.infer<typeof rbacUserCreateContract>;
+export type RbacUserUpdateInput = z.infer<typeof rbacUserUpdateContract>;
 
 export type ProductUpsertInput = z.infer<typeof productUpsertContract>;
 export type CreateOrderInput = z.infer<typeof createOrderContract>;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler, Errors } from "@/lib/errors/handler";
-import { isAdminRequest } from "@/lib/auth";
+import { requirePermission } from "@/lib/rbac";
 import { getMcpRegistry, isMcpToolsEnabled } from "@/lib/ai";
 
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export const GET = apiHandler("/api/admin/mcp/tools", async (request) => {
   if (!isMcpToolsEnabled()) throw Errors.notFound("هذه النقطة غير متاحة");
-  if (!isAdminRequest(request)) throw Errors.authRequired();
+  await requirePermission(request, "mcp:read");
 
   const registry = getMcpRegistry();
   return NextResponse.json({

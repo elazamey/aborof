@@ -13,6 +13,12 @@
  *     و`connect-src 'self'` أساسه — أي توسيع يحتاج تذكرة أمنية صريحة.
  *  7. أسطول الوكلاء (المرحلة الرابعة): الكتالوج بيانات لا سلوك — لا استيراد وحدات
  *     بيانات (db/orders/auth)، ولا أدوات خارج قائمة القراءة فقط المجمّدة هنا.
+ *  8. لوحة الصلاحيات (M1): حزمة `src/lib/rbac` خادم فقط (تُضاف إلى وحدات الخادم)،
+ *     وبصمات كلمات المرور عبر scrypt لا دالة تجزئة سريعة، ولا `password_hash`
+ *     خارج طبقة المخزن (الواجهة والمسارات لا تلمس العمود أبدًا).
+ *  9. كتالوج الصلاحيات = نقاط الفرض: كل `requirePermission`/`actorCan` يذكر صلاحية
+ *     معروفة في الكتالوج، وكل صلاحية في الكتالوج لها نقطة فرض فعلية في الكود —
+ *     لا صلاحية معلنة بلا حارس، ولا حارس بصلاحية وهمية.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -61,7 +67,15 @@ const FLEET_READ_ONLY_TOOLS = new Set(["search_products", "lookup_faq", "shippin
 const FLEET_FORBIDDEN_IMPORTS = ["@/lib/db", "@/lib/orders", "@/lib/auth", "@/lib/secrets"];
 
 /** وحدات خادم فقط — استيرادها من مكوّن عميل ممنوع (فحص العزل أعلاه). */
-const SERVER_ONLY_MODULES = ["@/lib/auth", "@/lib/secrets", "@/lib/db", "@/lib/orders", "@/lib/rate-limit"];
+const SERVER_ONLY_MODULES = [
+  "@/lib/auth",
+  "@/lib/secrets",
+  "@/lib/db",
+  "@/lib/orders",
+  "@/lib/rate-limit",
+  // M1: حزمة الصلاحيات تلمس قاعدة البيانات وكلمات المرور ⇒ خادم فقط.
+  "@/lib/rbac",
+];
 
 for (const file of files) {
   const rel = path.relative(root, file);
@@ -131,6 +145,71 @@ for (const file of files) {
   if (/console\.(log|error|warn)\([^)]*process\.env\./.test(src) &&
       /SECRET|PASSWORD|TOKEN|KEY/.test(src.match(/console\.(log|error|warn)\([^)]*process\.env\.([A-Z_]+)/)?.[1] ?? "")) {
     problems.push(`${rel}: لا تطبع قيم البيئة الحساسة في السجلات.`);
+  }
+}
+
+/**
+ * 8) لوحة الصلاحيات: لا دالة تجزئة سريعة لكلمات المرور، ولا عمود البصمة خارج
+ *    طبقة المخزن. القاعدتان تُفحصان نصيًا لأنهما ثابتان لا يعتمدان سياقًا.
+ */
+const passwordModule = path.join(root, "src", "lib", "rbac", "password.ts");
+if (fs.existsSync(passwordModule)) {
+  const source = fs.readFileSync(passwordModule, "utf8");
+  if (!source.includes("scrypt")) {
+    problems.push("src/lib/rbac/password.ts: بصمات كلمات المرور يجب أن تمرّ عبر scrypt.");
+  }
+  if (/createHash\(|md5|sha1\b/i.test(source)) {
+    problems.push("src/lib/rbac/password.ts: دالة تجزئة سريعة لكلمة مرور (createHash/md5/sha1) — مرفوضة.");
+  }
+  if (!source.includes("timingSafeEqual")) {
+    problems.push("src/lib/rbac/password.ts: المقارنة يجب أن تكون ثابتة الزمن (timingSafeEqual).");
+  }
+}
+for (const file of files) {
+  const rel = path.relative(root, file);
+  const norm = path.normalize(rel);
+  const src = fs.readFileSync(file, "utf8");
+  const isApiRoute = norm.includes(path.normalize("app/api"));
+  const isClientComponent = /^\s*["']use client["']/m.test(src);
+  if ((isApiRoute || isClientComponent) && src.includes("password_hash")) {
+    problems.push(`${rel}: عمود password_hash لا يُلمس خارج طبقة المخزن (src/lib/rbac/store.ts).`);
+  }
+}
+
+/**
+ * 9) كتالوج الصلاحيات ↔ نقاط الفرض (اتجاهان، لا اتجاه واحد):
+ *    - صلاحية مذكورة في حارس ولا توجد في الكتالوج ⇒ فشل.
+ *    - صلاحية في الكتالوج بلا أي حارس في الكود ⇒ فشل (لا وعد بلا فرض).
+ *    القراءة بالتعابير النصية لأن المصدر هو الكود نفسه، لا نسخة موازية.
+ */
+const permissionsModule = path.join(root, "src", "lib", "rbac", "permissions.ts");
+if (fs.existsSync(permissionsModule)) {
+  const source = fs.readFileSync(permissionsModule, "utf8");
+  const catalogBlock = source.match(/export const RBAC_PERMISSIONS = \[([\s\S]*?)\] as const;/);
+  const catalog = catalogBlock
+    ? [...catalogBlock[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
+    : [];
+  if (!catalog.length) {
+    problems.push("src/lib/rbac/permissions.ts: تعذّر قراءة كتالوج الصلاحيات للفحص.");
+  }
+  const catalogSet = new Set(catalog);
+  const enforced = new Map(); // permission -> أول ملف يفرضها
+  for (const file of files) {
+    const src = fs.readFileSync(file, "utf8");
+    const rel = path.relative(root, file);
+    for (const match of src.matchAll(/(?:requirePermission|actorCan)\(\s*[A-Za-z_$][\w$]*\s*,\s*"([^"]+)"/g)) {
+      if (!enforced.has(match[1])) enforced.set(match[1], rel);
+    }
+  }
+  for (const [permission, file] of enforced) {
+    if (!catalogSet.has(permission)) {
+      problems.push(`${file}: يحرس صلاحية «${permission}» غير المدرجة في الكتالوج.`);
+    }
+  }
+  for (const permission of catalog) {
+    if (!enforced.has(permission)) {
+      problems.push(`كتالوج الصلاحيات: «${permission}» بلا أي نقطة فرض في الكود — احذفها أو أضف حارسها.`);
+    }
   }
 }
 
