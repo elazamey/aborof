@@ -173,19 +173,12 @@ if [ -z "$DB" ]; then
   if [ "$DB_COUNT" = 1 ]; then
     DB="$(printf '%s' "$DB_JSON" | jq -r '.databases[0] | (.Name // .name // .db_name // empty)' 2>/dev/null || true)"
   else
-    # أكثر من سجل: كثيرًا ما تكون فروعًا (لها parent) — نُصفّيها أولًا، فإن بقيت
-    # أساسيات متعددة فمطلوب اسم صريح (لا يُطبع أي اسم قاعدة هنا — الاسم عندك في
-    # لوحة Turso أو في متغيّر المستودع vars.TURSO_DB لسياق CI).
-    BASE_COUNT="$(printf '%s' "$DB_JSON" | jq '[.databases[] | select((.parent // null) == null)] | length' 2>/dev/null || echo 0)"
-    if [ "${BASE_COUNT:-0}" = 1 ]; then
-      DB="$(printf '%s' "$DB_JSON" | jq -r '[.databases[] | select((.parent // null) == null)][0] | (.Name // .name // .db_name // empty)' 2>/dev/null || true)"
-      echo "✅ اختيرت القاعدة الأساسية الوحيدة (من ${DB_COUNT} سجلًا — الفروع مُصفّاة تلقائيًا)."
-    else
-      # برهنة لا تخمين: لكل مرشّح تُسكّ توكن قراءة قصير (5m — ينتهي وحده) وتُقرأ
-      # الجداول بلا أي كتابة. «المستخدمة وحدها» = schema_migrations أو صفوف محتوى.
-      # صفر أو أكثر من واحدة مُستخدمة ⇒ اسم صريح مطلوب (لا يُطبع أي اسم قاعدة).
+    # برهنة لا تخمين — وتشمل كل السجلات (حتى ذات parent): نلتقط الفرع إن كان
+      # هو الإنتاجية. لكل سجل تُسكّ توكن قراءة قصير (5m — ينتهي وحده) ويُقرأ
+      # verify بلا أي كتابة؛ «المستخدمة» = schema_migrations أو جدول order_items.
+      # واحدة مُستخدمة فقط ⇒ هي المختارة؛ وإلا اسم صريح مطلوب (لا يُطبع أي اسم).
       TOUCHED_N=0
-      CANDIDATES="$(printf '%s' "$DB_JSON" | jq -r '.databases[] | select((.parent // null) == null) | [(.Name // .name // .db_name), (.Hostname // .hostname)] | @tsv' 2>/dev/null || true)"
+      CANDIDATES="$(printf '%s' "$DB_JSON" | jq -r '.databases[] | [(.Name // .name // .db_name), (.Hostname // .hostname)] | @tsv' 2>/dev/null || true)"
       EVIDENCE_I=0
       while IFS=$'\t' read -r cname chost; do
         [ -n "${cname:-}" ] && [ -n "${chost:-}" ] || continue
@@ -209,13 +202,12 @@ if [ -z "$DB" ]; then
         fi
       done <<< "$CANDIDATES"
       if [ "$TOUCHED_N" = 1 ]; then
-        echo "✅ اختيرت بالبرهنة القاعدة المستخدمة وحدها (من ${BASE_COUNT} مرشّحًا — جداول فعلية، قراءة فقط، توكن فحص ينتهي خلال 5 دقائق)."
+        echo "✅ اختيرت بالبرهنة القاعدة المستخدمة وحدها (من ${DB_COUNT} سجلًا — جداول فعلية، قراءة فقط، توكن الفحص ينتهي خلال 5 دقائق)."
       elif [ "$TOUCHED_N" = 0 ]; then
-        fail "لا جداول في أي مرشّح (من ${BASE_COUNT}) — لا يمكن التعرّف على الإنتاجية؛ حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
+        fail "لا جداول في أي من ${DB_COUNT} سجل — لا يمكن التعرّف على الإنتاجية؛ حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
       else
-        fail "أكثر من مرشّح بها جداول فعلية (${TOUCHED_N} من ${BASE_COUNT}) — حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
+        fail "أكثر من سجل به جداول فعلية (${TOUCHED_N} من ${DB_COUNT}) — حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
       fi
-    fi
   fi
 fi
 [ -n "$DB" ] || fail "تعذّر قراءة اسم القاعدة — شغّل بـ TURSO_DB=<اسم>."

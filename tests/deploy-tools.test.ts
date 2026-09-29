@@ -573,7 +573,7 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
     }
   });
 
-  test("أكثر من سجل: الفروع (لها parent) تُصفّى وتُختار القاعدة الأساسية بلا طباعة اسم", () => {
+  test("أكثر من سجل: مسح البرهنة يشمل كل السجلات (حتى الفروع) بحالة لكل واحد بلا أسماء", () => {
     const { binDir, logFile } = makeFakes();
     try {
       const res = spawnSync("bash", ["scripts/mint-turso-token.sh", "--dry-run", "--skip-verify"], {
@@ -590,12 +590,18 @@ describe("scripts/mint-turso-token.sh — تحويل توكن المنصّة إ�
         },
       });
       const out = res.stdout + res.stderr;
-      assert.equal(res.status, 0, out);
-      assert.match(res.stdout, /اختيرت القاعدة الأساسية الوحيدة \(من 3 سجلًا/);
-      assert.doesNotMatch(out, /base-db-elazamey/, "لا مضيف كامل في المخرج");
+      // في بيئة الاختبار لا جداول حقيقية ⇒ صفر مُستخدمة ⇒ فشل مغلق يطلب الاسم الصريح.
+      assert.equal(res.status, 1, out);
+      // المسح يشمل كل السجلات الثلاثة (حتى ذات parent) بحالة واحدة لكل واحد.
+      assert.match(out, /EVIDENCE i=1 mint=200/);
+      assert.match(out, /EVIDENCE i=2 mint=200/);
+      assert.match(out, /EVIDENCE i=3 mint=200/);
+      assert.match(out, /TURSO_DB/);
+      assert.match(out, /vars\.TURSO_DB/);
+      assert.doesNotMatch(out, /base-db/, "لا اسم قاعدة في المخرج");
       assert.doesNotMatch(out, /branch-a/, "لا اسم فرع في المخرج");
       const log = fs.readFileSync(logFile, "utf8");
-      assert.match(log, /auth\/tokens\?authorization=full-access/, "تابع التوريد بعد الاختيار");
+      assert.match(log, /auth\/tokens\?authorization=read-only&expiration=5m/, "توكن فحص قصير لكل سجل");
     } finally {
       fs.rmSync(binDir, { recursive: true, force: true });
     }
