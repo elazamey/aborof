@@ -104,9 +104,18 @@ export class SmartAgentEngine {
     options?: AgentOptions
   ): Promise<{ reply: string; toolCalls: number; products: ProductCard[] }> {
     const capable = provider as Partial<ToolCapableProvider>;
+    // Celia تُفعّل أدواتها عبر ENABLE_CELIA_AGENT حتى لو كانت MCP معطلة
+    // — Scope Filter هو البوابة، والتنفيذ المزدوج يرفض أي تجاوز.
+    let celiaEnabled = false;
+    try {
+      const mod = require("@/lib/celia/config") as { isCeliaAgentEnabled?: () => boolean };
+      celiaEnabled = mod.isCeliaAgentEnabled?.() === true;
+    } catch {
+      celiaEnabled = false;
+    }
     const toolsRequested =
       options?.enableTools === true &&
-      isMcpToolsEnabled() &&
+      (isMcpToolsEnabled() || celiaEnabled) &&
       capable.supportsTools === true &&
       typeof capable.callWithTools === "function";
 

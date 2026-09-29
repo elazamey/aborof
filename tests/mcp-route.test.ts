@@ -61,7 +61,7 @@ describe("admin MCP manifest route", () => {
 
     assert.deepEqual(
       payload.tools?.map((t) => t.name).sort(),
-      ["lookup_faq", "search_products", "shipping_estimate", "store_info"]
+      ["get_order_status", "lookup_faq", "search_products", "shipping_estimate", "store_info"]
     );
     assert.equal(payload.policy?.enabled, true);
     assert.equal(payload.policy?.max_calls_per_request, 3);

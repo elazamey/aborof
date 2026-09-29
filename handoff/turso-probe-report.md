@@ -48,6 +48,8 @@
 | المكوّن | الدور |
 |---|---|
 | `.github/workflows/turso-evidence.yml` | مجسّ **قراءة فقط** على `pull_request` و`workflow_dispatch`: وظيفة لأسرار نطاق المستودع، وأخرى تعمل **فقط عند غيابها** لجرّب بيئة `production` (النتيجة: الأسرار على **بيئة production** لا على نطاق المستودع) |
+| `.github/workflows/token-lifecycle.yml` | فحص **أسبوعي مجدول** (كل اثنين 04:17Z + يدوي ببوابة `threshold_days`): يفكّ `exp` من `TURSO_AUTH_TOKEN` داخل الـ runner ويحكم عليه مقابل 14 يومًا — **مراقبة فقط** (`contents: read` + `issues: write`، ولا `TURSO_PLATFORM_TOKEN` أصلًا). يأخذ خلاصة الجدول أعلاه بأن السرّ على بيئة `production` فيجعلها النطاق الأساسي ويُبقي نطاق المستودع احتياطًا |
+| `scripts/audit-token-lifecycle.mjs` + `scripts/token-lifecycle-ci.sh` | الأول تدقيق نقّي بلا تبعيات (`--json`/`--now`/`--threshold-days`/`--token-env`) يطبع كتلة أدلة ثابتة؛ والثاني غلاف CI: ملخّص + إشعار + **Issue واحد** لمنطقة الخطر (فتح ← تعديل الجسم ← إغلاق) فلا ضوضاء أسبوعية |
 | `scripts/probe-turso-ci.sh` | يشغّل الفحص، يطبع الجدول في السجل والملخّص، **وينشره تعليقًا على الـ PR** (يُحدَّث لا يتكدّس)، ويلحق قراءة سطح الإنتاج الحيّ |
 | `scripts/apply-turso-secrets.sh` | يضبط السرّين في GitHub (بيئة `production`) و Vercel (Production) بأمر واحد، بتحقق شكلي وبلا طباعة أي قيمة (تُمرَّر عبر `stdin` فقط) |
 | `scripts/lib/db-url.mjs` | تشخيص آمن: نوع المضيف وطوله، **شكل مقاطع المسار بالأطوال** (`8/9/5`)، تمييز «قيمة موضعية»، ترجمة رمز الحالة إلى حكم (`404` ⇒ أنشئ القاعدة · `401` ⇒ جدّد الرمز)، وتحليل قيمة حقل الرمز (JWT أم رابط) |
@@ -65,7 +67,7 @@
 
 1. **من Turso:** افتح <https://app.turso.tech/elazamey> → القاعدة (اسمها 5 أحرف — هي نفسها في رابط اللوحة الحالي) →
    - **Connect** → انسخ **Database URL** (يبدأ `libsql://` — وهذا كل المطلوب من هذه الخطوة).
-   - تبويب **Tokens** → **Create Token** → Full Access → **Never expire** → انسخ الرمز (يبدأ بـ `eyJ`).
+   - تبويب **Tokens** → **Create Token** → Full Access → مدة محدودة (**90 يومًا** هي افتراضي المستودع الآن؛ كان الاختيار وقتها Never expire) → انسخ الرمز (يبدأ بـ `eyJ`).
    - إن تفضّل CLI: `turso db show <db> --url` و`turso db tokens create <db>` (لو أن CLI الجديد لا يدعم الأمرين فزر Connect في اللوحة هو المرجع).
 2. **في Vercel (بيئة Production)** — عدّل الحقلين ثم **Redeploy**:
    - `TURSO_DATABASE_URL` = رابط `libsql://…` (وليس صفحة اللوحة).
