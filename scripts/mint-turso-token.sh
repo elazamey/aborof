@@ -97,6 +97,20 @@ api() { # $1=method · $2=url · $3=data? — يعيد الحالة في API_STA
 
 mask() { local h="$1"; if [ "${#h}" -gt 12 ]; then printf '%s…%s' "${h:0:3}" "${h: -9}"; else printf '%s…' "${h:0:3}"; fi; }
 
+# كل نداء verify يقرأ بيئته من الجملة نفسها — لا تلوّث متغيّرات الطرفية.
+verify_pair() { # $1=الرابط · $2=الرمز → stdout JSON من verify (قراءة فقط)
+  TURSO_DATABASE_URL="$1" TURSO_AUTH_TOKEN="$2" node scripts/verify-turso.mjs --json 2>/dev/null
+}
+verify_json() { # $1=الرمز الاختياري بديل (فارغ = PROD) → stdout JSON، رمز الخروج كما هو
+  local tok="${1:-$TURSO_AUTH_TOKEN}"
+  verify_pair "$TURSO_DATABASE_URL" "$tok"
+}
+row_ok() { printf '%s' "$1" | jq -r --arg id "$2" '.rows[]? | select(.id == $id) | .ok' 2>/dev/null; }
+row_detail() { printf '%s' "$1" | jq -r --arg id "$2" '.rows[]? | select(.id == $id) | .detail' 2>/dev/null; }
+print_rows() { # تفاصيل مُنقّاة أصلًا من verify — تُطبع للإنسان عند الفشل فقط.
+  printf '%s' "$1" | jq -r '.rows[]? | select(.ok == false) | "   • \(.id): \(.detail)"' 2>/dev/null
+}
+
 # ───────────────────────── Platform API: المؤسسة والقاعدة والمضيف ─────────────
 # عقد المنصّة الحقيقي (docs.turso.tech/api-reference/organizations/list): الاستجابة
 # **مصفوفة سادة** [{name,slug,type,…}] لا كائن — ولكل حساب مؤسسة personal إضافة إلى
@@ -167,7 +181,30 @@ if [ -z "$DB" ]; then
       DB="$(printf '%s' "$DB_JSON" | jq -r '[.databases[] | select((.parent // null) == null)][0] | (.Name // .name // .db_name // empty)' 2>/dev/null || true)"
       echo "✅ اختيرت القاعدة الأساسية الوحيدة (من ${DB_COUNT} سجلًا — الفروع مُصفّاة تلقائيًا)."
     else
-      fail "توجد ${DB_COUNT} قاعدة — حدّدها بـ TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (في المستودع لسياق CI). لا يُطبع أي اسم قاعدة هنا."
+      # برهنة لا تخمين: لكل مرشّح تُسكّ توكن قراءة قصير (5m — ينتهي وحده) وتُقرأ
+      # الجداول بلا أي كتابة. «المستخدمة وحدها» = schema_migrations أو صفوف محتوى.
+      # صفر أو أكثر من واحدة مُستخدمة ⇒ اسم صريح مطلوب (لا يُطبع أي اسم قاعدة).
+      TOUCHED_N=0
+      CANDIDATES="$(printf '%s' "$DB_JSON" | jq -r '.databases[] | select((.parent // null) == null) | [(.Name // .name // .db_name), (.Hostname // .hostname)] | @tsv' 2>/dev/null || true)"
+      while IFS=$'\t' read -r cname chost; do
+        [ -n "${cname:-}" ] && [ -n "${chost:-}" ] || continue
+        api POST "$API_BASE/v1/organizations/$ORG/databases/$cname/auth/tokens?authorization=read-only&expiration=5m" '{}'
+        [ "$API_STATUS" = 200 ] || continue
+        cjwt="$(printf '%s' "$API_BODY" | jq -r '.jwt // empty')"
+        [ -n "$cjwt" ] || continue
+        cv="$(verify_pair "libsql://${chost}" "$cjwt")"
+        if [ "$(row_ok "$cv" mig-table)" = "true" ] || [ "$(row_ok "$cv" row-7)" = "true" ]; then
+          TOUCHED_N=$((TOUCHED_N + 1))
+          DB="$cname"
+        fi
+      done <<< "$CANDIDATES"
+      if [ "$TOUCHED_N" = 1 ]; then
+        echo "✅ اختيرت بالبرهنة القاعدة المستخدمة وحدها (من ${BASE_COUNT} مرشّحًا — جداول فعلية، قراءة فقط، توكن فحص ينتهي خلال 5 دقائق)."
+      elif [ "$TOUCHED_N" = 0 ]; then
+        fail "لا جداول في أي مرشّح (من ${BASE_COUNT}) — لا يمكن التعرّف على الإنتاجية؛ حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
+      else
+        fail "أكثر من مرشّح بها جداول فعلية (${TOUCHED_N} من ${BASE_COUNT}) — حدّد TURSO_DB=<اسم> (محليًا) أو vars.TURSO_DB (CI). لا يُطبع أي اسم قاعدة هنا."
+      fi
     fi
   fi
 fi
@@ -195,16 +232,6 @@ echo "✅ أُنشئ توكن القاعدة PROD (full-access · انتهاء $
 export TURSO_DATABASE_URL="$CONNECTION_URL"
 export TURSO_AUTH_TOKEN="$DB_JWT"
 
-# كل نداء verify يقرأ بيئته من الجملة نفسها — لا تلوّث متغيّرات الطرفية.
-verify_json() { # $1=الرمز الاختياري بديل (فارغ = PROD) → stdout JSON، رمز الخروج كما هو
-  local tok="${1:-$TURSO_AUTH_TOKEN}"
-  TURSO_AUTH_TOKEN="$tok" node scripts/verify-turso.mjs --json 2>/dev/null
-}
-row_ok() { printf '%s' "$1" | jq -r --arg id "$2" '.rows[]? | select(.id == $id) | .ok' 2>/dev/null; }
-row_detail() { printf '%s' "$1" | jq -r --arg id "$2" '.rows[]? | select(.id == $id) | .detail' 2>/dev/null; }
-print_rows() { # تفاصيل مُنقّاة أصلًا من verify — تُطبع للإنسان عند الفشل فقط.
-  printf '%s' "$1" | jq -r '.rows[]? | select(.ok == false) | "   • \(.id): \(.detail)"' 2>/dev/null
-}
 
 # أي بوابة تحتمل الإجراءات المتبقية؟ --skip-verify يتجاوز الشبكيّة مع تحذير صريح.
 SKIP_VERIFY=false
