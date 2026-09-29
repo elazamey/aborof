@@ -274,6 +274,27 @@ describe("scripts/verify-turso — مسار فشل الاتصال", () => {
     assert.doesNotMatch(res.stdout, new RegExp(payload), "لا يُطبع مقطع الادّعاءات");
     assert.doesNotMatch(res.stdout, /unit-test-example/, "لا يُطبع المضيف كاملًا");
   });
+
+  test("JWT بلا ادّعاءي db/org (بنية الإنتاج الحالية: alg EdDSA) يُحاكم «ليس توكن قاعدة»", () => {
+    // الحالة الحيّة الموثّقة في تعليق PR: رمز EdDSA بلا exp/db/org والخادم
+    // يرد «invalid JWT token» — الصف يجب أن يسقطه بـ TURSO_TOKEN_NO_DB_CLAIMS
+    // لا أن يتركه ✅ مُطمئنًا، ويُختم BLOCKED.
+    const header = Buffer.from(JSON.stringify({ alg: "EdDSA" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ sub: "not-a-turso-db-token" })).toString("base64url");
+    const token = `${header}.${payload}.c2lnbmF0dXJl`;
+    const env = {
+      ...process.env,
+      TURSO_DATABASE_URL: "libsql://rof-example.turso.io",
+      TURSO_AUTH_TOKEN: token,
+    };
+    const res = spawnSync("node", ["scripts/verify-turso.mjs", "--allow-secret-repair"], { encoding: "utf8", env });
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /TURSO_TOKEN_NO_DB_CLAIMS/);
+    assert.match(res.stdout, /ليس بصيغة توكن قاعدة Turso/);
+    assert.match(res.stdout, /FINAL: BLOCKED/);
+    assert.doesNotMatch(res.stdout + res.stderr, /not-a-turso-db-token/, "لا يُطبع ادعاء");
+    assert.doesNotMatch(res.stdout, /rof-example/, "لا يُطبع المضيف كاملًا");
+  });
 });
 
 describe("scripts/apply-turso-secrets — تطبيق السرّين بأمان", () => {

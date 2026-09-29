@@ -192,8 +192,12 @@ async function attemptDerivedConnection() {
  * زمني، وادّعاءان db/org مُقنَّعان بالقناع نفسه (أول 3 أحرف + …)، وحكم مطابقة
  * المضيف. فكّ الترميز على مقطع الادّعاءات نص مكشوف أصلًا في JWT — والتوقيع
  * لا يُمسّ.
+ *
+ * حكم الصف: فشل الاتصال + رمز بلا ادّعاءي db/org = **ليس توكن قاعدة Turso**
+ * (كل توكن قاعدة يحملهما) — ❌ صريح يوجّه العلاج؛ أما مع نجاح الاتصال فالصف
+ * وصفي دائمًا (الخادم هو المرجع، والادّعاءات تُقرأ للتوثيق لا للحكم).
  */
-function recordTokenClaims() {
+function recordTokenClaims(connected) {
   if (local) return;
   const authParts = parseAuthValue(authToken);
   const token = authParts.token;
@@ -203,9 +207,9 @@ function recordTokenClaims() {
     record(
       "conn-token-claims",
       "ادّعاءات الرمز (exp/db/org)",
-      false,
+      connected,
       "بصيغة JWT لكن تعذّر فك محتواها — الرمز تالف أو ليس JWT · أنشئ توكنًا جديدًا Full access",
-      "TURSO_TOKEN_UNREADABLE"
+      connected ? null : "TURSO_TOKEN_UNREADABLE"
     );
     return;
   }
@@ -214,9 +218,9 @@ function recordTokenClaims() {
     record(
       "conn-token-claims",
       "ادّعاءات الرمز (exp/db/org)",
-      false,
+      connected,
       `منتهي الصلاحية منذ ${formatTimespan(claims.secondsLeft)} · alg ${claims.alg ?? "—"} · db ${masked(claims.db)} · org ${masked(claims.org)} — جدّد التوكن (turso db tokens create) ثم طبّقه بـ apply-turso-secrets.sh`,
-      "TURSO_TOKEN_EXPIRED"
+      connected ? null : "TURSO_TOKEN_EXPIRED"
     );
     return;
   }
@@ -237,6 +241,17 @@ function recordTokenClaims() {
     matchNote = derivedHosts.includes(host)
       ? "المضيف المضبوط مطابق لادّعاءات الرمز"
       : `⚠ المضيف المضبوط لا يطابق ادعاءات الرمز — الزوج المشتق يُجرَّب في صف conn-derived`;
+  }
+  if (!connected && (!claims.db || !claims.org)) {
+    // الفشل هنا مع رمز بلا ادّعاءين = القاعدة لم تُسلّم هذا الرمز أصلًا.
+    record(
+      "conn-token-claims",
+      "ادّعاءات الرمز (exp/db/org)",
+      false,
+      `بلا ادّعاءي db/org — ليس بصيغة توكن قاعدة Turso المعتاد · alg ${claims.alg ?? "—"} — أنشئ توكنًا (لوحة Turso ← Tokens ← Full Access أو turso db tokens create) ثم طبّقه بـ apply-turso-secrets.sh`,
+      "TURSO_TOKEN_NO_DB_CLAIMS"
+    );
+    return;
   }
   record(
     "conn-token-claims",
@@ -330,7 +345,7 @@ try {
   // 1.5) ادعاءات الرمز (غير محلي دائمًا): الـ 401 لا يُترجم إلى علاج واحد —
   // «منتهٍ» و«بصمة قاعدة أخرى» و«الرمز لم يصل» ثلاثة علاجات مختلفة، ومقطع
   // الادّعاءات يحسم اثنتين منها **قبل** أي اعتماد على نص الخادم.
-  recordTokenClaims();
+  recordTokenClaims(connected);
 
   // 1.6) السبب الخام الموثّق: نفس الطلب لكن **مع الرمز المضبوط** — فحص الأصل
   // في diagnoseEndpoint يأتي بلا ترويسة فيعطي 401 دومًا (empty JWT) ولا يثبت

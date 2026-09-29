@@ -131,7 +131,7 @@ export function parseAuthValue(value) {
  */
 export function interpretProbeStatus(status, body = "") {
   const code = Number(status);
-  const hint = String(body || "").replace(/\s+/g, " ").slice(0, 120);
+  const hint = String(body || "").replace(/\s+/g, " ").slice(0, 220);
   if (code === 200) return { ok: true, code: null, verdict: "الاتصال ناجح (HTTP 200)" };
   if (code === 401 || code === 403) {
     // فروع السبب قرار الاختيار العلاجي: «منتهٍ» = جدّد الرمز · «بصمة» = رمز قاعدة
