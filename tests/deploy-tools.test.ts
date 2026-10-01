@@ -1848,8 +1848,8 @@ describe(".github/workflows/token-lifecycle.yml — عقد المراقبة ال
 
   test("لا تثبيت تبعيات في مسار المراقبة — سلسلة التوريد خارج الصورة", () => {
     assert.doesNotMatch(steps, /npm ci|npm install|npm i |cache: npm/);
-    assert.match(workflow, /actions\/checkout@v4/);
-    assert.match(workflow, /actions\/setup-node@v4/);
+    assert.match(workflow, /actions\/checkout@v7/);
+    assert.match(workflow, /actions\/setup-node@v7/);
   });
 
   test("لا تشغيلين متزامنين يلغي أحدهما الآخر أثناء كتابة Issue", () => {

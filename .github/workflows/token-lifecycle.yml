@@ -64,14 +64,15 @@ jobs:
       configured: ${{ steps.detect.outputs.configured }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
+          package-manager-cache: false
           # بلا cache: الفحص لا يثبّت اعتماديات أصلًا.
 
       # الكشف عن النطاق لا يطبع القيمة: اختبار فراغ فقط (نفس نمط turso-evidence.yml).
@@ -117,14 +118,15 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
+          package-manager-cache: false
 
       - name: Token lifecycle audit (observability only)
         env:
