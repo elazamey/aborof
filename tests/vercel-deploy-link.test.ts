@@ -405,6 +405,11 @@ describe("scripts/vercel-preflight.mjs — CI (خادم وهمي)", () => {
       assert.match(run.output, /::notice::Vercel token صالح — الحساب: canyoudfg-3243/);
       assert.match(run.output, /مشروع Vercel متاح — الاسم: aborof/);
       assert.match(run.output, /تطابق الاسم المتوقع/);
+      assert.deepEqual(mock.readLog(), [
+        "GET /v2/user",
+        `GET /v9/projects/prj_good?teamId=${PERSONAL_UID}`,
+      ], "الفحص الناجح يجب أن يقتصر على قراءتي الهوية والمشروع");
+      assert.ok(!run.output.includes(TOKEN), "لا يجوز طباعة رمز Vercel");
     } finally {
       mock.close();
     }
@@ -427,6 +432,8 @@ describe("scripts/vercel-preflight.mjs — CI (خادم وهمي)", () => {
         mock.readLog().some((line) => line.includes("GET /v9/projects?")),
         "يجب سؤال قائمة المشاريع عند الفشل"
       );
+      assert.ok(mock.readLog().every((line) => line.startsWith("GET ")), "التشخيص عند الفشل يجب أن يبقى للقراءة فقط");
+      assert.ok(!run.output.includes(TOKEN), "لا يجوز طباعة رمز Vercel عند الفشل");
     } finally {
       mock.close();
     }
@@ -797,10 +804,49 @@ describe("تركيب أدوات Vercel في المستودع", () => {
   });
 
   test("لا قيمة سرية مكتوبة في ملفات الأدوات", () => {
-    for (const file of ["scripts/vercel-preflight.mjs", "scripts/apply-vercel-link.mjs", "scripts/lib/vercel-link.mjs"]) {
+    for (const file of ["scripts/vercel-preflight.mjs", "scripts/apply-vercel-link.mjs", "scripts/lib/vercel-link.mjs", ".github/workflows/vercel-preflight-only.yml"]) {
       const text = fs.readFileSync(file, "utf8");
       assert.ok(!/prj_[A-Za-z0-9]{10,}/.test(text), `${file} يحمل معرّف مشروع حقيقي`);
       assert.ok(!/team_[A-Za-z0-9]{10,}/.test(text), `${file} يحمل معرّف فريق حقيقي`);
     }
+  });
+});
+
+describe(".github/workflows/vercel-preflight-only.yml — فحص يدوي بلا نشر", () => {
+  const workflow = fs.readFileSync(".github/workflows/vercel-preflight-only.yml", "utf8");
+  const executable = workflow.replace(/^\s*#.*$/gm, "");
+
+  test("تشغيل يدوي فقط وعلى main قبل استخدام أسرار الإنتاج", () => {
+    assert.match(executable, /^on:\s*\n\s+workflow_dispatch:\s*$/m);
+    assert.doesNotMatch(executable, /^\s*(push|pull_request|pull_request_target|schedule|workflow_call|workflow_run):/m);
+    assert.match(executable, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/);
+    assert.match(executable, /environment: production/);
+    assert.match(executable, /timeout-minutes: 5/);
+  });
+
+  test("صلاحيات قراءة فقط ولا يحتفظ checkout ببيانات GitHub", () => {
+    assert.match(executable, /permissions:\s*\n\s+contents: read/);
+    assert.doesNotMatch(executable, /:\s*write\b|\bwrite-all\b/);
+    assert.match(executable, /persist-credentials: false/);
+    assert.match(executable, /fetch-depth: 1/);
+  });
+
+  test("المدخلات من Secrets والاسم المتوقع من Variables مع حاجز للنقص", () => {
+    for (const name of ["VERCEL_TOKEN", "VERCEL_ORG_ID", "VERCEL_PROJECT_ID"]) {
+      assert.ok(executable.includes(name + ": ${{ secrets." + name + " }}"), `${name} يجب أن يُقرأ من Secrets`);
+    }
+    assert.match(executable, /VERCEL_EXPECTED_PROJECT: \$\{\{ vars\.VERCEL_EXPECTED_PROJECT \}\}/);
+    assert.match(executable, /for var in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do/);
+    assert.match(executable, /if \[ -z "\$\{!var:-\}" \]; then[\s\S]*?exit 1/);
+  });
+
+  test("يشغّل سكربت الفحص فقط بلا CLI أو تثبيت أو بناء أو كتابة أسرار", () => {
+    assert.match(executable, /uses: actions\/checkout@v7/);
+    assert.match(executable, /uses: actions\/setup-node@v7/);
+    assert.match(executable, /node-version: 20/);
+    assert.match(executable, /node scripts\/vercel-preflight\.mjs/);
+    assert.doesNotMatch(executable, /\b(npm|npx|vercel|gh)\s/);
+    assert.doesNotMatch(executable, /apply-vercel-link\.mjs|deploy\.yml|VERCEL_DEPLOY_ENABLED/);
+    assert.equal((executable.match(/^\s+- name:/gm) ?? []).length, 4);
   });
 });
